@@ -1,0 +1,63 @@
+# XcodeGen spec — generates a proper macOS .app target (real bundle identity).
+# Install XcodeGen once:  brew install xcodegen
+# Generate the project:   cd <this folder> && xcodegen generate
+# Then open AutoSwitchKVM.xcodeproj and Run.
+#
+# The Swift Package (Package.swift) still works for quick runs; this is the path
+# to a real .app bundle and, later, signing/notarization.
+
+name: AutoSwitchKVM
+options:
+  bundleIdPrefix: com.enginal
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+targets:
+  AutoSwitchKVM:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/AutoSwitchKVM
+      - path: Resources/Assets.xcassets
+    info:
+      path: Info.plist
+      properties:
+        CFBundleName: AutoSwitchKVM
+        CFBundleDisplayName: AutoSwitch KVM
+        CFBundleShortVersionString: "0.1"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "13.0"
+        LSUIElement: true
+        NSBluetoothAlwaysUsageDescription: "AutoSwitch KVM connects and disconnects your Bluetooth devices when your KVM switches this Mac in and out."
+        NSBluetoothPeripheralUsageDescription: "AutoSwitch KVM connects and disconnects your Bluetooth devices when your KVM switches this Mac in and out."
+    dependencies:
+      - sdk: IOKit.framework
+      - sdk: IOBluetooth.framework
+      - sdk: UserNotifications.framework
+      - sdk: Carbon.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.enginal.AutoSwitchKVM
+        PRODUCT_NAME: AutoSwitchKVM
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        # Apple-recommended build settings (harmless; we keep the macOS 13 deployment target).
+        DEAD_CODE_STRIPPING: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+        # --- Signing ---
+        # Default: self-signed / "Sign to Run Locally" (ad-hoc, no Apple account needed).
+        # Builds and runs out of the box.
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_IDENTITY: "-"
+        # To sign with your Apple Developer account instead (sturdier — TCC permissions and
+        # notifications persist across rebuilds), uncomment the next line with your 10-char
+        # Team ID (Xcode ▸ Settings ▸ Accounts ▸ your Apple ID ▸ team, or developer.apple.com
+        # ▸ Membership) and change CODE_SIGN_IDENTITY above to "Apple Development":
+        # DEVELOPMENT_TEAM: XXXXXXXXXX
+        #
+        # Hardened runtime is required only for Developer ID notarization (a later step); leave
+        # off for local development.
+        ENABLE_HARDENED_RUNTIME: NO

@@ -1,0 +1,14 @@
+# Repo-wide ignores. Platform build artifacts live in osx/.gitignore and windows/.gitignore.
+
+# macOS / OS cruft
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+desktop.ini
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*~

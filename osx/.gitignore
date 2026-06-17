@@ -1,0 +1,20 @@
+# macOS app (Swift / SwiftPM / Xcode). See ../.gitignore for repo-wide OS/editor ignores.
+
+## Swift Package Manager
+.build/
+.swiftpm/
+# Package.resolved is kept (no external deps today, but commit it if any are added).
+
+## Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+
+## XcodeGen output
+# The .xcodeproj is generated from project.yml via `xcodegen generate` - not source.
+*.xcodeproj/
+
+## macOS
+.DS_Store

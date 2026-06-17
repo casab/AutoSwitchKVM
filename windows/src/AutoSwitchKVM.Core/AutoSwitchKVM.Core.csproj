@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>AutoSwitchKVM.Core</RootNamespace>
+    <!-- Portable, platform-neutral core: models, config, engine, and the USB/Bluetooth
+         interfaces. No WinUI/WinRT-UI dependencies so it stays unit-testable on any runner. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lets tests drive internal seams (SleepHook, PostPairSettleMs) for deterministic, fast runs. -->
+    <InternalsVisibleTo Include="AutoSwitchKVM.Core.Tests" />
+  </ItemGroup>
+
+</Project>

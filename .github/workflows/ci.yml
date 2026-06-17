@@ -1,0 +1,36 @@
+name: CI (macOS)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+defaults:
+  run:
+    working-directory: osx
+
+jobs:
+  build-test:
+    name: Build & test (osx)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Test
+        run: swift test
+
+  lint:
+    name: Format lint (advisory)
+    runs-on: macos-14
+    # Advisory for now — surfaces style issues without blocking the build. Flip to a hard gate
+    # once the codebase is fully conformant.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install swift-format
+        run: brew install swift-format
+      - name: Lint
+        run: swift-format lint --recursive --strict Sources Tests

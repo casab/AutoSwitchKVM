@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>AutoSwitchKVM.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64;arm64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableMsixTooling>true</EnableMsixTooling>
+
+    <!-- Unpackaged (no MSIX identity): the Windows App SDK bootstrapper auto-initializer is
+         injected automatically when WindowsPackageType=None. See windows/PLAN.md (distribution). -->
+    <WindowsPackageType>None</WindowsPackageType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Versions are a known-good baseline; Visual Studio may offer newer servicing builds - bump
+         freely. If NuGet restore fails on a version string, update to the latest available. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240627000" />
+    <PackageReference Include="H.NotifyIcon.WinUI" Version="2.1.0" />
+    <!-- WMI: Win32_PnPEntity enumeration + Win32_DeviceChangeEvent watch (PnpUsbMonitor). -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
+    <!-- System integration (Milestone 6): registry Run key + power/sleep events. WinUI 3 (no
+         WindowsDesktop.App ref) doesn't ship these in-box, so reference them explicitly. -->
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AutoSwitchKVM.Core\AutoSwitchKVM.Core.csproj" />
+  </ItemGroup>
+
+</Project>
