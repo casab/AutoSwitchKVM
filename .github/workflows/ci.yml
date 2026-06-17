@@ -14,6 +14,12 @@ jobs:
         working-directory: osx
     steps:
       - uses: actions/checkout@v4
+      # The code uses Swift 6.0 compiler features (e.g. @preconcurrency on a conformance, SE-0423),
+      # so pin the newest stable Xcode. The macos-14 default Xcode (15.x / Swift 5.10) rejects them.
+      - name: Select Xcode (Swift 6 toolchain)
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
       - name: Swift version
         run: swift --version
       - name: Build
