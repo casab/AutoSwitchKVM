@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using AutoSwitchKVM.App.Support;
 using AutoSwitchKVM.Core.Models;
 
 namespace AutoSwitchKVM.App.Platform;
@@ -59,6 +60,8 @@ public sealed class HotKeyService : IDisposable
         if (s.Modifiers == 0 || s.KeyCode == 0) return; // a bare key makes a poor global hotkey
         if (RegisterHotKey(_hwnd, id, s.Modifiers | MOD_NOREPEAT, s.KeyCode))
             _registered.Add(id);
+        else
+            Log.Warn("hotkey", $"RegisterHotKey failed for {(HotKeyAction)id} ('{s.Display}') - likely already in use");
     }
 
     private void Unregister()

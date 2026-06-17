@@ -25,7 +25,6 @@ public sealed class AppController
 
     public AppConfig Config { get; private set; }
     public SelectionEngine Engine { get; }
-    public DebugLog Log { get; } = new();
 
     /// Raised (on the UI thread) whenever state the UI shows may have changed.
     public event Action? StateChanged;
@@ -36,17 +35,19 @@ public sealed class AppController
         _usb = new PnpUsbMonitor();   // captures the UI SynchronizationContext
         _bt = new WinRtBluetooth();
         Config = _store.Load();
+        Log.Info("app", $"config loaded from {_store.Path}: profile='{Config.ActiveProfileName}', " +
+            $"source={(Config.Source is null ? "(none)" : Config.Source.DisplayVidPid)}, devices={Config.Devices.Count}, paused={Config.Paused}");
 
         Engine = new SelectionEngine(Config, _usb, _bt);
         Engine.Changed += () => StateChanged?.Invoke();
         Engine.OnNotice = (title, body) =>
         {
-            Log.Log("notice", $"{title}: {body}");
+            Log.Info("notice", $"{title}: {body}");
             if (Config.ShowNotifications) _toasts.Notify(title, body);
         };
         Engine.OnUnexpectedDisconnect = d =>
         {
-            Log.Log("bt", $"{d.Name} dropped unexpectedly while selected");
+            Log.Warn("bt", $"{d.Name} dropped unexpectedly while selected");
             if (Config.NotifyUnexpectedDisconnect)
                 _toasts.Notify("Device disconnected", $"{d.Name} dropped while still selected");
         };
@@ -54,10 +55,12 @@ public sealed class AppController
 
     public void Start()
     {
+        Log.Info("app", $"starting; log file: {Log.FilePath}");
         _toasts.Register();
 
         _usb.Changed += OnUsbSnapshot;
         _usb.Start();
+        Log.Info("usb", "monitor started");
         Engine.RefreshMonitoring();
         _ = Engine.SeedAsync();
         _pollTimer = new Timer(_ => _dispatcher.TryEnqueue(() => { _ = Engine.PollStatusesAsync(); }),
@@ -66,12 +69,12 @@ public sealed class AppController
         // Sleep/wake: release on suspend, reconcile on resume (marshaled onto the UI thread).
         _power.OnSuspend = () => _dispatcher.TryEnqueue(() =>
         {
-            Log.Log("power", "suspend -> disconnect all");
+            Log.Info("power", "suspend -> disconnect all");
             _ = Engine.DisconnectAllNowAsync();
         });
         _power.OnResume = () => _dispatcher.TryEnqueue(() =>
         {
-            Log.Log("power", "resume -> re-evaluate");
+            Log.Info("power", "resume -> re-evaluate");
             _ = Engine.ReevaluateAsync();
         });
         _power.Start();
@@ -80,10 +83,11 @@ public sealed class AppController
         _hotkeys.OnAction = a => _dispatcher.TryEnqueue(() => HandleHotkey(a));
         _hotkeys.Start();
         ApplyHotkeys();
+        Log.Info("hotkey", $"global hotkeys {(Config.GlobalHotkeysEnabled ? "enabled" : "disabled")}");
 
         LoginItem.SetEnabled(Config.LaunchAtLogin);
 
-        Log.Log("app", "started");
+        Log.Info("app", "started");
     }
 
     public void Shutdown()
@@ -170,12 +174,13 @@ public sealed class AppController
 
     // ---- Quick actions ----
 
-    public Task ConnectAllAsync() => Engine.ConnectAllNowAsync();
-    public Task DisconnectAllAsync() => Engine.DisconnectAllNowAsync();
+    public Task ConnectAllAsync() { Log.Info("action", "connect all"); return Engine.ConnectAllNowAsync(); }
+    public Task DisconnectAllAsync() { Log.Info("action", "disconnect all"); return Engine.DisconnectAllNowAsync(); }
 
     public void TogglePause()
     {
         Config.Paused = !Config.Paused;
+        Log.Info("action", $"pause -> {Config.Paused}");
         Save();
         _ = Engine.EvaluateNowAsync();
         StateChanged?.Invoke();
@@ -184,6 +189,7 @@ public sealed class AppController
     public void SwitchProfile(Guid id)
     {
         Config.ActiveProfileID = id;
+        Log.Info("action", $"switch profile -> '{Config.ActiveProfileName}'");
         Save();
         Engine.RefreshMonitoring();
         _ = Engine.ReevaluateAsync();
@@ -192,10 +198,10 @@ public sealed class AppController
 
     // ---- Per-device test actions (Settings buttons) ----
 
-    public Task TestConnectAsync(BTDevice d) => _bt.ConnectAsync(d.Address);
-    public Task TestDisconnectAsync(BTDevice d) => _bt.DisconnectAsync(d.Address);
-    public Task TestPairAsync(BTDevice d) => _bt.PairAsync(d.Address);
-    public Task TestUnpairAsync(BTDevice d) => _bt.UnpairAsync(d.Address);
+    public Task TestConnectAsync(BTDevice d) { Log.Info("action", $"test connect {d.Name}"); return _bt.ConnectAsync(d.Address); }
+    public Task TestDisconnectAsync(BTDevice d) { Log.Info("action", $"test disconnect {d.Name}"); return _bt.DisconnectAsync(d.Address); }
+    public Task TestPairAsync(BTDevice d) { Log.Info("action", $"test pair {d.Name}"); return _bt.PairAsync(d.Address); }
+    public Task TestUnpairAsync(BTDevice d) { Log.Info("action", $"test unpair {d.Name}"); return _bt.UnpairAsync(d.Address); }
 
     public Task<IReadOnlyList<PairedDeviceInfo>> PairedDevicesAsync() => _bt.PairedDevicesAsync();
     public IReadOnlyList<UsbDeviceInfo> UsbSnapshot() => _usb.Snapshot();

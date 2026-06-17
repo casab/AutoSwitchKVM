@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Management;
 using System.Text.RegularExpressions;
+using AutoSwitchKVM.App.Support;
 using AutoSwitchKVM.Core;
 
 namespace AutoSwitchKVM.App.Platform;
@@ -56,11 +57,13 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
             _watcher = new ManagementEventWatcher(new WqlEventQuery("SELECT * FROM Win32_DeviceChangeEvent"));
             _watcher.EventArrived += (_, _) => OnDeviceChange();
             _watcher.Start();
+            Log.Info("usb", "device-change watcher started");
         }
-        catch
+        catch (Exception ex)
         {
             // If WMI events are unavailable, the reconcile timer alone still converges.
             _watcher = null;
+            Log.Warn("usb", $"device-change watcher unavailable, using reconcile only: {ex.Message}");
         }
 
         // Immediate first reconcile (dueTime 0) emits the initial snapshot, then every _reconcileMs.
@@ -90,7 +93,7 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
     {
         List<UsbDeviceInfo> snapshot;
         try { snapshot = Enumerate(); }
-        catch { return; }   // a transient WMI hiccup during the storm; next tick retries
+        catch (Exception ex) { Log.Warn("usb", $"reconcile enumerate failed: {ex.Message}"); return; }
 
         var signature = new HashSet<uint>(snapshot.Select(d => ((uint)d.VendorID << 16) | d.ProductID));
         lock (_gate)
@@ -98,6 +101,7 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
             if (signature.SetEquals(_lastSignature)) return;
             _lastSignature = signature;
         }
+        Log.Info("usb", $"snapshot changed: {snapshot.Count} USB device(s)");
         Emit(snapshot);
     }
 

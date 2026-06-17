@@ -1,3 +1,4 @@
+using AutoSwitchKVM.App.Support;
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
 
@@ -16,10 +17,12 @@ public sealed class ToastNotifier
         {
             AppNotificationManager.Default.Register();
             _registered = true;
+            Log.Info("toast", "AppNotificationManager registered");
         }
-        catch
+        catch (Exception ex)
         {
             _registered = false; // toasts unavailable; Notify() will no-op
+            Log.Warn("toast", $"registration failed (toasts disabled): {ex.Message}");
         }
     }
 

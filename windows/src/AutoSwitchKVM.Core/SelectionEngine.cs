@@ -385,18 +385,21 @@ public sealed class SelectionEngine
 
     // MARK: - Helpers
 
-    /// Run a Bluetooth call with the configured per-call timeout.
+    /// Run a Bluetooth call with the configured per-call timeout. Uses a cancel-after token (which
+    /// WinRT AsTask honors) rather than a racing Task.Delay, so a completed call leaves no canceled
+    /// task behind (avoids spurious first-chance TaskCanceledExceptions in the debugger).
     private async Task WithTimeoutAsync(Func<CancellationToken, Task> op)
     {
         var secs = Math.Max(1, Config.BtCallTimeoutSecs);
-        using var cts = new CancellationTokenSource();
-        var opTask = op(cts.Token);
-        var delayTask = Task.Delay(TimeSpan.FromSeconds(secs), cts.Token);
-        var winner = await Task.WhenAny(opTask, delayTask);
-        cts.Cancel();
-        if (winner == delayTask && !opTask.IsCompleted)
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(secs));
+        try
+        {
+            await op(cts.Token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
             throw new TimeoutException($"Bluetooth call timed out after {secs}s");
-        await opTask; // observe exceptions / completion
+        }
     }
 
     private DeviceStatus? GetStatus(Guid id) => _statuses.TryGetValue(id, out var s) ? s : null;

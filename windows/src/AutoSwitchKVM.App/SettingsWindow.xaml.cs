@@ -1,4 +1,5 @@
 using AutoSwitchKVM.App.Platform;
+using AutoSwitchKVM.App.Support;
 using AutoSwitchKVM.Core;
 using AutoSwitchKVM.Core.Models;
 using Microsoft.UI.Input;
@@ -16,7 +17,7 @@ namespace AutoSwitchKVM.App;
 
 /// Settings window with five tabs (Source / Devices / General / Extras / Diagnostics), mirroring the
 /// macOS app. Built in code-behind against App.Controller. Dynamic panels (devices, diagnostics, log)
-/// refresh on AppController.StateChanged / DebugLog.Changed.
+/// refresh on AppController.StateChanged / Log.Changed.
 public sealed partial class SettingsWindow : Window
 {
     private static Services.AppController C => App.Controller;
@@ -51,11 +52,11 @@ public sealed partial class SettingsWindow : Window
         Root.Children.Add(tabs);
 
         C.StateChanged += OnStateChanged;
-        C.Log.Changed += OnLogChanged;
+        Log.Changed += OnLogChanged;
         Closed += (_, _) =>
         {
             C.StateChanged -= OnStateChanged;
-            C.Log.Changed -= OnLogChanged;
+            Log.Changed -= OnLogChanged;
         };
     }
 
@@ -68,7 +69,7 @@ public sealed partial class SettingsWindow : Window
 
     private void OnLogChanged() => DispatcherQueue.TryEnqueue(() =>
     {
-        if (_logBox != null) _logBox.Text = C.Log.PlainText();
+        if (_logBox != null) _logBox.Text = Log.PlainText();
     });
 
     // ===================== Source =====================
@@ -397,6 +398,7 @@ public sealed partial class SettingsWindow : Window
         panel.Children.Add(refresh);
 
         panel.Children.Add(Header("Debug log"));
+        panel.Children.Add(new TextBlock { Text = "Log file: " + Log.FilePath, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
         _logBox = new TextBox
         {
             IsReadOnly = true,
@@ -404,7 +406,7 @@ public sealed partial class SettingsWindow : Window
             TextWrapping = TextWrapping.NoWrap,
             Height = 240,
             FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
-            Text = C.Log.PlainText(),
+            Text = Log.PlainText(),
         };
         panel.Children.Add(new ScrollViewer { Content = _logBox, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto });
 
@@ -412,11 +414,11 @@ public sealed partial class SettingsWindow : Window
         copy.Click += (_, _) =>
         {
             var pkg = new DataPackage();
-            pkg.SetText(C.Log.PlainText());
+            pkg.SetText(Log.PlainText());
             Clipboard.SetContent(pkg);
         };
         var clear = new Button { Content = "Clear log" };
-        clear.Click += (_, _) => C.Log.Clear();
+        clear.Click += (_, _) => Log.Clear();
         panel.Children.Add(Row(copy, clear));
 
         RefreshDiagnostics();

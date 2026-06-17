@@ -1,4 +1,5 @@
 using System.Management;
+using AutoSwitchKVM.App.Support;
 using AutoSwitchKVM.Core;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Enumeration;
@@ -42,10 +43,12 @@ public sealed class WinRtBluetooth : IBluetoothController
         {
             var radios = await Radio.GetRadiosAsync().AsTask(ct);
             var bt = radios.FirstOrDefault(r => r.Kind == RadioKind.Bluetooth);
-            return bt is null ? null : bt.State == RadioState.On;
+            if (bt is null) { Log.Warn("bt", "no Bluetooth radio found"); return null; }
+            return bt.State == RadioState.On;
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Error("bt", "radio state query failed", ex);
             return null; // access not granted / no radio -> unknown
         }
     }
@@ -88,8 +91,10 @@ public sealed class WinRtBluetooth : IBluetoothController
         catch { /* resolve failure -> attempt discovery + pair below */ }
 
         // The cached device is NOT pairable; discover the freshly-enumerated unpaired endpoint.
+        Log.Info("bt", $"pair {address}: discovering unpaired endpoint...");
         var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(false);
         var found = await DeviceInformation.FindAllAsync(selector).AsTask(ct);
+        Log.Info("bt", $"pair {address}: {found.Count} unpaired device(s) discovered");
         var di = found.FirstOrDefault(d =>
             StripSeparators(d.Id).Contains(digits, StringComparison.OrdinalIgnoreCase));
 
@@ -103,6 +108,7 @@ public sealed class WinRtBluetooth : IBluetoothController
         TypedEventHandler<DeviceInformationCustomPairing, DevicePairingRequestedEventArgs> handler =
             (_, e) =>
             {
+                Log.Info("bt", $"pair {address}: PairingRequested kind={e.PairingKind}");
                 if (e.PairingKind == DevicePairingKinds.ProvidePin) e.Accept("0000");
                 else e.Accept();
             };
@@ -111,6 +117,7 @@ public sealed class WinRtBluetooth : IBluetoothController
         {
             // Do NOT gate on CanPair (it reads false yet pairing succeeds).
             var result = await custom.PairAsync(DevicePairingKinds.ConfirmOnly).AsTask(ct);
+            Log.Info("bt", $"pair {address}: result={result.Status}");
             if (result.Status != DevicePairingResultStatus.Paired &&
                 result.Status != DevicePairingResultStatus.AlreadyPaired)
             {
@@ -126,11 +133,12 @@ public sealed class WinRtBluetooth : IBluetoothController
     public async Task UnpairAsync(string address, CancellationToken ct = default)
     {
         using var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
-        if (dev is null) return;
+        if (dev is null) { Log.Warn("bt", $"unpair {address}: device not resolved"); return; }
         var pairing = dev.DeviceInformation.Pairing;
-        if (!pairing.IsPaired) return;
+        if (!pairing.IsPaired) { Log.Info("bt", $"unpair {address}: already unpaired"); return; }
 
         var result = await pairing.UnpairAsync().AsTask(ct);
+        Log.Info("bt", $"unpair {address}: result={result.Status}");
         if (result.Status != DeviceUnpairingResultStatus.Unpaired &&
             result.Status != DeviceUnpairingResultStatus.AlreadyUnpaired)
         {
