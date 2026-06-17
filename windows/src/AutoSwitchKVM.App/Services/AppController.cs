@@ -198,7 +198,15 @@ public sealed class AppController
 
     // ---- Per-device test actions (Settings buttons) ----
 
-    public Task TestConnectAsync(BTDevice d) { Log.Info("action", $"connect {d.Name}"); return _bt.ConnectAsync(d.Address); }
+    // Manual test actions catch failures and log them - they run from button-click (async void)
+    // handlers, so an uncaught BluetoothException would otherwise crash the app.
+
+    public async Task TestConnectAsync(BTDevice d)
+    {
+        Log.Info("action", $"connect {d.Name}");
+        try { await _bt.ConnectAsync(d.Address); }
+        catch (Exception ex) { Log.Error("bt", $"connect {d.Name} failed", ex); }
+    }
 
     /// Release a device from this PC: disconnect, and (for Classic-HID / managePairing devices, where
     /// the bond is the only lever) unpair. Mirrors the engine's switch-away path. A plain
@@ -206,12 +214,27 @@ public sealed class AppController
     public async Task TestDisconnectAsync(BTDevice d)
     {
         Log.Info("action", $"release {d.Name} (managePairing={d.ManagePairing})");
-        await _bt.DisconnectAsync(d.Address);
-        if (d.ManagePairing) await _bt.UnpairAsync(d.Address);
+        try
+        {
+            await _bt.DisconnectAsync(d.Address);
+            if (d.ManagePairing) await _bt.UnpairAsync(d.Address);
+        }
+        catch (Exception ex) { Log.Error("bt", $"release {d.Name} failed", ex); }
     }
 
-    public Task TestPairAsync(BTDevice d) { Log.Info("action", $"pair {d.Name}"); return _bt.PairAsync(d.Address); }
-    public Task TestUnpairAsync(BTDevice d) { Log.Info("action", $"unpair {d.Name}"); return _bt.UnpairAsync(d.Address); }
+    public async Task TestPairAsync(BTDevice d)
+    {
+        Log.Info("action", $"pair {d.Name}");
+        try { await _bt.PairAsync(d.Address); }
+        catch (Exception ex) { Log.Error("bt", $"pair {d.Name} failed", ex); }
+    }
+
+    public async Task TestUnpairAsync(BTDevice d)
+    {
+        Log.Info("action", $"unpair {d.Name}");
+        try { await _bt.UnpairAsync(d.Address); }
+        catch (Exception ex) { Log.Error("bt", $"unpair {d.Name} failed", ex); }
+    }
 
     public Task<IReadOnlyList<PairedDeviceInfo>> PairedDevicesAsync() => _bt.PairedDevicesAsync();
     public IReadOnlyList<UsbDeviceInfo> UsbSnapshot() => _usb.Snapshot();

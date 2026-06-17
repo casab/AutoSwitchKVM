@@ -152,9 +152,12 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
 - **Serialize Bluetooth ops.** `WinRtBluetooth` guards pair/unpair with a `SemaphoreSlim` - without
   it, the auto-connect, the engine's retries, and manual test-connect run concurrent radio inquiries
   and produce `AuthenticationTimeout` churn (the "sometimes connects" instability seen on first run).
-- **Discover with a DeviceWatcher, not `FindAllAsync`.** `FindAllAsync(GetDeviceSelectorFromPairingState(false))`
-  blocks for the full BR/EDR inquiry (~20-30s). Use a `DeviceWatcher` that returns as soon as the
-  target MAC appears, bounded by a timeout (`FindUnpairedEndpointAsync`).
+- **Discover with `FindAllAsync`, NOT a plain `DeviceWatcher`.** `FindAllAsync(GetDeviceSelectorFromPairingState(false))`
+  reliably surfaces the unpaired endpoint when it's discoverable (matching Windows Settings). A
+  `DeviceWatcher` on the same selector did **not** report the device in testing (returned no match
+  even though the device was pairable) - a tried-and-reverted optimization. FindAllAsync can take
+  ~10-20s for the BR/EDR inquiry; the engine's per-call timeout bounds it and the `_opLock` prevents
+  overlapping inquiries.
 - **Tray menu: use `ContextMenuMode.PopupMenu`.** The XAML `SecondWindow` flyout renders as a blank
   rectangle (the secondary window doesn't inherit the app theme); the native popup renders reliably.
 - **Size the Settings window** via `AppWindow.Resize` - a WinUI `Window` opens very large by default.
