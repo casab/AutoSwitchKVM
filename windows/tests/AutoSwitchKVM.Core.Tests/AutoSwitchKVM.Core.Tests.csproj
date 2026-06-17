@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- So the solution can build/run this under the x64 platform in Visual Studio (default stays
+         AnyCPU for `dotnet test`/CI). -->
+    <Platforms>AnyCPU;x64;arm64</Platforms>
   </PropertyGroup>
 
   <ItemGroup>

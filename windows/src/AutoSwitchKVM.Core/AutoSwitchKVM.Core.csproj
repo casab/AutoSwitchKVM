@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <RootNamespace>AutoSwitchKVM.Core</RootNamespace>
+    <!-- Match the WinUI app's platforms so it resolves Core's output at bin\x64\... when building
+         x64. Default build platform stays AnyCPU, so `dotnet test`/CI are unaffected. -->
+    <Platforms>AnyCPU;x64;arm64</Platforms>
     <!-- Portable, platform-neutral core: models, config, engine, and the USB/Bluetooth
          interfaces. No WinUI/WinRT-UI dependencies so it stays unit-testable on any runner. -->
   </PropertyGroup>
