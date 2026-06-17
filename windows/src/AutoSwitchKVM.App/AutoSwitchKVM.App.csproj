@@ -21,14 +21,14 @@
   <ItemGroup>
     <!-- Versions are a known-good baseline; Visual Studio may offer newer servicing builds - bump
          freely. If NuGet restore fails on a version string, update to the latest available. -->
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.5.240627000" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
     <PackageReference Include="H.NotifyIcon.WinUI" Version="2.1.0" />
     <!-- WMI: Win32_PnPEntity enumeration + Win32_DeviceChangeEvent watch (PnpUsbMonitor). -->
-    <PackageReference Include="System.Management" Version="8.0.0" />
+    <PackageReference Include="System.Management" Version="10.0.9" />
     <!-- System integration (Milestone 6): registry Run key + power/sleep events. WinUI 3 (no
          WindowsDesktop.App ref) doesn't ship these in-box, so reference them explicitly. -->
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
-    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.9" />
   </ItemGroup>
 
   <ItemGroup>
