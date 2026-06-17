@@ -147,21 +147,57 @@ public sealed class WinRtBluetooth : IBluetoothController
         }
     }
 
-    /// Find the unpaired endpoint for a MAC. Uses FindAllAsync (a one-shot snapshot of known unpaired
-    /// association endpoints) - this reliably surfaces the device when it's discoverable, matching what
-    /// Windows Settings does. (A plain DeviceWatcher on the same selector did NOT report the device in
-    /// testing.) It can take ~10-20s for the BR/EDR inquiry; the engine's per-call timeout bounds it,
-    /// and the serialization above prevents overlapping inquiries.
-    private async Task<DeviceInformation?> FindUnpairedEndpointAsync(string digits, CancellationToken ct)
+    /// Find the unpaired endpoint for a MAC. The slow part is that FindAllAsync waits the FULL BR/EDR
+    /// inquiry (~30s) even though the device is discoverable within a few seconds. To cut that latency
+    /// we run two things in parallel and take whichever finds the device first:
+    ///   - a DeviceWatcher, which fires Added the moment the device is discovered (fast path). We must
+    ///     NOT resolve on EnumerationCompleted - BR/EDR devices surface via Added during the ongoing
+    ///     inquiry, after the cached enumeration finishes (resolving there was the earlier bug).
+    ///   - FindAllAsync as a reliable fallback (returns after the inquiry).
+    /// Bounded by a timeout so it never hangs when the device truly isn't discoverable.
+    private async Task<DeviceInformation?> FindUnpairedEndpointAsync(string digits, CancellationToken ct, int timeoutSeconds = 40)
     {
         var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(false);
-        var found = await DeviceInformation.FindAllAsync(selector).AsTask(ct);
-        var match = found.FirstOrDefault(d =>
-            StripSeparators(d.Id).Contains(digits, StringComparison.OrdinalIgnoreCase));
-        Log.Info("bt", match is null
-            ? $"discovery: {found.Count} unpaired device(s), no match"
-            : $"discovery: matched {match.Id}");
-        return match;
+        var tcs = new TaskCompletionSource<DeviceInformation?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        using var reg = timeoutCts.Token.Register(() => tcs.TrySetResult(null));
+
+        var watcher = DeviceInformation.CreateWatcher(selector);
+        watcher.Added += (_, di) =>
+        {
+            if (StripSeparators(di.Id).Contains(digits, StringComparison.OrdinalIgnoreCase))
+                tcs.TrySetResult(di);   // early-exit as soon as the target is discovered
+        };
+        watcher.Start();
+
+        // Parallel fallback: whichever (watcher Added / FindAllAsync) finds it first resolves.
+        _ = FallbackFindAllAsync(selector, digits, tcs, timeoutCts.Token);
+
+        try
+        {
+            var found = await tcs.Task;
+            Log.Info("bt", found is null ? "discovery: no match (timed out)" : $"discovery: matched {found.Id}");
+            return found;
+        }
+        finally
+        {
+            try { watcher.Stop(); } catch { /* ignore */ }
+        }
+    }
+
+    private static async Task FallbackFindAllAsync(
+        string selector, string digits, TaskCompletionSource<DeviceInformation?> tcs, CancellationToken ct)
+    {
+        try
+        {
+            var found = await DeviceInformation.FindAllAsync(selector).AsTask(ct);
+            var match = found.FirstOrDefault(d =>
+                StripSeparators(d.Id).Contains(digits, StringComparison.OrdinalIgnoreCase));
+            if (match != null) tcs.TrySetResult(match);
+        }
+        catch { /* cancelled / failed - the watcher or timeout covers it */ }
     }
 
     public async Task UnpairAsync(string address, CancellationToken ct = default)

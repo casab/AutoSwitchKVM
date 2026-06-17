@@ -25,7 +25,7 @@ public class ConfigTests
         Assert.Equal(400, cfg.ArrivalDebounceMs);
         Assert.Equal(6, cfg.ConnectRetryMax);
         Assert.Equal(2, cfg.ConnectRetrySecs);
-        Assert.Equal(30, cfg.BtCallTimeoutSecs); // higher than macOS (pair ~14s on Windows)
+        Assert.Equal(45, cfg.BtCallTimeoutSecs); // headroom for the Windows discovery inquiry
         Assert.False(cfg.GlobalHotkeysEnabled);
         Assert.False(cfg.Paused);
     }
@@ -66,7 +66,7 @@ public class ConfigTests
             File.WriteAllText(tmp, "{\"profiles\":[{\"name\":\"Default\"}]}");
             var loaded = new ConfigStore(tmp).Load();
             Assert.Equal(1200, loaded.DebounceMs);       // default-on-missing
-            Assert.Equal(30, loaded.BtCallTimeoutSecs);
+            Assert.Equal(45, loaded.BtCallTimeoutSecs);
             Assert.Single(loaded.Profiles);
             Assert.Equal("Default", loaded.ActiveProfileName);
         }

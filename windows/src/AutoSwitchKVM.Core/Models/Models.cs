@@ -88,9 +88,10 @@ public sealed class AppConfig
     /// Base retry interval (seconds). Backoff between attempts is ConnectRetrySecs * 2^(attempt-1).
     public int ConnectRetrySecs { get; set; } = 2;
 
-    /// Per Bluetooth-call timeout. NOTE: on Windows pairing can take ~14s (inquiry + bond), so the
-    /// effective default is higher than macOS's 15s - see ConfigStore default below.
-    public int BtCallTimeoutSecs { get; set; } = 30;
+    /// Per Bluetooth-call timeout. On Windows a pair includes a BR/EDR discovery inquiry (~30s for the
+    /// FindAllAsync fallback), so this must comfortably exceed that or the engine cancels its own
+    /// discovery mid-flight. Default 45s (vs macOS 15s).
+    public int BtCallTimeoutSecs { get; set; } = 45;
 
     // Behavior
     public bool ShowNotifications { get; set; }
