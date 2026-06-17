@@ -13,11 +13,14 @@ This is a **monorepo organized by platform**:
 - `osx/` — the macOS app (SwiftUI, IOKit/IOBluetooth). **Stable.** All macOS source, build files,
   tests, and macOS-specific docs live here, including `osx/CLAUDE.md` (detailed macOS guidance),
   `osx/PLAN.md`, and `osx/IMPROVEMENTS.md`.
-- `windows/` — the Windows app (C#/.NET 8 + WinUI 3). **In progress:** Milestone 0 (Bluetooth/USB
-  validated on real hardware) done; Milestone 1 scaffold (solution + Core lib + WinUI app + tests)
-  in place. Windows source, build files, and docs live here, including `windows/CLAUDE.md` (detailed
-  Windows guidance), `windows/PLAN.md`, and `windows/README.md`.
-- `.github/` — CI (currently builds + tests the macOS app under `osx/`).
+- `windows/` — the Windows app (C#/.NET 8 + WinUI 3). **In progress:** Bluetooth/USB validated on
+  real hardware (M0); Core (models, config, engine, source-learner) ported and unit-tested; the
+  platform layer (USB monitor, WinRT Bluetooth, hotkeys, power, login item, toasts), tray UI, and
+  Settings are authored (M1–M7); pending a first on-device build. Windows source, build files, and
+  docs live here, including `windows/CLAUDE.md` (detailed Windows guidance), `windows/PLAN.md`, and
+  `windows/README.md`.
+- `.github/` — CI: macOS job (`swift build`/`swift test` + advisory lint) and a Windows job
+  (`dotnet test` on `AutoSwitchKVM.Core.Tests`).
 
 ## Where to work
 

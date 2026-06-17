@@ -43,8 +43,9 @@ windows/
     AutoSwitchKVM.Core.Tests/  xUnit — engine/config/models with fake USB + BT (mirror osx tests)
 ```
 
-CI: a `windows` GitHub Actions job (`windows-latest`) running `dotnet build` + `dotnet test` on
-`AutoSwitchKVM.Core.Tests`.
+CI: **added** - a `windows-latest` job in `.github/workflows/ci.yml` runs `dotnet test` on
+`AutoSwitchKVM.Core.Tests` (alongside the macOS swift build/test + lint jobs). The WinUI app is
+validated on-device, not in CI.
 
 ## Component mapping (macOS → Windows)
 
@@ -150,7 +151,8 @@ CI: a `windows` GitHub Actions job (`windows-latest`) running `dotnet build` + `
    on some Win10/11 builds - verify on-device and create it on first run if so.
 7. **Diagnostics + logging. [DONE]** `DebugLog` buffer + the Diagnostics tab (live USB/BT state,
    per-device status, debug log with copy/clear) landed with Milestone 5.
-8. **Distribution (later).** Code-sign the unpackaged `.exe`; optional MSIX; CI on `windows-latest`.
+8. **Distribution (later).** Code-sign the unpackaged `.exe`; optional MSIX; extend CI to also
+   build/package the WinUI app (the `windows-latest` Core-test job already exists).
 
 ## Milestone 0 — spike findings
 

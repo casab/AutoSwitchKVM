@@ -1,18 +1,17 @@
-name: CI (macOS)
+name: CI
 
 on:
   push:
     branches: [ main ]
   pull_request:
 
-defaults:
-  run:
-    working-directory: osx
-
 jobs:
-  build-test:
-    name: Build & test (osx)
+  macos:
+    name: Build & test (macOS)
     runs-on: macos-14
+    defaults:
+      run:
+        working-directory: osx
     steps:
       - uses: actions/checkout@v4
       - name: Swift version
@@ -22,15 +21,36 @@ jobs:
       - name: Test
         run: swift test
 
-  lint:
+  macos-lint:
     name: Format lint (advisory)
     runs-on: macos-14
     # Advisory for now — surfaces style issues without blocking the build. Flip to a hard gate
     # once the codebase is fully conformant.
     continue-on-error: true
+    defaults:
+      run:
+        working-directory: osx
     steps:
       - uses: actions/checkout@v4
       - name: Install swift-format
         run: brew install swift-format
       - name: Lint
         run: swift-format lint --recursive --strict Sources Tests
+
+  windows-core:
+    name: Build & test (Windows Core)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      # The Core library + tests are plain net8.0 (no WinUI / Windows App SDK), so they build and run
+      # on a standard runner. The WinUI app (AutoSwitchKVM.App) is validated on-device, not in CI.
+      - name: Restore
+        run: dotnet restore tests/AutoSwitchKVM.Core.Tests/AutoSwitchKVM.Core.Tests.csproj
+      - name: Test Core
+        run: dotnet test tests/AutoSwitchKVM.Core.Tests/AutoSwitchKVM.Core.Tests.csproj -c Release

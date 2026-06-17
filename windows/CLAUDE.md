@@ -11,9 +11,10 @@ feature parity to the macOS app: detect a USB "switcher source" appearing/disapp
 pair/connect (or unpair/disconnect) the configured Bluetooth devices, with the same model (profiles,
 per-device pairing management, timing, global shortcuts).
 
-Status: **Milestone 0 done** (Bluetooth/USB validated on real hardware), **Milestone 1 scaffold** in
-place. The full milestone roadmap and rationale live in `PLAN.md`; the proven prototype is
-`reference/Trackpad-AutoSwitch.ps1` (the Windows counterpart of the macOS Hammerspoon script).
+Status: **M0 validated on real hardware; M1-M7 authored** (Core ported and unit-tested; platform
+layer, tray UI, and Settings built) - pending the first on-device build. The full milestone roadmap
+and per-component status live in `PLAN.md`; the proven prototype is `reference/Trackpad-AutoSwitch.ps1`
+(the Windows counterpart of the macOS Hammerspoon script).
 
 ## Build & run
 
@@ -99,7 +100,7 @@ testability):
     flow resolves correctly on Windows. Needs an on-device run to confirm vs the spikes.
 - `tests/AutoSwitchKVM.Core.Tests/` — xUnit; `ConfigTests.cs` + `Fakes/Fake{Usb,Bluetooth}*`.
 
-CI (later): a `windows-latest` job running `dotnet build` + `dotnet test` on the Core tests.
+CI: a `windows-latest` job in `.github/workflows/ci.yml` runs `dotnet test` on the Core tests.
 
 ## Milestone 0 findings — the validated Bluetooth/USB contract
 

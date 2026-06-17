@@ -1,6 +1,7 @@
 # AutoSwitch KVM — Windows
 
-Native Windows port of AutoSwitch KVM. **Status: Milestone 0 done (Bluetooth/USB validated), Milestone 1 scaffold in place.**
+Native Windows port of AutoSwitch KVM. **Status: M0 validated on hardware; M1-M7 authored — Core
+ported and unit-tested, platform layer + tray UI + Settings built; pending the first on-device build.**
 
 The goal is feature parity with the macOS app (`../osx/`): a background **system-tray** app that
 detects a USB "switcher source" appearing/disappearing and pairs/connects (or unpairs/disconnects)
@@ -40,25 +41,34 @@ unpackaged, native WinRT pairing), solution structure, a component-by-component 
 macOS app, the platform discrepancies and how they're resolved, and milestones (spike-first). The
 behavior contract it targets is `../SPECIFICATION.md`.
 
-## Solution layout (Milestone 1 scaffold)
+## Solution layout
 
 ```
 AutoSwitchKVM.sln
 src/
-  AutoSwitchKVM.Core/      net8.0 class library (portable, unit-tested)
-    Models/Models.cs        USBSource, BTDevice, Profile, KeyShortcut, AppConfig (System.Text.Json)
-    ConfigStore.cs          %LOCALAPPDATA%\AutoSwitchKVM\config.json load/save (camelCase parity w/ macOS)
-    IUsbMonitor.cs          USB attach/detach interface
-    IBluetoothController.cs  Bluetooth control surface (encodes the Milestone 0 recipe in doc comments)
-  AutoSwitchKVM.App/       net8.0-windows10.0.19041.0, WinUI 3, unpackaged (WindowsPackageType=None)
-    App.xaml(.cs)           tray-only app (H.NotifyIcon) - context menu Open Settings / Exit
-    SettingsWindow.xaml(.cs) empty window with the 5 tabs (Source/Devices/General/Extras/Diagnostics)
-    Platform/
-      WinRtBluetooth.cs      IBluetoothController stub (bodies = Milestone 4; recipe in comments)
-      PnpUsbMonitor.cs       IUsbMonitor stub (bodies = Milestone 3)
+  AutoSwitchKVM.Core/        net8.0 class library (portable, unit-tested) - NO WinUI/WinRT deps
+    Models/Models.cs          USBSource, BTDevice, Profile, KeyShortcut, AppConfig (System.Text.Json)
+    ConfigStore.cs            %LOCALAPPDATA%\AutoSwitchKVM\config.json (camelCase parity + legacy migration)
+    SelectionEngine.cs        ported state machine     DeviceStatus.cs   per-device status
+    SourceLearner.cs          Learn-source (snapshot diff)
+    IUsbMonitor.cs / IBluetoothController.cs           platform seams
+  AutoSwitchKVM.App/         net8.0-windows10.0.19041.0, WinUI 3, unpackaged (WindowsPackageType=None)
+    App.xaml(.cs)             tray app + dynamic context menu (status/profiles/devices/quick actions)
+    SettingsWindow.xaml(.cs)  Source / Devices / General / Extras / Diagnostics tabs (code-behind)
+    Services/AppController.cs  coordinator: wires config + engine + monitors, exposes state + actions
+    Support/DebugLog.cs        in-memory log buffer
+    Platform/PnpUsbMonitor.cs  IUsbMonitor via WMI (Win32_PnPEntity + Win32_DeviceChangeEvent + reconcile)
+    Platform/WinRtBluetooth.cs IBluetoothController via WinRT (pair/unpair/connection/radio)
+    Platform/HotKeyService.cs  global hotkeys (RegisterHotKey + message-only window)
+    Platform/PowerMonitor.cs   sleep/wake (SystemEvents.PowerModeChanged)
+    Platform/LoginItem.cs      run-at-login (HKCU Run key)
+    Platform/ToastNotifier.cs  toasts (AppNotificationManager)
 tests/
-  AutoSwitchKVM.Core.Tests/  xUnit - config tests + Fake USB/Bluetooth for the engine port (M2)
+  AutoSwitchKVM.Core.Tests/  xUnit (38 tests): models, config, profiles, engine, source-learner
+spikes/                      PowerShell hardware validations (Spike1 read-state, Spike2 pairing, Spike3 USB)
 ```
+
+See **`PLAN.md`** ("Milestones") for the per-component status and design notes.
 
 ## Build & run
 
@@ -66,28 +76,18 @@ Requires **Visual Studio 2022** with the **.NET Desktop** workload and the **Win
 templates** (or the standalone Windows App SDK), and the **.NET 8 SDK**.
 
 - Open `AutoSwitchKVM.sln`, set **AutoSwitchKVM.App** as startup, platform **x64**, and run. You
-  should get a tray icon; click it (or right-click → Open Settings) to open the empty Settings window.
+  get a tray icon; left-click opens Settings, right-click shows the status/quick-actions menu.
 - Tests: `dotnet test tests/AutoSwitchKVM.Core.Tests` (the Core lib + tests are plain `net8.0`, no
-  Windows SDK needed).
+  Windows SDK needed). These also run in CI (`.github/workflows/ci.yml`, `windows-latest`).
 
 Notes:
 - The app is **unpackaged**; the Windows App SDK bootstrapper auto-initializes (`WindowsPackageType=None`).
 - NuGet versions in the `.csproj` files are a known-good baseline — if restore complains, let VS
-  update `Microsoft.WindowsAppSDK` / `H.NotifyIcon.WinUI` to the latest. The tray creation in
-  `App.xaml.cs` follows H.NotifyIcon 2.x; adjust if you bump to a different major version.
-- Everything under `src`/`tests` was authored on a Mac and **not yet compiled on Windows** — expect
-  to smooth over minor build hiccups on first open.
-
-## Approach summary
-
-- **Language/UI:** C# / .NET with a tray icon (WinUI 3, WPF, or Win32 `NotifyIcon`).
-- **USB detection:** `CM_Register_Notification` / `WM_DEVICECHANGE` (or the WMI/Kernel-PnP sources
-  the prototype uses), watching the source's vendor/product IDs; keep the PID_0626-as-signal nuance
-  and the periodic-reconcile safety-net.
-- **Bluetooth:** pairing via WinRT `DeviceInformation.Pairing` (`Pair`/`Unpair`) or a bundled CLI;
-  verify connection via the HID PnP nodes for the device's MAC.
-- **Config:** mirror the macOS `AppConfig`/`Profile` JSON shape so settings concepts (and ideally
-  exported files) line up across platforms.
+  update the packages. The tray creation in `App.xaml.cs` follows H.NotifyIcon 2.x.
+- The **App project** was authored on a Mac and **not yet compiled on Windows** — expect to smooth
+  over minor WinUI/build hiccups on first open. The **Core library + tests** are CI-built on Windows.
+- A couple of items need on-device confirmation: the WinRT pair/unpair flow vs. the spikes, and
+  whether unpackaged toasts need a Start-menu shortcut with an AUMID (see `PLAN.md`).
 
 ## Reference
 
