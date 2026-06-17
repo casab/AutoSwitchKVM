@@ -1,4 +1,5 @@
 using System.Management;
+using System.Runtime.InteropServices;
 using AutoSwitchKVM.App.Support;
 using AutoSwitchKVM.Core;
 using Microsoft.UI.Dispatching;
@@ -146,17 +147,45 @@ public sealed class WinRtBluetooth : IBluetoothController
         await _opLock.WaitAsync(ct);
         try
         {
-            using var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
-            if (dev is null) { Log.Warn("bt", $"unpair {address}: device not resolved"); return; }
-            var pairing = dev.DeviceInformation.Pairing;
-            if (!pairing.IsPaired) { Log.Info("bt", $"unpair {address}: already unpaired"); return; }
+            var addr = ParseAddress(address);
 
-            var result = await pairing.UnpairAsync().AsTask(ct);
-            Log.Info("bt", $"unpair {address}: result={result.Status}");
-            if (result.Status != DeviceUnpairingResultStatus.Unpaired &&
-                result.Status != DeviceUnpairingResultStatus.AlreadyUnpaired)
+            // Forcefully remove the device via the classic Win32 API (the same call behind Control
+            // Panel "Remove device"). Unlike WinRT UnpairAsync - which removes the pairing record on
+            // the Windows side - this also tears down the active ACL link (LMP detach), so the
+            // trackpad actually lets go and the other host (Mac) can take it. WinRT unpair alone was
+            // leaving the device attached on the radio.
+            uint rc = uint.MaxValue;
+            try
             {
-                throw new BluetoothException($"Unpair {address} failed: {result.Status}");
+                var a = addr;
+                rc = BluetoothRemoveDevice(ref a);
+                Log.Info("bt", rc == 0
+                    ? $"unpair {address}: BluetoothRemoveDevice OK (device removed + disconnected)"
+                    : $"unpair {address}: BluetoothRemoveDevice rc=0x{rc:X} (will try WinRT unpair)");
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("bt", $"unpair {address}: BluetoothRemoveDevice threw: {ex.Message}");
+            }
+
+            // Fallback: if the forceful remove didn't take, fall back to WinRT unpair.
+            if (rc != 0)
+            {
+                using var dev = await BluetoothDevice.FromBluetoothAddressAsync(addr).AsTask(ct);
+                if (dev?.DeviceInformation.Pairing.IsPaired == true)
+                {
+                    var result = await dev.DeviceInformation.Pairing.UnpairAsync().AsTask(ct);
+                    Log.Info("bt", $"unpair {address}: WinRT result={result.Status}");
+                    if (result.Status != DeviceUnpairingResultStatus.Unpaired &&
+                        result.Status != DeviceUnpairingResultStatus.AlreadyUnpaired)
+                    {
+                        throw new BluetoothException($"Unpair {address} failed: {result.Status}");
+                    }
+                }
+                else
+                {
+                    Log.Info("bt", $"unpair {address}: already unpaired");
+                }
             }
         }
         finally
@@ -330,4 +359,10 @@ public sealed class WinRtBluetooth : IBluetoothController
         catch { /* WMI hiccup -> treat as not present */ }
         return false;
     }
+
+    // Classic Win32 Bluetooth "Remove device" - disconnects the active link AND removes the bond.
+    // The address is a BLUETOOTH_ADDRESS union whose low 6 bytes are the MAC (passed as a ulong).
+    // Returns ERROR_SUCCESS (0) on success.
+    [DllImport("bthprops.cpl", SetLastError = true)]
+    private static extern uint BluetoothRemoveDevice(ref ulong pAddress);
 }
