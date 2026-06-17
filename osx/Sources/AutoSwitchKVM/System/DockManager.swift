@@ -1,5 +1,5 @@
-import Foundation
 import AppKit
+import Foundation
 
 /// Extras feature: hide the Dock when only the built-in display is present, show it when an
 /// external display connects. Ports the prototype's `updateDock` via an NSScreen change watcher.
@@ -14,9 +14,10 @@ final class DockManager {
             if observer == nil {
                 observer = NotificationCenter.default.addObserver(
                     forName: NSApplication.didChangeScreenParametersNotification,
-                    object: nil, queue: .main) { _ in
-                        MainActor.assumeIsolated { Self.update() }
-                    }
+                    object: nil, queue: .main
+                ) { _ in
+                    MainActor.assumeIsolated { Self.update() }
+                }
             }
             Self.update()
         } else {
@@ -28,7 +29,7 @@ final class DockManager {
 
     private static func update() {
         let external = NSScreen.screens.count > 1
-        setAutohide(!external)   // external present -> show; built-in only -> hide
+        setAutohide(!external)  // external present -> show; built-in only -> hide
     }
 
     private static func setAutohide(_ flag: Bool) {

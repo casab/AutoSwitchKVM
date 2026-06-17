@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import AutoSwitchKVM
 
 @MainActor
@@ -13,12 +14,17 @@ final class SelectionEngineTests: XCTestCase {
         return ConfigStore(directory: tmp)
     }
 
-    private func makeEngine(managePairing: Bool = false,
-                            enabled: Bool = true) -> (SelectionEngine, MockBluetoothController, ConfigStore) {
+    private func makeEngine(
+        managePairing: Bool = false,
+        enabled: Bool = true
+    ) -> (SelectionEngine, MockBluetoothController, ConfigStore) {
         let store = makeStore()
         store.config.source = USBSource(name: "Hub", vendorID: vendor, productIDs: [product])
-        store.config.devices = [BTDevice(name: "Trackpad", address: addr,
-                                         enabled: enabled, managePairing: managePairing)]
+        store.config.devices = [
+            BTDevice(
+                name: "Trackpad", address: addr,
+                enabled: enabled, managePairing: managePairing)
+        ]
         let usb = MockUSBMonitor()
         let bt = MockBluetoothController()
         let engine = SelectionEngine(store: store, usb: usb, bt: bt)
@@ -53,7 +59,8 @@ final class SelectionEngineTests: XCTestCase {
         await engine.evaluateNow()
 
         guard let pairIndex = bt.calls.firstIndex(of: "pair:\(addr)"),
-              let connectIndex = bt.calls.firstIndex(of: "connect:\(addr)") else {
+            let connectIndex = bt.calls.firstIndex(of: "connect:\(addr)")
+        else {
             return XCTFail("expected both pair and connect calls; got \(bt.calls)")
         }
         XCTAssertLessThan(pairIndex, connectIndex, "pair must happen before connect")
@@ -94,8 +101,8 @@ final class SelectionEngineTests: XCTestCase {
         engine.handleUSB((vendorID: vendor, productID: product, added: true))
         await engine.evaluateNow()
 
-        XCTAssertTrue(engine.selected)               // source is present
-        XCTAssertTrue(bt.connectedAddrs.isEmpty)     // but disabled device is left alone
+        XCTAssertTrue(engine.selected)  // source is present
+        XCTAssertTrue(bt.connectedAddrs.isEmpty)  // but disabled device is left alone
     }
 
     func testMultiDeviceSourceStaysSelectedUntilAllGone() async {
@@ -173,8 +180,8 @@ final class SelectionEngineTests: XCTestCase {
         engine.handleUSB((vendorID: vendor, productID: product, added: true))
         await engine.evaluateNow()
 
-        XCTAssertTrue(engine.selected)                 // presence still tracked
-        XCTAssertTrue(bt.connectedAddrs.isEmpty)       // but no connect while BT is off
+        XCTAssertTrue(engine.selected)  // presence still tracked
+        XCTAssertTrue(bt.connectedAddrs.isEmpty)  // but no connect while BT is off
         XCTAssertEqual(engine.statuses.values.first, .bluetoothOff)
     }
 
@@ -183,7 +190,7 @@ final class SelectionEngineTests: XCTestCase {
         XCTAssertEqual(SelectionEngine.backoffSeconds(base: 2, attempt: 2), 4)
         XCTAssertEqual(SelectionEngine.backoffSeconds(base: 2, attempt: 3), 8)
         XCTAssertEqual(SelectionEngine.backoffSeconds(base: 2, attempt: 4), 16)
-        XCTAssertEqual(SelectionEngine.backoffSeconds(base: 2, attempt: 6), 30)   // capped
+        XCTAssertEqual(SelectionEngine.backoffSeconds(base: 2, attempt: 6), 30)  // capped
     }
 
     func testConnectsInDeviceListOrder() async {
@@ -191,7 +198,7 @@ final class SelectionEngineTests: XCTestCase {
         store.config.source = USBSource(name: "Hub", vendorID: vendor, productIDs: [product])
         store.config.devices = [
             BTDevice(name: "First", address: "aa-aa", enabled: true),
-            BTDevice(name: "Second", address: "bb-bb", enabled: true)
+            BTDevice(name: "Second", address: "bb-bb", enabled: true),
         ]
         let usb = MockUSBMonitor()
         let bt = MockBluetoothController()
@@ -205,7 +212,7 @@ final class SelectionEngineTests: XCTestCase {
 
     func testAlreadyConnectedSkipsRedundantConnect() async {
         let (engine, bt, _) = makeEngine()
-        try? await bt.connect(addr)                  // pretend it's already connected
+        try? await bt.connect(addr)  // pretend it's already connected
         let callsBefore = bt.calls.count
 
         engine.handleUSB((vendorID: vendor, productID: product, added: true))

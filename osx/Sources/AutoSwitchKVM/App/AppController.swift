@@ -1,6 +1,6 @@
-import Foundation
-import Combine
 import AppKit
+import Combine
+import Foundation
 import UniformTypeIdentifiers
 
 /// Top-level coordinator. Owns all managers, wires them together, and exposes actions
@@ -94,8 +94,9 @@ final class AppController: ObservableObject {
             guard let self else { return }
             self.append("\(device.name) dropped unexpectedly")
             if self.store.config.notifyUnexpectedDisconnect {
-                self.notifier.notify(title: "Device disconnected",
-                                     body: "\(device.name) dropped while still selected")
+                self.notifier.notify(
+                    title: "Device disconnected",
+                    body: "\(device.name) dropped while still selected")
             }
         }
         if store.config.showNotifications || store.config.notifyUnexpectedDisconnect {
@@ -165,10 +166,11 @@ final class AppController: ObservableObject {
     }
 
     private func applyHotkeys() {
-        hotKeys.apply(enabled: store.config.globalHotkeysEnabled,
-                      pause: store.config.hotkeyPause,
-                      connectAll: store.config.hotkeyConnectAll,
-                      disconnectAll: store.config.hotkeyDisconnectAll)
+        hotKeys.apply(
+            enabled: store.config.globalHotkeysEnabled,
+            pause: store.config.hotkeyPause,
+            connectAll: store.config.hotkeyConnectAll,
+            disconnectAll: store.config.hotkeyDisconnectAll)
     }
 
     // MARK: - Pause & quick actions (menu)
@@ -178,7 +180,7 @@ final class AppController: ObservableObject {
     func setPaused(_ on: Bool) {
         store.config.paused = on
         append(on ? "Automation paused" : "Automation resumed")
-        if !on { engine.reevaluate() }   // catch up to current state on resume
+        if !on { engine.reevaluate() }  // catch up to current state on resume
     }
 
     func connectAllNow() {
@@ -195,7 +197,8 @@ final class AppController: ObservableObject {
 
     func switchProfile(to id: UUID) {
         guard store.config.activeProfileID != id,
-              store.config.profiles.contains(where: { $0.id == id }) else { return }
+            store.config.profiles.contains(where: { $0.id == id })
+        else { return }
         store.config.activeProfileID = id
         append("Switched to profile “\(store.config.activeProfileName)”")
         reapplyActiveProfile()
@@ -296,32 +299,36 @@ final class AppController: ObservableObject {
     func testConnect(_ device: BTDevice) {
         Task {
             append("connect \(device.name)…")
-            do { try await bt.connect(device.normalizedAddress); append("connect \(device.name): ok") }
-            catch { append("connect \(device.name): \(error)") }
+            do { try await bt.connect(device.normalizedAddress); append("connect \(device.name): ok") } catch {
+                append("connect \(device.name): \(error)")
+            }
         }
     }
 
     func testDisconnect(_ device: BTDevice) {
         Task {
             append("disconnect \(device.name)…")
-            do { try await bt.disconnect(device.normalizedAddress); append("disconnect \(device.name): ok") }
-            catch { append("disconnect \(device.name): \(error)") }
+            do { try await bt.disconnect(device.normalizedAddress); append("disconnect \(device.name): ok") } catch {
+                append("disconnect \(device.name): \(error)")
+            }
         }
     }
 
     func testPair(_ device: BTDevice) {
         Task {
             append("pair \(device.name)…")
-            do { try await bt.pair(device.normalizedAddress); append("pair \(device.name): ok") }
-            catch { append("pair \(device.name): \(error)") }
+            do { try await bt.pair(device.normalizedAddress); append("pair \(device.name): ok") } catch {
+                append("pair \(device.name): \(error)")
+            }
         }
     }
 
     func testUnpair(_ device: BTDevice) {
         Task {
             append("unpair \(device.name)…")
-            do { try await bt.unpair(device.normalizedAddress); append("unpair \(device.name): ok") }
-            catch { append("unpair \(device.name): \(error)") }
+            do { try await bt.unpair(device.normalizedAddress); append("unpair \(device.name): ok") } catch {
+                append("unpair \(device.name): \(error)")
+            }
         }
     }
 

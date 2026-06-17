@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 /// Abstraction over USB attach/detach so the SelectionEngine can be unit-tested with a fake
 /// event stream instead of live IOKit hardware.

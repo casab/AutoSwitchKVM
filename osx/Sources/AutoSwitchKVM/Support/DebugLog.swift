@@ -26,7 +26,8 @@ final class DebugLog: ObservableObject {
     func plainText() -> String {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-        return entries
+        return
+            entries
             .map { "[\(f.string(from: $0.date))] [\($0.category)] \($0.message)" }
             .joined(separator: "\n")
     }

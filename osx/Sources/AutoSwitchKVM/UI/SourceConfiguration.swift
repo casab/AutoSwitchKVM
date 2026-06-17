@@ -32,8 +32,10 @@ struct SourceEditorView: View {
                 TextField("e.g. Desk KVM", text: $name)
             }
 
-            Text("Select the device(s) that belong to this source. Leave out anything that isn’t part of the switch (e.g. a mouse plugged into it).")
-                .font(.caption).foregroundStyle(.secondary)
+            Text(
+                "Select the device(s) that belong to this source. Leave out anything that isn’t part of the switch (e.g. a mouse plugged into it)."
+            )
+            .font(.caption).foregroundStyle(.secondary)
 
             if candidates.isEmpty {
                 Text("No devices detected.").foregroundStyle(.secondary).padding(.vertical, 8)
@@ -41,10 +43,12 @@ struct SourceEditorView: View {
                 List {
                     ForEach(candidates) { dev in
                         let k = usbKey(dev)
-                        Toggle(isOn: Binding(
-                            get: { selectedKeys.contains(k) },
-                            set: { on in if on { selectedKeys.insert(k) } else { selectedKeys.remove(k) } }
-                        )) {
+                        Toggle(
+                            isOn: Binding(
+                                get: { selectedKeys.contains(k) },
+                                set: { on in if on { selectedKeys.insert(k) } else { selectedKeys.remove(k) } }
+                            )
+                        ) {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(dev.name.isEmpty ? "Unknown device" : dev.name)
                                 Text(String(format: "0x%04X:0x%04X", dev.vendorID, dev.productID))
@@ -57,9 +61,11 @@ struct SourceEditorView: View {
             }
 
             if vendorCount > 1 {
-                Label("A source must be a single vendor. Please select devices from only one vendor.",
-                      systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
+                Label(
+                    "A source must be a single vendor. Please select devices from only one vendor.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption).foregroundStyle(.orange)
             }
         }
     }
@@ -98,9 +104,10 @@ struct ManualSourceSheet: View {
         .onAppear {
             name = existing?.name ?? ""
             if let s = existing {
-                selectedKeys = Set(candidates
-                    .filter { $0.vendorID == s.vendorID && s.productIDs.contains($0.productID) }
-                    .map { usbKey($0) })
+                selectedKeys = Set(
+                    candidates
+                        .filter { $0.vendorID == s.vendorID && s.productIDs.contains($0.productID) }
+                        .map { usbKey($0) })
             }
         }
     }
@@ -136,8 +143,10 @@ struct LearnSourceSheet: View {
     private var learningView: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Learn source").font(.headline)
-            Text("Now switch your KVM to another computer and back — or just away. The app notes which USB devices appear or disappear, then lets you confirm them.")
-                .font(.callout).foregroundStyle(.secondary)
+            Text(
+                "Now switch your KVM to another computer and back — or just away. The app notes which USB devices appear or disappear, then lets you confirm them."
+            )
+            .font(.callout).foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text("\(learner.changeCount) device change(s) detected")
@@ -145,7 +154,9 @@ struct LearnSourceSheet: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel") { learner.cancel(); dismiss() }
+                Button("Cancel") {
+                    learner.cancel(); dismiss()
+                }
                 Button("Done") {
                     candidates = learner.finish()
                     selectedKeys = Set(candidates.map { usbKey($0) })
@@ -162,7 +173,9 @@ struct LearnSourceSheet: View {
             Text("Confirm source").font(.headline)
             SourceEditorView(candidates: candidates, name: $name, selectedKeys: $selectedKeys)
             HStack {
-                Button("Back") { learner.start(); phase = .learning }
+                Button("Back") {
+                    learner.start(); phase = .learning
+                }
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save") {

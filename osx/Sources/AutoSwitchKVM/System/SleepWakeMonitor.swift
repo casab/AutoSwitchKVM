@@ -1,5 +1,5 @@
-import Foundation
 import AppKit
+import Foundation
 
 /// Observes system sleep/wake. On sleep we proactively disconnect (so another host can take
 /// the device while the Mac is asleep); on wake we re-seed presence and re-evaluate.
@@ -12,12 +12,14 @@ final class SleepWakeMonitor {
 
     func start() {
         let nc = NSWorkspace.shared.notificationCenter
-        observers.append(nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onWillSleep?() }
-        })
-        observers.append(nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.onDidWake?() }
-        })
+        observers.append(
+            nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onWillSleep?() }
+            })
+        observers.append(
+            nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onDidWake?() }
+            })
     }
 
     func stop() {

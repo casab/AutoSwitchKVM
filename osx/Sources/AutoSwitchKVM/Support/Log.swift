@@ -35,6 +35,7 @@ enum Log {
 
     static let app = CategoryLog(logger: Logger(subsystem: subsystem, category: "app"), category: "app")
     static let usb = CategoryLog(logger: Logger(subsystem: subsystem, category: "usb"), category: "usb")
-    static let bluetooth = CategoryLog(logger: Logger(subsystem: subsystem, category: "bluetooth"), category: "bluetooth")
+    static let bluetooth = CategoryLog(
+        logger: Logger(subsystem: subsystem, category: "bluetooth"), category: "bluetooth")
     static let engine = CategoryLog(logger: Logger(subsystem: subsystem, category: "engine"), category: "engine")
 }

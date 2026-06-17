@@ -1,6 +1,6 @@
 import Foundation
-import IOKit
 import IOBluetooth
+import IOKit
 
 /// Native IOBluetooth implementation.
 ///
@@ -75,13 +75,14 @@ final class IOBluetoothController: NSObject, BluetoothController {
 
         let sel = NSSelectorFromString("remove")
         guard dev.responds(to: sel),
-              let method = class_getInstanceMethod(type(of: dev), sel) else {
+            let method = class_getInstanceMethod(type(of: dev), sel)
+        else {
             throw BTError.unpairUnavailable
         }
         typealias RemoveIMP = @convention(c) (AnyObject, Selector) -> Int32
         let imp = method_getImplementation(method)
         let fn = unsafeBitCast(imp, to: RemoveIMP.self)
-        _ = fn(dev, sel)   // return value is unreliable (the selector effectively returns void)
+        _ = fn(dev, sel)  // return value is unreliable (the selector effectively returns void)
 
         // Judge success by the actual pairing state rather than the bogus return value.
         if dev.isPaired() {
@@ -94,8 +95,9 @@ final class IOBluetoothController: NSObject, BluetoothController {
     func pairedDevices() async -> [PairedDeviceInfo] {
         guard let devices = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] else { return [] }
         return devices.map {
-            PairedDeviceInfo(name: $0.name ?? $0.addressString ?? "Unknown",
-                             address: $0.addressString ?? "")
+            PairedDeviceInfo(
+                name: $0.name ?? $0.addressString ?? "Unknown",
+                address: $0.addressString ?? "")
         }
     }
 
@@ -112,8 +114,9 @@ final class IOBluetoothController: NSObject, BluetoothController {
         self.monitoredAddresses = Set(addresses.map { $0.replacingOccurrences(of: ":", with: "-").lowercased() })
 
         // One global observer fires whenever ANY device connects.
-        connectObserver = IOBluetoothDevice.register(forConnectNotifications: self,
-                                                      selector: #selector(deviceConnected(_:device:)))
+        connectObserver = IOBluetoothDevice.register(
+            forConnectNotifications: self,
+            selector: #selector(deviceConnected(_:device:)))
 
         // Report current state for each monitored address, and arm a disconnect watch on any
         // that are already connected.
@@ -137,17 +140,20 @@ final class IOBluetoothController: NSObject, BluetoothController {
     private func armDisconnect(_ device: IOBluetoothDevice, _ addr: String) {
         disconnectObservers[addr]?.unregister()
         disconnectObservers[addr] = nil
-        if let note = device.register(forDisconnectNotification: self,
-                                      selector: #selector(deviceDisconnected(_:device:))) {
+        if let note = device.register(
+            forDisconnectNotification: self,
+            selector: #selector(deviceDisconnected(_:device:)))
+        {
             disconnectObservers[addr] = note
         }
     }
 
     @objc private func deviceConnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {
         guard let addr = device.addressString?.lowercased(),
-              monitoredAddresses.contains(addr) else { return }
+            monitoredAddresses.contains(addr)
+        else { return }
         onChange?(addr, true)
-        armDisconnect(device, addr)   // disconnect notifications are one-shot; re-arm each time
+        armDisconnect(device, addr)  // disconnect notifications are one-shot; re-arm each time
     }
 
     @objc private func deviceDisconnected(_ note: IOBluetoothUserNotification, device: IOBluetoothDevice) {

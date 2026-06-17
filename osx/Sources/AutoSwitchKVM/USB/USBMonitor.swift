@@ -1,7 +1,7 @@
+import Combine
 import Foundation
 import IOKit
 import IOKit.usb
-import Combine
 
 /// A USB device as seen by IOKit.
 struct USBDeviceInfo: Identifiable, Hashable {
@@ -58,7 +58,7 @@ final class USBMonitor: ObservableObject, USBMonitoring {
             },
             selfPtr, &addIter)
         addedIterator = addIter
-        handleIterator(addIter, added: true)   // drain initial matches + seed
+        handleIterator(addIter, added: true)  // drain initial matches + seed
 
         // --- Removed ---
         // IOServiceMatching is consumed by each call, so build a fresh dictionary.
@@ -74,7 +74,7 @@ final class USBMonitor: ObservableObject, USBMonitoring {
             },
             selfPtr, &remIter)
         removedIterator = remIter
-        drain(remIter)   // arm the notification (initial set are already-present devices)
+        drain(remIter)  // arm the notification (initial set are already-present devices)
 
         refreshAttached()
     }
@@ -122,20 +122,25 @@ final class USBMonitor: ObservableObject, USBMonitoring {
 
     private static func deviceInfo(from service: io_object_t) -> USBDeviceInfo? {
         func intProp(_ key: String) -> Int? {
-            guard let ref = IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?
-                .takeRetainedValue() else { return nil }
+            guard
+                let ref = IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?
+                    .takeRetainedValue()
+            else { return nil }
             return (ref as? NSNumber)?.intValue
         }
         func strProp(_ key: String) -> String? {
-            guard let ref = IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?
-                .takeRetainedValue() else { return nil }
+            guard
+                let ref = IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?
+                    .takeRetainedValue()
+            else { return nil }
             return ref as? String
         }
 
         guard let vid = intProp("idVendor"), let pid = intProp("idProduct") else { return nil }
         let name = strProp("USB Product Name") ?? strProp("kUSBProductString") ?? strProp("Product Name") ?? ""
-        return USBDeviceInfo(vendorID: UInt16(truncatingIfNeeded: vid),
-                             productID: UInt16(truncatingIfNeeded: pid),
-                             name: name)
+        return USBDeviceInfo(
+            vendorID: UInt16(truncatingIfNeeded: vid),
+            productID: UInt16(truncatingIfNeeded: pid),
+            name: name)
     }
 }

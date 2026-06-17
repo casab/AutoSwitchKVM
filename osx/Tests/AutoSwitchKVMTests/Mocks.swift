@@ -1,5 +1,6 @@
-import Foundation
 import Combine
+import Foundation
+
 @testable import AutoSwitchKVM
 
 /// In-memory USB monitor for tests — drive `events` directly to simulate attach/detach.

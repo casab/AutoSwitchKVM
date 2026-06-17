@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import AutoSwitchKVM
 
 final class ModelsTests: XCTestCase {

@@ -12,12 +12,12 @@ enum BTError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .invalidAddress(let a): return "Invalid Bluetooth address: \(a)"
-        case .connectFailed(let c):  return "Connect failed (IOReturn \(c))"
+        case .connectFailed(let c): return "Connect failed (IOReturn \(c))"
         case .disconnectFailed(let c): return "Disconnect failed (IOReturn \(c))"
-        case .pairFailed(let m):     return "Pairing failed: \(m)"
-        case .unpairUnavailable:     return "Unpair API unavailable on this macOS version"
-        case .unpairFailed(let c):   return "Unpair failed (IOReturn \(c))"
-        case .timeout:               return "Operation timed out"
+        case .pairFailed(let m): return "Pairing failed: \(m)"
+        case .unpairUnavailable: return "Unpair API unavailable on this macOS version"
+        case .unpairFailed(let c): return "Unpair failed (IOReturn \(c))"
+        case .timeout: return "Operation timed out"
         }
     }
 }

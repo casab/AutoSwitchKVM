@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 enum DeviceStatus: Equatable {
     case idle
@@ -46,7 +46,7 @@ final class SelectionEngine: ObservableObject {
     /// which tracks raw presence even while paused).
     private var automationActed = false
     private var debounceTimer: Timer?
-    private var runToken = 0   // bumps on every evaluation to cancel in-flight work
+    private var runToken = 0  // bumps on every evaluation to cancel in-flight work
 
     private var statusTimer: Timer?
     /// Devices with an in-flight connect/disconnect; the poller leaves their status alone.
@@ -143,9 +143,10 @@ final class SelectionEngine: ObservableObject {
     func seed() {
         let source = store.config.source
         presentProductIDs.removeAll()
-        automationActed = false   // re-evaluate from scratch (covers profile switches and wake)
+        automationActed = false  // re-evaluate from scratch (covers profile switches and wake)
         if let source {
-            for dev in usb.attachedDevices where dev.vendorID == source.vendorID && source.productIDs.contains(dev.productID) {
+            for dev in usb.attachedDevices
+            where dev.vendorID == source.vendorID && source.productIDs.contains(dev.productID) {
                 presentProductIDs.insert(dev.productID)
             }
         }
@@ -158,8 +159,9 @@ final class SelectionEngine: ObservableObject {
     /// Internal (not private) so unit tests can simulate USB events directly.
     func handleUSB(_ event: (vendorID: UInt16, productID: UInt16, added: Bool)) {
         guard let source = store.config.source,
-              event.vendorID == source.vendorID,
-              source.productIDs.contains(event.productID) else { return }
+            event.vendorID == source.vendorID,
+            source.productIDs.contains(event.productID)
+        else { return }
 
         if event.added {
             presentProductIDs.insert(event.productID)
@@ -189,9 +191,9 @@ final class SelectionEngine: ObservableObject {
     /// Internal for testing; production reaches it via the debounce timer in `evaluate()`.
     func evaluateNow() async {
         let present = !presentProductIDs.isEmpty
-        selected = present                       // always reflect real presence for the UI
+        selected = present  // always reflect real presence for the UI
 
-        guard !store.config.paused else { return }   // automation suspended; don't act
+        guard !store.config.paused else { return }  // automation suspended; don't act
 
         // `automationActed` latches the presence the automation last acted on, so resuming from
         // pause reconciles to the current state.
@@ -278,7 +280,9 @@ final class SelectionEngine: ObservableObject {
             let aborted = token != runToken || (respectSelection && !selected)
             guard !aborted else { statuses[device.id] = .idle; return }
             attempt += 1
-            Log.engine.log("connect \(device.name): attempt \(attempt)/\(cfg.connectRetryMax) (managePairing=\(device.managePairing))")
+            Log.engine.log(
+                "connect \(device.name): attempt \(attempt)/\(cfg.connectRetryMax) (managePairing=\(device.managePairing))"
+            )
 
             if !device.managePairing, await bt.isConnected(addr) {
                 Log.bluetooth.log("\(device.name) already connected")
@@ -317,7 +321,8 @@ final class SelectionEngine: ObservableObject {
                 return
             } else {
                 // Don't trust a link-only state; drop any partial connection so the next attempt is clean.
-                Log.bluetooth.log("\(device.name) not cleanly connected after attempt \(attempt); dropping partial link")
+                Log.bluetooth.log(
+                    "\(device.name) not cleanly connected after attempt \(attempt); dropping partial link")
                 try? await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.disconnect(addr) }
             }
 
@@ -325,7 +330,8 @@ final class SelectionEngine: ObservableObject {
                 try? await Task.sleep(nanoseconds: Self.backoffNanos(base: cfg.connectRetrySecs, attempt: attempt))
             }
         }
-        if case .connected = statuses[device.id] ?? .idle {} else {
+        if case .connected = statuses[device.id] ?? .idle {
+        } else {
             statuses[device.id] = .error("gave up after \(cfg.connectRetryMax) attempts")
             onNotice?("Connection failed", "\(device.name): gave up after \(cfg.connectRetryMax) attempts")
         }

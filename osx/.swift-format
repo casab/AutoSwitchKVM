@@ -9,7 +9,6 @@
   "rules" : {
     "AllPublicDeclarationsHaveDocumentation" : false,
     "AlwaysUseLowerCamelCase" : true,
-    "NoForceUnwrapping" : false,
     "OrderedImports" : true,
     "ReturnVoidInsteadOfEmptyTuple" : true,
     "UseLetInEveryBoundCaseVariable" : true,

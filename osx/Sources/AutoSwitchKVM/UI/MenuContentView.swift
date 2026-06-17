@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// Custom menu bar panel (rendered via `.menuBarExtraStyle(.window)`): a status header, device
 /// cards with status pills + toggles, quick actions, and a footer.
@@ -57,8 +57,9 @@ struct MenuContentView: View {
     }
 
     private var profileSelection: Binding<UUID> {
-        Binding(get: { store.config.activeProfileID },
-                set: { controller.switchProfile(to: $0) })
+        Binding(
+            get: { store.config.activeProfileID },
+            set: { controller.switchProfile(to: $0) })
     }
 
     // MARK: Header
@@ -72,7 +73,9 @@ struct MenuContentView: View {
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             Spacer()
-            Button { controller.togglePause() } label: {
+            Button {
+                controller.togglePause()
+            } label: {
                 Image(systemName: controller.paused ? "play.fill" : "pause.fill")
                     .font(.system(size: 12))
             }
@@ -124,10 +127,14 @@ struct MenuContentView: View {
 
     private var quickActions: some View {
         HStack(spacing: 8) {
-            Button { controller.connectAllNow() } label: {
+            Button {
+                controller.connectAllNow()
+            } label: {
                 Label("Connect all", systemImage: "link").frame(maxWidth: .infinity)
             }
-            Button { controller.disconnectAllNow() } label: {
+            Button {
+                controller.disconnectAllNow()
+            } label: {
                 Label("Disconnect all", systemImage: "xmark.circle").frame(maxWidth: .infinity)
             }
         }
@@ -142,9 +149,15 @@ struct MenuContentView: View {
             Button {
                 openWindow(id: "settings")
                 NSApp.activate(ignoringOtherApps: true)
-            } label: { Label("Settings", systemImage: "gearshape") }
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
             Spacer()
-            Button { NSApp.terminate(nil) } label: { Label("Quit", systemImage: "power") }
+            Button {
+                NSApp.terminate(nil)
+            } label: {
+                Label("Quit", systemImage: "power")
+            }
         }
         .buttonStyle(PanelButtonStyle())
         .font(.system(size: 12))

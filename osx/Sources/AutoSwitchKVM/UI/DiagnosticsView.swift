@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// Read-only troubleshooting view: current engine/adapter state, live USB devices (with the
 /// configured source highlighted), and paired Bluetooth devices with live connection status.
@@ -90,8 +90,12 @@ struct DiagnosticsTab: View {
             HStack {
                 Label("USB devices", systemImage: "cable.connector").font(.headline)
                 Spacer()
-                Button { usb.refreshAttached() } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless)
+                Button {
+                    usb.refreshAttached()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
             }
             if usb.attachedDevices.isEmpty {
                 Text("None detected").font(.system(size: 12)).foregroundStyle(.secondary)
@@ -119,8 +123,12 @@ struct DiagnosticsTab: View {
             HStack {
                 Label("Bluetooth devices", systemImage: "dot.radiowaves.left.and.right").font(.headline)
                 Spacer()
-                Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.borderless)
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
             }
             if paired.isEmpty {
                 Text(btPowered == false ? "Bluetooth is off" : "No paired devices")
@@ -133,8 +141,9 @@ struct DiagnosticsTab: View {
                             Text(p.address).font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        pill(connectedAddrs.contains(p.address) ? "connected" : "disconnected",
-                             connectedAddrs.contains(p.address) ? .green : .gray)
+                        pill(
+                            connectedAddrs.contains(p.address) ? "connected" : "disconnected",
+                            connectedAddrs.contains(p.address) ? .green : .gray)
                     }
                     .padding(.vertical, 3)
                 }

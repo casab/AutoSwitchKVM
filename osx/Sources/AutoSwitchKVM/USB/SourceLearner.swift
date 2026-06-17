@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 /// Detects the USB device(s) that constitute a KVM source by watching what changes while the
 /// user switches the KVM. Snapshot the attached devices at start; any device that appears or
@@ -45,9 +45,11 @@ final class SourceLearner: ObservableObject {
             if let info = current[k] ?? baseline[k] {
                 result.append(info)
             } else {
-                result.append(USBDeviceInfo(vendorID: UInt16(k >> 16),
-                                            productID: UInt16(k & 0xFFFF),
-                                            name: ""))
+                result.append(
+                    USBDeviceInfo(
+                        vendorID: UInt16(k >> 16),
+                        productID: UInt16(k & 0xFFFF),
+                        name: ""))
             }
         }
         return result.sorted { $0.displayName < $1.displayName }

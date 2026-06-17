@@ -1,18 +1,21 @@
-import Foundation
 import AppKit
 import Carbon.HIToolbox
+import Foundation
 
 extension KeyShortcut {
     /// Default combos (⌃⌥⌘ P/C/D), used until the user assigns their own.
-    static let defaultPause = KeyShortcut(keyCode: UInt32(kVK_ANSI_P),
-                                          carbonModifiers: UInt32(controlKey | optionKey | cmdKey),
-                                          display: "⌃⌥⌘P")
-    static let defaultConnectAll = KeyShortcut(keyCode: UInt32(kVK_ANSI_C),
-                                               carbonModifiers: UInt32(controlKey | optionKey | cmdKey),
-                                               display: "⌃⌥⌘C")
-    static let defaultDisconnectAll = KeyShortcut(keyCode: UInt32(kVK_ANSI_D),
-                                                  carbonModifiers: UInt32(controlKey | optionKey | cmdKey),
-                                                  display: "⌃⌥⌘D")
+    static let defaultPause = KeyShortcut(
+        keyCode: UInt32(kVK_ANSI_P),
+        carbonModifiers: UInt32(controlKey | optionKey | cmdKey),
+        display: "⌃⌥⌘P")
+    static let defaultConnectAll = KeyShortcut(
+        keyCode: UInt32(kVK_ANSI_C),
+        carbonModifiers: UInt32(controlKey | optionKey | cmdKey),
+        display: "⌃⌥⌘C")
+    static let defaultDisconnectAll = KeyShortcut(
+        keyCode: UInt32(kVK_ANSI_D),
+        carbonModifiers: UInt32(controlKey | optionKey | cmdKey),
+        display: "⌃⌥⌘D")
 
     /// Build from a recorded key-down event. Requires at least one of ⌃⌥⌘⇧ (a bare key makes a poor
     /// global hotkey); returns nil otherwise.
@@ -62,27 +65,32 @@ final class HotKeyManager {
 
     private func installHandler() {
         guard handlerRef == nil else { return }
-        var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard),
-                                      eventKind: UInt32(kEventHotKeyPressed))
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed))
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, userData in
-            guard let event, let userData else { return noErr }
-            var hkID = EventHotKeyID()
-            GetEventParameter(event, EventParamName(kEventParamDirectObject),
-                              EventParamType(typeEventHotKeyID), nil,
-                              MemoryLayout<EventHotKeyID>.size, nil, &hkID)
-            let manager = Unmanaged<HotKeyManager>.fromOpaque(userData).takeUnretainedValue()
-            MainActor.assumeIsolated { manager.handle(id: hkID.id) }   // dispatched on main
-            return noErr
-        }, 1, &eventType, selfPtr, &handlerRef)
+        InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, event, userData in
+                guard let event, let userData else { return noErr }
+                var hkID = EventHotKeyID()
+                GetEventParameter(
+                    event, EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID), nil,
+                    MemoryLayout<EventHotKeyID>.size, nil, &hkID)
+                let manager = Unmanaged<HotKeyManager>.fromOpaque(userData).takeUnretainedValue()
+                MainActor.assumeIsolated { manager.handle(id: hkID.id) }  // dispatched on main
+                return noErr
+            }, 1, &eventType, selfPtr, &handlerRef)
     }
 
     private func register(_ shortcut: KeyShortcut?, action: Action) {
         guard let shortcut else { return }
         var ref: EventHotKeyRef?
         let hkID = EventHotKeyID(signature: signature, id: action.rawValue)
-        RegisterEventHotKey(shortcut.keyCode, shortcut.carbonModifiers, hkID,
-                            GetApplicationEventTarget(), 0, &ref)
+        RegisterEventHotKey(
+            shortcut.keyCode, shortcut.carbonModifiers, hkID,
+            GetApplicationEventTarget(), 0, &ref)
         hotKeyRefs.append(ref)
     }
 

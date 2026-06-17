@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import AutoSwitchKVM
 
 @MainActor
@@ -9,8 +10,11 @@ final class ConfigStoreTests: XCTestCase {
 
         let store = ConfigStore(directory: dir)
         store.config.source = USBSource(name: "Hub", vendorID: 0x05E3, productIDs: [0x0626, 0x0610])
-        store.config.devices = [BTDevice(name: "Trackpad", address: "3c-50-02-bf-22-45",
-                                         enabled: true, managePairing: true)]
+        store.config.devices = [
+            BTDevice(
+                name: "Trackpad", address: "3c-50-02-bf-22-45",
+                enabled: true, managePairing: true)
+        ]
         store.config.debounceMs = 800
         store.config.dockAutoHide = true
         store.saveNow()

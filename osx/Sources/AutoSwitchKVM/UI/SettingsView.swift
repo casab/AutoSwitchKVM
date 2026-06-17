@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 struct SettingsView: View {
     var body: some View {
@@ -29,22 +29,37 @@ struct ProfilesBar: View {
         HStack(spacing: 8) {
             Image(systemName: "person.crop.rectangle.stack").foregroundStyle(.secondary)
             Text("Profile").foregroundStyle(.secondary)
-            Picker("Profile", selection: Binding(
-                get: { store.config.activeProfileID },
-                set: { controller.switchProfile(to: $0) }
-            )) {
+            Picker(
+                "Profile",
+                selection: Binding(
+                    get: { store.config.activeProfileID },
+                    set: { controller.switchProfile(to: $0) }
+                )
+            ) {
                 ForEach(store.config.profiles) { Text($0.name).tag($0.id) }
             }
             .labelsHidden()
             .frame(maxWidth: 220)
 
-            Button { showRename = true } label: { Image(systemName: "pencil") }
-                .help("Rename profile")
-            Button { controller.addProfile() } label: { Image(systemName: "plus") }
-                .help("Add profile")
-            Button(role: .destructive) { controller.deleteActiveProfile() } label: { Image(systemName: "trash") }
-                .help("Delete profile")
-                .disabled(store.config.profiles.count <= 1)
+            Button {
+                showRename = true
+            } label: {
+                Image(systemName: "pencil")
+            }
+            .help("Rename profile")
+            Button {
+                controller.addProfile()
+            } label: {
+                Image(systemName: "plus")
+            }
+            .help("Add profile")
+            Button(role: .destructive) {
+                controller.deleteActiveProfile()
+            } label: {
+                Image(systemName: "trash")
+            }
+            .help("Delete profile")
+            .disabled(store.config.profiles.count <= 1)
             Spacer()
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
@@ -92,9 +107,11 @@ struct SourceTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Switcher source").font(.headline)
-            Text("The USB device(s) that appear when your KVM selects this Mac. Use Learn to detect "
-                 + "them automatically by switching the KVM, or pick them manually. You can name the source.")
-                .font(.caption).foregroundStyle(.secondary)
+            Text(
+                "The USB device(s) that appear when your KVM selects this Mac. Use Learn to detect "
+                    + "them automatically by switching the KVM, or pick them manually. You can name the source."
+            )
+            .font(.caption).foregroundStyle(.secondary)
 
             if let source = store.config.source {
                 GroupBox {
@@ -114,17 +131,24 @@ struct SourceTab: View {
             }
 
             HStack {
-                Button { usb.refreshAttached(); learner.start(); sheet = .learn } label: {
+                Button {
+                    usb.refreshAttached(); learner.start(); sheet = .learn
+                } label: {
                     Label("Learn source…", systemImage: "wand.and.stars")
                 }
-                Button { usb.refreshAttached(); sheet = .manual } label: {
-                    Label(store.config.source == nil ? "Pick manually…" : "Edit…",
-                          systemImage: "slider.horizontal.3")
+                Button {
+                    usb.refreshAttached(); sheet = .manual
+                } label: {
+                    Label(
+                        store.config.source == nil ? "Pick manually…" : "Edit…",
+                        systemImage: "slider.horizontal.3")
                 }
                 if store.config.source != nil {
                     Button(role: .destructive) {
                         store.config.source = nil; engine.reevaluate()
-                    } label: { Label("Clear", systemImage: "trash") }
+                    } label: {
+                        Label("Clear", systemImage: "trash")
+                    }
                 }
                 Spacer()
             }
@@ -165,7 +189,11 @@ struct DevicesTab: View {
                 Label("Bluetooth devices", systemImage: "dot.radiowaves.left.and.right")
                     .font(.headline)
                 Spacer()
-                Button { showAdd = true } label: { Label("Add", systemImage: "plus") }
+                Button {
+                    showAdd = true
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
             }
 
             deviceArea
@@ -275,11 +303,21 @@ struct SettingsDeviceCard: View {
                 Button("Pair") { controller.testPair(device) }
                 Button("Unpair") { controller.testUnpair(device) }
                 Spacer()
-                Button { onMoveUp() } label: { Image(systemName: "chevron.up") }
-                    .disabled(!canMoveUp).help("Move up (connects earlier)")
-                Button { onMoveDown() } label: { Image(systemName: "chevron.down") }
-                    .disabled(!canMoveDown).help("Move down (connects later)")
-                Button(role: .destructive) { onDelete() } label: {
+                Button {
+                    onMoveUp()
+                } label: {
+                    Image(systemName: "chevron.up")
+                }
+                .disabled(!canMoveUp).help("Move up (connects earlier)")
+                Button {
+                    onMoveDown()
+                } label: {
+                    Image(systemName: "chevron.down")
+                }
+                .disabled(!canMoveDown).help("Move down (connects later)")
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
                     Image(systemName: "trash")
                 }
                 .help("Remove device")
@@ -317,7 +355,9 @@ struct AddDeviceSheet: View {
                             Text(p.address).font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Use") { name = p.name; address = p.address }
+                        Button("Use") {
+                            name = p.name; address = p.address
+                        }
                     }
                 }
                 .frame(height: 120)
@@ -355,39 +395,54 @@ struct GeneralTab: View {
     var body: some View {
         Form {
             Section {
-                TimingSlider(title: "Debounce (arrival)", value: $store.config.arrivalDebounceMs,
-                             range: 0...3000, step: 100, unit: "ms")
-                TimingSlider(title: "Debounce (departure)", value: $store.config.debounceMs,
-                             range: 200...5000, step: 100, unit: "ms")
-                TimingSlider(title: "Connect retries", value: $store.config.connectRetryMax,
-                             range: 1...20)
-                TimingSlider(title: "Retry interval", value: $store.config.connectRetrySecs,
-                             range: 1...30, unit: "s")
-                TimingSlider(title: "Per-call timeout", value: $store.config.btCallTimeoutSecs,
-                             range: 1...30, unit: "s")
+                TimingSlider(
+                    title: "Debounce (arrival)", value: $store.config.arrivalDebounceMs,
+                    range: 0...3000, step: 100, unit: "ms")
+                TimingSlider(
+                    title: "Debounce (departure)", value: $store.config.debounceMs,
+                    range: 200...5000, step: 100, unit: "ms")
+                TimingSlider(
+                    title: "Connect retries", value: $store.config.connectRetryMax,
+                    range: 1...20)
+                TimingSlider(
+                    title: "Retry interval", value: $store.config.connectRetrySecs,
+                    range: 1...30, unit: "s")
+                TimingSlider(
+                    title: "Per-call timeout", value: $store.config.btCallTimeoutSecs,
+                    range: 1...30, unit: "s")
             } header: {
                 Label("Timing", systemImage: "timer")
             }
             Section {
-                Toggle("Pause automation", isOn: Binding(
-                    get: { store.config.paused },
-                    set: { controller.setPaused($0) }))
-                Toggle("Show notifications", isOn: Binding(
-                    get: { store.config.showNotifications },
-                    set: { controller.setShowNotifications($0) }))
-                Toggle("Notify when a device drops unexpectedly", isOn: Binding(
-                    get: { store.config.notifyUnexpectedDisconnect },
-                    set: { controller.setNotifyUnexpectedDisconnect($0) }))
-                Toggle("Launch at login", isOn: Binding(
-                    get: { store.config.launchAtLogin },
-                    set: { controller.setLaunchAtLogin($0) }))
+                Toggle(
+                    "Pause automation",
+                    isOn: Binding(
+                        get: { store.config.paused },
+                        set: { controller.setPaused($0) }))
+                Toggle(
+                    "Show notifications",
+                    isOn: Binding(
+                        get: { store.config.showNotifications },
+                        set: { controller.setShowNotifications($0) }))
+                Toggle(
+                    "Notify when a device drops unexpectedly",
+                    isOn: Binding(
+                        get: { store.config.notifyUnexpectedDisconnect },
+                        set: { controller.setNotifyUnexpectedDisconnect($0) }))
+                Toggle(
+                    "Launch at login",
+                    isOn: Binding(
+                        get: { store.config.launchAtLogin },
+                        set: { controller.setLaunchAtLogin($0) }))
             } header: {
                 Label("Behavior", systemImage: "switch.2")
             }
             Section {
-                Toggle("Enable global keyboard shortcuts", isOn: Binding(
-                    get: { store.config.globalHotkeysEnabled },
-                    set: { controller.setGlobalHotkeysEnabled($0) }))
+                Toggle(
+                    "Enable global keyboard shortcuts",
+                    isOn: Binding(
+                        get: { store.config.globalHotkeysEnabled },
+                        set: { controller.setGlobalHotkeysEnabled($0) }))
 
                 Group {
                     ShortcutRecorder(label: "Pause / resume", shortcut: store.config.hotkeyPause) {
@@ -403,9 +458,11 @@ struct GeneralTab: View {
                 .disabled(!store.config.globalHotkeysEnabled)
 
                 HStack {
-                    Text("System-wide while the app is running. Click Record and press a combo with "
-                         + "at least one of ⌃⌥⌘⇧.")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Text(
+                        "System-wide while the app is running. Click Record and press a combo with "
+                            + "at least one of ⌃⌥⌘⇧."
+                    )
+                    .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("Restore defaults") { controller.resetHotkeysToDefault() }
                         .controlSize(.small)
@@ -439,9 +496,11 @@ struct TimingSlider: View {
     var body: some View {
         HStack(spacing: 12) {
             Text(title).frame(width: 150, alignment: .leading)
-            Slider(value: Binding(get: { Double(value) },
-                                  set: { value = Int($0.rounded()) }),
-                   in: range, step: step)
+            Slider(
+                value: Binding(
+                    get: { Double(value) },
+                    set: { value = Int($0.rounded()) }),
+                in: range, step: step)
             Text(unit.isEmpty ? "\(value)" : "\(value) \(unit)")
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -459,12 +518,16 @@ struct ExtrasTab: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Auto-hide Dock when on built-in display only", isOn: Binding(
-                    get: { store.config.dockAutoHide },
-                    set: { controller.setDockAutoHide($0) }))
-                Text("Hides the Dock when no external display is connected, and shows it when one is. "
-                     + "Unrelated to Bluetooth handoff.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Toggle(
+                    "Auto-hide Dock when on built-in display only",
+                    isOn: Binding(
+                        get: { store.config.dockAutoHide },
+                        set: { controller.setDockAutoHide($0) }))
+                Text(
+                    "Hides the Dock when no external display is connected, and shows it when one is. "
+                        + "Unrelated to Bluetooth handoff."
+                )
+                .font(.caption).foregroundStyle(.secondary)
             } header: {
                 Label("Dock", systemImage: "dock.rectangle")
             }
@@ -490,8 +553,12 @@ struct ShortcutRecorder: View {
             }
             .frame(minWidth: 110)
             if shortcut != nil {
-                Button { onChange(nil) } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.borderless).help("Clear shortcut")
+                Button {
+                    onChange(nil)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.borderless).help("Clear shortcut")
             }
         }
         .onDisappear { recorder.stop() }
@@ -513,7 +580,7 @@ final class ShortcutRecorderModel: ObservableObject {
             let isEscape = event.keyCode == 53
             let shortcut = KeyShortcut(event: event)
             MainActor.assumeIsolated { self?.handleCapture(isEscape: isEscape, shortcut: shortcut) }
-            return nil   // swallow keys while recording
+            return nil  // swallow keys while recording
         }
     }
 
@@ -524,8 +591,8 @@ final class ShortcutRecorderModel: ObservableObject {
     }
 
     private func handleCapture(isEscape: Bool, shortcut: KeyShortcut?) {
-        if isEscape { stop(); return }          // Escape cancels
-        if let shortcut {                        // a valid modified combo was captured
+        if isEscape { stop(); return }  // Escape cancels
+        if let shortcut {  // a valid modified combo was captured
             onCapture?(shortcut)
             stop()
         }

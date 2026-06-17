@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 
 /// Loads and persists `AppConfig` as JSON in Application Support, and publishes changes.
 @MainActor
@@ -15,13 +15,16 @@ final class ConfigStore: ObservableObject {
     ///   tests pass a temporary directory to avoid touching the real config.
     init(directory: URL? = nil) {
         let fm = FileManager.default
-        let dir = directory ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir =
+            directory
+            ?? fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AutoSwitchKVM", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("config.json")
 
         if let data = try? Data(contentsOf: fileURL),
-           let loaded = try? JSONDecoder().decode(AppConfig.self, from: data) {
+            let loaded = try? JSONDecoder().decode(AppConfig.self, from: data)
+        {
             self.config = loaded
         } else {
             self.config = .default

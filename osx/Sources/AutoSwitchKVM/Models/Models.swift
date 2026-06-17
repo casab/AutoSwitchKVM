@@ -104,25 +104,28 @@ struct AppConfig: Codable {
     var hotkeyConnectAll: KeyShortcut?
     var hotkeyDisconnectAll: KeyShortcut?
 
-    init(profiles: [Profile] = [Profile(name: "Default")],
-         activeProfileID: UUID? = nil,
-         debounceMs: Int = 1200,
-         arrivalDebounceMs: Int = 400,
-         connectRetryMax: Int = 6,
-         connectRetrySecs: Int = 2,
-         btCallTimeoutSecs: Int = 15,
-         showNotifications: Bool = false,
-         notifyUnexpectedDisconnect: Bool = false,
-         launchAtLogin: Bool = false,
-         paused: Bool = false,
-         dockAutoHide: Bool = false,
-         globalHotkeysEnabled: Bool = false,
-         hotkeyPause: KeyShortcut? = .defaultPause,
-         hotkeyConnectAll: KeyShortcut? = .defaultConnectAll,
-         hotkeyDisconnectAll: KeyShortcut? = .defaultDisconnectAll) {
+    init(
+        profiles: [Profile] = [Profile(name: "Default")],
+        activeProfileID: UUID? = nil,
+        debounceMs: Int = 1200,
+        arrivalDebounceMs: Int = 400,
+        connectRetryMax: Int = 6,
+        connectRetrySecs: Int = 2,
+        btCallTimeoutSecs: Int = 15,
+        showNotifications: Bool = false,
+        notifyUnexpectedDisconnect: Bool = false,
+        launchAtLogin: Bool = false,
+        paused: Bool = false,
+        dockAutoHide: Bool = false,
+        globalHotkeysEnabled: Bool = false,
+        hotkeyPause: KeyShortcut? = .defaultPause,
+        hotkeyConnectAll: KeyShortcut? = .defaultConnectAll,
+        hotkeyDisconnectAll: KeyShortcut? = .defaultDisconnectAll
+    ) {
         let list = profiles.isEmpty ? [Profile(name: "Default")] : profiles
         self.profiles = list
-        self.activeProfileID = (activeProfileID.flatMap { id in list.contains { $0.id == id } ? id : nil }) ?? list[0].id
+        self.activeProfileID =
+            (activeProfileID.flatMap { id in list.contains { $0.id == id } ? id : nil }) ?? list[0].id
         self.debounceMs = debounceMs
         self.arrivalDebounceMs = arrivalDebounceMs
         self.connectRetryMax = connectRetryMax
@@ -170,7 +173,7 @@ struct AppConfig: Codable {
         case debounceMs, arrivalDebounceMs, connectRetryMax, connectRetrySecs, btCallTimeoutSecs
         case showNotifications, notifyUnexpectedDisconnect, launchAtLogin, paused, dockAutoHide
         case globalHotkeysEnabled, hotkeyPause, hotkeyConnectAll, hotkeyDisconnectAll
-        case source, devices   // legacy top-level keys (pre-profiles)
+        case source, devices  // legacy top-level keys (pre-profiles)
     }
 
     init(from decoder: Decoder) throws {
@@ -187,11 +190,14 @@ struct AppConfig: Codable {
         dockAutoHide = try c.decodeIfPresent(Bool.self, forKey: .dockAutoHide) ?? false
         globalHotkeysEnabled = try c.decodeIfPresent(Bool.self, forKey: .globalHotkeysEnabled) ?? false
         // Absent key (old config) → the default combo; present-but-null → intentionally cleared.
-        hotkeyPause = c.contains(.hotkeyPause)
+        hotkeyPause =
+            c.contains(.hotkeyPause)
             ? try c.decodeIfPresent(KeyShortcut.self, forKey: .hotkeyPause) : .defaultPause
-        hotkeyConnectAll = c.contains(.hotkeyConnectAll)
+        hotkeyConnectAll =
+            c.contains(.hotkeyConnectAll)
             ? try c.decodeIfPresent(KeyShortcut.self, forKey: .hotkeyConnectAll) : .defaultConnectAll
-        hotkeyDisconnectAll = c.contains(.hotkeyDisconnectAll)
+        hotkeyDisconnectAll =
+            c.contains(.hotkeyDisconnectAll)
             ? try c.decodeIfPresent(KeyShortcut.self, forKey: .hotkeyDisconnectAll) : .defaultDisconnectAll
 
         var list = try c.decodeIfPresent([Profile].self, forKey: .profiles) ?? []
