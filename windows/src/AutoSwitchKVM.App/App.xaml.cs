@@ -29,13 +29,17 @@ public partial class App : Application
         {
             ToolTipText = "AutoSwitch KVM",
             IconSource = new GeneratedIconSource { Text = "K", Foreground = new SolidColorBrush(Colors.White) },
-            ContextMenuMode = ContextMenuMode.SecondWindow,
+            // Native Win32 popup menu: renders reliably (the XAML "SecondWindow" flyout showed a
+            // blank box because the secondary window doesn't inherit the app theme).
+            ContextMenuMode = ContextMenuMode.PopupMenu,
         };
 
         var menu = new MenuFlyout();
         menu.Opening += (_, _) => BuildTrayMenu(menu);
         _trayIcon.ContextFlyout = menu;
         _trayIcon.LeftClickCommand = new RelayCommand(ShowSettings);
+        _trayIcon.DoubleClickCommand = new RelayCommand(ShowSettings);
+        BuildTrayMenu(menu);   // populate up front so the popup has items on first open
         _trayIcon.ForceCreate();
     }
 

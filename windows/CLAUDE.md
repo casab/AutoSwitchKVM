@@ -149,6 +149,15 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   re-enumeration storm on a KVM switch starves a pure debounce.
 - **Spike scripts must be pure ASCII.** PowerShell 5.1 reads BOM-less `.ps1` as Windows-1252; a
   non-ASCII char (e.g. an em-dash) gets misread as a smart-quote and breaks parsing.
+- **Serialize Bluetooth ops.** `WinRtBluetooth` guards pair/unpair with a `SemaphoreSlim` - without
+  it, the auto-connect, the engine's retries, and manual test-connect run concurrent radio inquiries
+  and produce `AuthenticationTimeout` churn (the "sometimes connects" instability seen on first run).
+- **Discover with a DeviceWatcher, not `FindAllAsync`.** `FindAllAsync(GetDeviceSelectorFromPairingState(false))`
+  blocks for the full BR/EDR inquiry (~20-30s). Use a `DeviceWatcher` that returns as soon as the
+  target MAC appears, bounded by a timeout (`FindUnpairedEndpointAsync`).
+- **Tray menu: use `ContextMenuMode.PopupMenu`.** The XAML `SecondWindow` flyout renders as a blank
+  rectangle (the secondary window doesn't inherit the app theme); the native popup renders reliably.
+- **Size the Settings window** via `AppWindow.Resize` - a WinUI `Window` opens very large by default.
 
 ## When making changes
 

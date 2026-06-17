@@ -42,6 +42,7 @@ public sealed partial class SettingsWindow : Window
     {
         InitializeComponent();
         Title = "AutoSwitch KVM - Settings";
+        try { AppWindow.Resize(new Windows.Graphics.SizeInt32(720, 640)); } catch { /* sizing is best-effort */ }
 
         var tabs = new TabView { IsAddTabButtonVisible = false, CanReorderTabs = false, CanDragTabs = false };
         tabs.TabItems.Add(new TabViewItem { Header = "Source", IsClosable = false, Content = BuildSourceTab() });

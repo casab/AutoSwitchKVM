@@ -29,6 +29,9 @@ public sealed class WinRtBluetooth : IBluetoothController
     private readonly SynchronizationContext? _sync;
     private readonly object _gate = new();
     private readonly List<(BluetoothDevice dev, TypedEventHandler<BluetoothDevice, object> handler)> _subs = new();
+    // Serializes pair/unpair so overlapping radio operations (engine retries + manual test buttons)
+    // can't run concurrent inquiries against the one radio (the cause of AuthenticationTimeout churn).
+    private readonly SemaphoreSlim _opLock = new(1, 1);
 
     public WinRtBluetooth()
     {
@@ -79,70 +82,128 @@ public sealed class WinRtBluetooth : IBluetoothController
 
     public async Task PairAsync(string address, CancellationToken ct = default)
     {
-        var digits = Digits(address);
-
-        // Idempotent: if already paired (== connected when in range), nothing to do. The engine
-        // calls pair() on every connect attempt, so this must not fail on an already-paired device.
+        await _opLock.WaitAsync(ct);
         try
         {
-            using var existing = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
-            if (existing?.DeviceInformation.Pairing.IsPaired == true) return;
-        }
-        catch { /* resolve failure -> attempt discovery + pair below */ }
+            var digits = Digits(address);
 
-        // The cached device is NOT pairable; discover the freshly-enumerated unpaired endpoint.
-        Log.Info("bt", $"pair {address}: discovering unpaired endpoint...");
-        var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(false);
-        var found = await DeviceInformation.FindAllAsync(selector).AsTask(ct);
-        Log.Info("bt", $"pair {address}: {found.Count} unpaired device(s) discovered");
-        var di = found.FirstOrDefault(d =>
-            StripSeparators(d.Id).Contains(digits, StringComparison.OrdinalIgnoreCase));
-
-        if (di is null)
-            throw new BluetoothException(
-                $"{address} is not discoverable as an unpaired endpoint - free it from the other host / put it in pairing mode.");
-
-        var custom = di.Pairing.Custom;
-
-        // Auto-accept the ConfirmOnly ceremony (a real .NET delegate; no PowerShell-style deadlock).
-        TypedEventHandler<DeviceInformationCustomPairing, DevicePairingRequestedEventArgs> handler =
-            (_, e) =>
+            // Idempotent: if already paired (== connected when in range), nothing to do. The engine
+            // calls pair() on every connect attempt, so this must not fail on an already-paired device.
+            try
             {
-                Log.Info("bt", $"pair {address}: PairingRequested kind={e.PairingKind}");
-                if (e.PairingKind == DevicePairingKinds.ProvidePin) e.Accept("0000");
-                else e.Accept();
-            };
-        custom.PairingRequested += handler;
-        try
-        {
-            // Do NOT gate on CanPair (it reads false yet pairing succeeds).
-            var result = await custom.PairAsync(DevicePairingKinds.ConfirmOnly).AsTask(ct);
-            Log.Info("bt", $"pair {address}: result={result.Status}");
-            if (result.Status != DevicePairingResultStatus.Paired &&
-                result.Status != DevicePairingResultStatus.AlreadyPaired)
+                using var existing = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
+                if (existing?.DeviceInformation.Pairing.IsPaired == true)
+                {
+                    Log.Info("bt", $"pair {address}: already paired, skipping discovery");
+                    return;
+                }
+            }
+            catch { /* resolve failure -> attempt discovery + pair below */ }
+
+            // The cached device is NOT pairable; discover the freshly-enumerated unpaired endpoint.
+            Log.Info("bt", $"pair {address}: discovering unpaired endpoint...");
+            var di = await FindUnpairedEndpointAsync(digits, ct);
+            if (di is null)
+                throw new BluetoothException(
+                    $"{address} is not discoverable as an unpaired endpoint - free it from the other host / put it in pairing mode.");
+
+            var custom = di.Pairing.Custom;
+
+            // Auto-accept the ConfirmOnly ceremony (a real .NET delegate; no PowerShell-style deadlock).
+            TypedEventHandler<DeviceInformationCustomPairing, DevicePairingRequestedEventArgs> handler =
+                (_, e) =>
+                {
+                    Log.Info("bt", $"pair {address}: PairingRequested kind={e.PairingKind}");
+                    if (e.PairingKind == DevicePairingKinds.ProvidePin) e.Accept("0000");
+                    else e.Accept();
+                };
+            custom.PairingRequested += handler;
+            try
             {
-                throw new BluetoothException($"Pair {address} failed: {result.Status}");
+                // Do NOT gate on CanPair (it reads false yet pairing succeeds).
+                var result = await custom.PairAsync(DevicePairingKinds.ConfirmOnly).AsTask(ct);
+                Log.Info("bt", $"pair {address}: result={result.Status}");
+                if (result.Status != DevicePairingResultStatus.Paired &&
+                    result.Status != DevicePairingResultStatus.AlreadyPaired)
+                {
+                    throw new BluetoothException($"Pair {address} failed: {result.Status}");
+                }
+            }
+            finally
+            {
+                custom.PairingRequested -= handler;
             }
         }
         finally
         {
-            custom.PairingRequested -= handler;
+            _opLock.Release();
+        }
+    }
+
+    /// Find the unpaired endpoint for a MAC using a DeviceWatcher that returns as soon as the target
+    /// appears (much faster than FindAllAsync, which blocks for the full BR/EDR inquiry), bounded by
+    /// a timeout so it never hangs when the device isn't discoverable.
+    private async Task<DeviceInformation?> FindUnpairedEndpointAsync(string digits, CancellationToken ct, int timeoutSeconds = 12)
+    {
+        var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(false);
+        var watcher = DeviceInformation.CreateWatcher(selector);
+        var tcs = new TaskCompletionSource<DeviceInformation?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        DeviceInformation? match = null;
+
+        watcher.Added += (_, di) =>
+        {
+            if (StripSeparators(di.Id).Contains(digits, StringComparison.OrdinalIgnoreCase))
+            {
+                match = di;
+                tcs.TrySetResult(di);
+            }
+        };
+        watcher.EnumerationCompleted += (_, _) => tcs.TrySetResult(match);
+        watcher.Stopped += (_, _) => tcs.TrySetResult(match);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        using var reg = timeoutCts.Token.Register(() => tcs.TrySetResult(match));
+
+        watcher.Start();
+        try
+        {
+            var found = await tcs.Task;
+            Log.Info("bt", found is null ? "discovery: no match" : $"discovery: matched {found.Id}");
+            return found;
+        }
+        finally
+        {
+            try
+            {
+                if (watcher.Status is DeviceWatcherStatus.Started or DeviceWatcherStatus.EnumerationCompleted)
+                    watcher.Stop();
+            }
+            catch { /* ignore */ }
         }
     }
 
     public async Task UnpairAsync(string address, CancellationToken ct = default)
     {
-        using var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
-        if (dev is null) { Log.Warn("bt", $"unpair {address}: device not resolved"); return; }
-        var pairing = dev.DeviceInformation.Pairing;
-        if (!pairing.IsPaired) { Log.Info("bt", $"unpair {address}: already unpaired"); return; }
-
-        var result = await pairing.UnpairAsync().AsTask(ct);
-        Log.Info("bt", $"unpair {address}: result={result.Status}");
-        if (result.Status != DeviceUnpairingResultStatus.Unpaired &&
-            result.Status != DeviceUnpairingResultStatus.AlreadyUnpaired)
+        await _opLock.WaitAsync(ct);
+        try
         {
-            throw new BluetoothException($"Unpair {address} failed: {result.Status}");
+            using var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
+            if (dev is null) { Log.Warn("bt", $"unpair {address}: device not resolved"); return; }
+            var pairing = dev.DeviceInformation.Pairing;
+            if (!pairing.IsPaired) { Log.Info("bt", $"unpair {address}: already unpaired"); return; }
+
+            var result = await pairing.UnpairAsync().AsTask(ct);
+            Log.Info("bt", $"unpair {address}: result={result.Status}");
+            if (result.Status != DeviceUnpairingResultStatus.Unpaired &&
+                result.Status != DeviceUnpairingResultStatus.AlreadyUnpaired)
+            {
+                throw new BluetoothException($"Unpair {address} failed: {result.Status}");
+            }
+        }
+        finally
+        {
+            _opLock.Release();
         }
     }
 
