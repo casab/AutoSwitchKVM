@@ -228,21 +228,27 @@ public sealed partial class SettingsWindow : Window
                 if (!double.IsNaN(e.NewValue)) C.Mutate(_ => device.ConnectDelayMs = (int)e.NewValue);
             };
 
+            var conn = new Button { Content = "Connect" };
+            conn.Click += async (_, _) => await C.TestConnectAsync(device);
+            var disc = new Button { Content = "Disconnect" };
+            disc.Click += async (_, _) => await C.TestDisconnectAsync(device);
+            var pair = new Button { Content = "Pair" };
+            pair.Click += async (_, _) => await C.TestPairAsync(device);
+            var unpair = new Button { Content = "Unpair" };
+            unpair.Click += async (_, _) => await C.TestUnpairAsync(device);
+
             var up = new Button { Content = "Up", IsEnabled = index > 0 };
             up.Click += (_, _) => MoveDevice(index, index - 1);
             var down = new Button { Content = "Down", IsEnabled = index < devices.Count - 1 };
             down.Click += (_, _) => MoveDevice(index, index + 1);
             var del = new Button { Content = "Delete" };
             del.Click += (_, _) => C.Mutate(cfg => cfg.Devices.RemoveAll(d => d.Id == device.Id), refreshMonitoring: true, reevaluate: true);
-            var conn = new Button { Content = "Connect" };
-            conn.Click += async (_, _) => await C.TestConnectAsync(device);
-            var disc = new Button { Content = "Disconnect" };
-            disc.Click += async (_, _) => await C.TestDisconnectAsync(device);
 
             card.Children.Add(enabled);
             card.Children.Add(pairing);
             card.Children.Add(delay);
-            card.Children.Add(Row(up, down, del, conn, disc));
+            card.Children.Add(Row(conn, disc, pair, unpair));   // connection actions
+            card.Children.Add(Row(up, down, del));              // list management
 
             _devicesPanel.Children.Add(Card(card));
         }
@@ -298,6 +304,9 @@ public sealed partial class SettingsWindow : Window
         {
             Name = string.IsNullOrWhiteSpace(manualName.Text) ? manualAddr.Text.Trim() : manualName.Text.Trim(),
             Address = manualAddr.Text.Trim(),
+            // On Windows the bond is exclusive and "disconnect" can only release via unpair, so
+            // managePairing must be on for the device to release on switch-away (default it on).
+            ManagePairing = true,
         };
         C.Mutate(cfg => cfg.Devices.Add(device), refreshMonitoring: true);
     }

@@ -32,8 +32,8 @@ public sealed class AppController
     public AppController()
     {
         _dispatcher = DispatcherQueue.GetForCurrentThread();
-        _usb = new PnpUsbMonitor();   // captures the UI SynchronizationContext
-        _bt = new WinRtBluetooth();
+        _usb = new PnpUsbMonitor(_dispatcher);   // marshal callbacks onto the UI thread
+        _bt = new WinRtBluetooth(_dispatcher);
         Config = _store.Load();
         Log.Info("app", $"config loaded from {_store.Path}: profile='{Config.ActiveProfileName}', " +
             $"source={(Config.Source is null ? "(none)" : Config.Source.DisplayVidPid)}, devices={Config.Devices.Count}, paused={Config.Paused}");
@@ -198,10 +198,20 @@ public sealed class AppController
 
     // ---- Per-device test actions (Settings buttons) ----
 
-    public Task TestConnectAsync(BTDevice d) { Log.Info("action", $"test connect {d.Name}"); return _bt.ConnectAsync(d.Address); }
-    public Task TestDisconnectAsync(BTDevice d) { Log.Info("action", $"test disconnect {d.Name}"); return _bt.DisconnectAsync(d.Address); }
-    public Task TestPairAsync(BTDevice d) { Log.Info("action", $"test pair {d.Name}"); return _bt.PairAsync(d.Address); }
-    public Task TestUnpairAsync(BTDevice d) { Log.Info("action", $"test unpair {d.Name}"); return _bt.UnpairAsync(d.Address); }
+    public Task TestConnectAsync(BTDevice d) { Log.Info("action", $"connect {d.Name}"); return _bt.ConnectAsync(d.Address); }
+
+    /// Release a device from this PC: disconnect, and (for Classic-HID / managePairing devices, where
+    /// the bond is the only lever) unpair. Mirrors the engine's switch-away path. A plain
+    /// DisconnectAsync is a no-op on Windows, so this is what the tray/Settings "disconnect" must call.
+    public async Task TestDisconnectAsync(BTDevice d)
+    {
+        Log.Info("action", $"release {d.Name} (managePairing={d.ManagePairing})");
+        await _bt.DisconnectAsync(d.Address);
+        if (d.ManagePairing) await _bt.UnpairAsync(d.Address);
+    }
+
+    public Task TestPairAsync(BTDevice d) { Log.Info("action", $"pair {d.Name}"); return _bt.PairAsync(d.Address); }
+    public Task TestUnpairAsync(BTDevice d) { Log.Info("action", $"unpair {d.Name}"); return _bt.UnpairAsync(d.Address); }
 
     public Task<IReadOnlyList<PairedDeviceInfo>> PairedDevicesAsync() => _bt.PairedDevicesAsync();
     public IReadOnlyList<UsbDeviceInfo> UsbSnapshot() => _usb.Snapshot();

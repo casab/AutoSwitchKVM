@@ -3,6 +3,7 @@ using System.Management;
 using System.Text.RegularExpressions;
 using AutoSwitchKVM.App.Support;
 using AutoSwitchKVM.Core;
+using Microsoft.UI.Dispatching;
 
 namespace AutoSwitchKVM.App.Platform;
 
@@ -24,7 +25,7 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
 
     private readonly int _reconcileMs;
     private readonly int _eventDebounceMs;
-    private readonly SynchronizationContext? _sync;
+    private readonly DispatcherQueue? _dispatcher;
     private readonly object _gate = new();
 
     private ManagementEventWatcher? _watcher;
@@ -35,11 +36,12 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
 
     public event Action<IReadOnlyList<UsbDeviceInfo>>? Changed;
 
-    public PnpUsbMonitor(int reconcileMs = 2000, int eventDebounceMs = 500)
+    /// Pass the UI DispatcherQueue so Changed is raised on the UI thread (the engine is single-threaded).
+    public PnpUsbMonitor(DispatcherQueue? dispatcher = null, int reconcileMs = 2000, int eventDebounceMs = 500)
     {
+        _dispatcher = dispatcher;
         _reconcileMs = reconcileMs;
         _eventDebounceMs = eventDebounceMs;
-        _sync = SynchronizationContext.Current;
     }
 
     public IReadOnlyList<UsbDeviceInfo> Snapshot() => Enumerate();
@@ -109,7 +111,7 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
     {
         var handler = Changed;
         if (handler is null) return;
-        if (_sync != null) _sync.Post(_ => handler(snapshot), null);
+        if (_dispatcher != null) _dispatcher.TryEnqueue(() => handler(snapshot));
         else handler(snapshot);
     }
 

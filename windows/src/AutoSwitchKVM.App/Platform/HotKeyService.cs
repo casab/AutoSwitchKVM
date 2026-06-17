@@ -41,8 +41,15 @@ public sealed class HotKeyService : IDisposable
             hInstance = GetModuleHandleW(null),
             lpszClassName = _className,
         };
-        RegisterClassW(ref wc);
+        var atom = RegisterClassW(ref wc);
+        if (atom == 0)
+            Log.Warn("hotkey", $"RegisterClassW failed (Win32 error {Marshal.GetLastWin32Error()})");
+
         _hwnd = CreateWindowExW(0, _className, string.Empty, 0, 0, 0, 0, 0, HWND_MESSAGE, IntPtr.Zero, wc.hInstance, IntPtr.Zero);
+        if (_hwnd == IntPtr.Zero)
+            Log.Error("hotkey", $"CreateWindowExW failed (Win32 error {Marshal.GetLastWin32Error()}); global hotkeys disabled");
+        else
+            Log.Info("hotkey", "message-only window created");
     }
 
     /// Idempotent: re-register from scratch whenever the enabled flag or any shortcut changes.
@@ -106,10 +113,10 @@ public sealed class HotKeyService : IDisposable
         public string? lpszClassName;
     }
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern ushort RegisterClassW(ref WNDCLASS wc);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr CreateWindowExW(uint exStyle, string className, string windowName,
         uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr hInstance, IntPtr param);
 

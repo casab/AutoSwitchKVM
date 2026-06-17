@@ -231,3 +231,15 @@ validated on-device, like the macOS Bluetooth layer.
   reconcile. CfgMgr32 remains a possible later optimization if WMI enumeration cost matters.
 - Unpackaged toast registration on Windows 10 vs 11: `AppNotificationManager.Register()` is wired,
   but some builds also need a Start-menu shortcut with an AUMID for toasts to surface - confirm on-device.
+- **USB source detection is VID/PID-set coarse (known limitation).** `selected` = any matching VID/PID
+  present; there's no instance-group scoping to a specific physical hub (the PowerShell prototype had
+  it). Works as long as the source keys on the *disappearing* PID (e.g. `0626`); but an always-on PID
+  in the source, or a second identical hub, would keep it "selected" forever. Follow-up: store the
+  hub instance-group key in `USBSource` and match it in `PnpUsbMonitor`/engine.
+- **Suspend release is best-effort.** On suspend the app queues an async unpair and returns; Windows
+  may suspend before WinRT unpair completes, leaving the bond held (sleep-while-selected). The normal
+  KVM switch-away path is unaffected. Needs hardware testing; a SystemEvents power-notification delay
+  could help but isn't guaranteed.
+- **Pairing ceremony coverage.** `PairAsync` now requests ConfirmOnly|ProvidePin|ConfirmPinMatch|
+  DisplayPin (handler auto-accepts ConfirmOnly, supplies "0000" for ProvidePin). Covers Apple
+  trackpad/keyboard; devices needing real user PIN/passkey entry are out of scope for now.

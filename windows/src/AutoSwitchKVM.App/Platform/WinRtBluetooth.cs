@@ -1,6 +1,7 @@
 using System.Management;
 using AutoSwitchKVM.App.Support;
 using AutoSwitchKVM.Core;
+using Microsoft.UI.Dispatching;
 using Windows.Devices.Bluetooth;
 using Windows.Devices.Enumeration;
 using Windows.Devices.Radios;
@@ -26,16 +27,17 @@ namespace AutoSwitchKVM.App.Platform;
 /// WinRT custom pairing.
 public sealed class WinRtBluetooth : IBluetoothController
 {
-    private readonly SynchronizationContext? _sync;
+    private readonly DispatcherQueue? _dispatcher;
     private readonly object _gate = new();
     private readonly List<(BluetoothDevice dev, TypedEventHandler<BluetoothDevice, object> handler)> _subs = new();
     // Serializes pair/unpair so overlapping radio operations (engine retries + manual test buttons)
     // can't run concurrent inquiries against the one radio (the cause of AuthenticationTimeout churn).
     private readonly SemaphoreSlim _opLock = new(1, 1);
 
-    public WinRtBluetooth()
+    /// Pass the UI DispatcherQueue so connection-change callbacks reach the engine on the UI thread.
+    public WinRtBluetooth(DispatcherQueue? dispatcher = null)
     {
-        _sync = SynchronizationContext.Current;
+        _dispatcher = dispatcher;
     }
 
     // ---- Power ----
@@ -120,8 +122,13 @@ public sealed class WinRtBluetooth : IBluetoothController
             custom.PairingRequested += handler;
             try
             {
-                // Do NOT gate on CanPair (it reads false yet pairing succeeds).
-                var result = await custom.PairAsync(DevicePairingKinds.ConfirmOnly).AsTask(ct);
+                // Accept the common HID ceremonies (the trackpad uses ConfirmOnly; the handler also
+                // handles ProvidePin). Do NOT gate on CanPair (it reads false yet pairing succeeds).
+                const DevicePairingKinds kinds = DevicePairingKinds.ConfirmOnly
+                    | DevicePairingKinds.ProvidePin
+                    | DevicePairingKinds.ConfirmPinMatch
+                    | DevicePairingKinds.DisplayPin;
+                var result = await custom.PairAsync(kinds).AsTask(ct);
                 Log.Info("bt", $"pair {address}: result={result.Status}");
                 if (result.Status != DevicePairingResultStatus.Paired &&
                     result.Status != DevicePairingResultStatus.AlreadyPaired)
@@ -277,7 +284,7 @@ public sealed class WinRtBluetooth : IBluetoothController
 
     private void Post(Action action)
     {
-        if (_sync != null) _sync.Post(_ => action(), null);
+        if (_dispatcher != null) _dispatcher.TryEnqueue(() => action());
         else action();
     }
 
