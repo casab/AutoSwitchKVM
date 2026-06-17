@@ -164,12 +164,19 @@ public sealed class WinRtBluetooth : IBluetoothController
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
         using var reg = timeoutCts.Token.Register(() => tcs.TrySetResult(null));
 
+        Log.Info("bt", $"discovery: watching unpaired selector for digits {digits}; selector={selector}");
         var watcher = DeviceInformation.CreateWatcher(selector);
         watcher.Added += (_, di) =>
         {
+            Log.Info("bt", $"discovery watcher Added: name='{di.Name}' id={di.Id}");
             if (StripSeparators(di.Id).Contains(digits, StringComparison.OrdinalIgnoreCase))
+            {
+                Log.Info("bt", "discovery watcher: MATCHED target");
                 tcs.TrySetResult(di);   // early-exit as soon as the target is discovered
+            }
         };
+        watcher.EnumerationCompleted += (_, _) => Log.Info("bt", "discovery watcher: EnumerationCompleted (inquiry continues)");
+        watcher.Stopped += (_, _) => Log.Info("bt", "discovery watcher: Stopped");
         watcher.Start();
 
         // Parallel fallback: whichever (watcher Added / FindAllAsync) finds it first resolves.
@@ -193,11 +200,15 @@ public sealed class WinRtBluetooth : IBluetoothController
         try
         {
             var found = await DeviceInformation.FindAllAsync(selector).AsTask(ct);
+            Log.Info("bt", $"discovery FindAllAsync(unpaired): {found.Count} device(s)");
+            foreach (var d in found)
+                Log.Info("bt", $"  findall: name='{d.Name}' id={d.Id}");
             var match = found.FirstOrDefault(d =>
                 StripSeparators(d.Id).Contains(digits, StringComparison.OrdinalIgnoreCase));
             if (match != null) tcs.TrySetResult(match);
         }
-        catch { /* cancelled / failed - the watcher or timeout covers it */ }
+        catch (OperationCanceledException) { /* timed out / cancelled - covered by watcher/timeout */ }
+        catch (Exception ex) { Log.Warn("bt", $"discovery FindAllAsync failed: {ex.Message}"); }
     }
 
     public async Task UnpairAsync(string address, CancellationToken ct = default)
@@ -247,6 +258,63 @@ public sealed class WinRtBluetooth : IBluetoothController
         }
         catch { /* enumeration unavailable -> empty list */ }
         return list;
+    }
+
+    // ---- Diagnostics (Settings "Diagnose" button): dump everything WinRT sees for this MAC ----
+
+    public async Task DiagnoseAsync(string address)
+    {
+        var digits = Digits(address);
+        Log.Info("diag", $"===== Diagnose {address} (match digits: {digits}) =====");
+
+        try
+        {
+            var radios = await Radio.GetRadiosAsync();
+            var bt = radios.FirstOrDefault(r => r.Kind == RadioKind.Bluetooth);
+            Log.Info("diag", $"radio: {(bt is null ? "<none>" : bt.State.ToString())}");
+        }
+        catch (Exception ex) { Log.Error("diag", "radio query failed", ex); }
+
+        try
+        {
+            var addr = ParseAddress(address);
+            Log.Info("diag", $"parsed address = 0x{addr:X12}");
+            using var dev = await BluetoothDevice.FromBluetoothAddressAsync(addr);
+            if (dev is null)
+            {
+                Log.Info("diag", "FromBluetoothAddressAsync: returned NULL (device not known to the system by address)");
+            }
+            else
+            {
+                var p = dev.DeviceInformation.Pairing;
+                Log.Info("diag", $"FromBluetoothAddressAsync: name='{dev.Name}' conn={dev.ConnectionStatus} " +
+                    $"IsPaired={p.IsPaired} CanPair={p.CanPair} kind={dev.DeviceInformation.Kind} id={dev.DeviceInformation.Id}");
+            }
+        }
+        catch (Exception ex) { Log.Error("diag", "FromBluetoothAddressAsync failed", ex); }
+
+        await DumpSelectorAsync("paired", BluetoothDevice.GetDeviceSelectorFromPairingState(true), digits);
+        await DumpSelectorAsync("unpaired", BluetoothDevice.GetDeviceSelectorFromPairingState(false), digits);
+        try { await DumpSelectorAsync("bt-classic-any", BluetoothDevice.GetDeviceSelector(), digits); }
+        catch (Exception ex) { Log.Warn("diag", $"bt-classic-any selector failed: {ex.Message}"); }
+
+        Log.Info("diag", $"BTHENUM HID node present for MAC: {HidNodePresent(digits)}");
+        Log.Info("diag", "===== end Diagnose =====");
+    }
+
+    private static async Task DumpSelectorAsync(string label, string selector, string digits)
+    {
+        try
+        {
+            var found = await DeviceInformation.FindAllAsync(selector);
+            Log.Info("diag", $"[{label}] {found.Count} device(s):");
+            foreach (var d in found)
+            {
+                var hit = StripSeparators(d.Id).Contains(digits, StringComparison.OrdinalIgnoreCase) ? "  <== TARGET" : "";
+                Log.Info("diag", $"  [{label}] name='{d.Name}' id={d.Id}{hit}");
+            }
+        }
+        catch (Exception ex) { Log.Error("diag", $"[{label}] enumerate failed", ex); }
     }
 
     // ---- Monitoring (best-effort; the engine also polls as a safety-net) ----

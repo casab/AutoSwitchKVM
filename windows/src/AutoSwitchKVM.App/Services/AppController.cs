@@ -236,6 +236,15 @@ public sealed class AppController
         catch (Exception ex) { Log.Error("bt", $"unpair {d.Name} failed", ex); }
     }
 
+    /// Dump a full Bluetooth diagnostic for this device to the log (radio, FromBluetoothAddress state,
+    /// paired/unpaired/all-Bluetooth device lists with the target marked, HID nodes).
+    public async Task DiagnoseAsync(BTDevice d)
+    {
+        Log.Info("action", $"diagnose {d.Name} ({d.Address})");
+        try { await _bt.DiagnoseAsync(d.Address); }
+        catch (Exception ex) { Log.Error("diag", "diagnose failed", ex); }
+    }
+
     public Task<IReadOnlyList<PairedDeviceInfo>> PairedDevicesAsync() => _bt.PairedDevicesAsync();
     public IReadOnlyList<UsbDeviceInfo> UsbSnapshot() => _usb.Snapshot();
 

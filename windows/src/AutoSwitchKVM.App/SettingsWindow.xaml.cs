@@ -243,12 +243,14 @@ public sealed partial class SettingsWindow : Window
             down.Click += (_, _) => MoveDevice(index, index + 1);
             var del = new Button { Content = "Delete" };
             del.Click += (_, _) => C.Mutate(cfg => cfg.Devices.RemoveAll(d => d.Id == device.Id), refreshMonitoring: true, reevaluate: true);
+            var diag = new Button { Content = "Diagnose" };
+            diag.Click += async (_, _) => await C.DiagnoseAsync(device);
 
             card.Children.Add(enabled);
             card.Children.Add(pairing);
             card.Children.Add(delay);
             card.Children.Add(Row(conn, disc, pair, unpair));   // connection actions
-            card.Children.Add(Row(up, down, del));              // list management
+            card.Children.Add(Row(up, down, del, diag));        // list management + diagnostics
 
             _devicesPanel.Children.Add(Card(card));
         }
