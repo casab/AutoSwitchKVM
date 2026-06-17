@@ -35,4 +35,14 @@
     <ProjectReference Include="..\AutoSwitchKVM.Core\AutoSwitchKVM.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Tray icons (monitor glyph matching the macOS menu-bar symbol) + state variants
+         (active/inactive/paused/off). Content so ms-appx:/// resolves them; Remove from the default
+         None glob first to avoid a duplicate-item error. -->
+    <None Remove="Assets\*.ico" />
+    <Content Include="Assets\*.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

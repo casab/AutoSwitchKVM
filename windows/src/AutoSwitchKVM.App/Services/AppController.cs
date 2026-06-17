@@ -172,6 +172,14 @@ public sealed class AppController
     public DeviceStatus StatusFor(BTDevice device) =>
         Engine.Statuses.TryGetValue(device.Id, out var s) ? s : DeviceStatus.Idle;
 
+    /// Tray icon file for the current state (mirrors the macOS menu-bar symbol set + StatusText
+    /// precedence): paused -> Bluetooth off -> this-PC-selected -> switched away.
+    public string TrayIconAsset =>
+        Config.Paused ? "tray-paused.ico"
+        : !Engine.BluetoothPowered ? "tray-off.ico"
+        : Engine.Selected ? "tray.ico"
+        : "tray-inactive.ico";
+
     // ---- Quick actions ----
 
     public Task ConnectAllAsync() { Log.Info("action", "connect all"); return Engine.ConnectAllNowAsync(); }

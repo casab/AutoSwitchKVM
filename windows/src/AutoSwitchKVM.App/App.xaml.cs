@@ -1,10 +1,13 @@
 using AutoSwitchKVM.App.Services;
+using AutoSwitchKVM.App.Support;
 using AutoSwitchKVM.Core;
 using H.NotifyIcon;
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace AutoSwitchKVM.App;
 
@@ -17,18 +20,23 @@ public partial class App : Application
 
     private TaskbarIcon? _trayIcon;
     private SettingsWindow? _settingsWindow;
+    private DispatcherQueue? _dispatcher;
+    private readonly Dictionary<string, ImageSource> _iconCache = new();
+    private string? _currentIconAsset;
 
     public App() => InitializeComponent();
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        _dispatcher = DispatcherQueue.GetForCurrentThread();
         Controller = new AppController();
         Controller.Start();
 
+        _currentIconAsset = Controller.TrayIconAsset;
         _trayIcon = new TaskbarIcon
         {
-            ToolTipText = "AutoSwitch KVM",
-            IconSource = new GeneratedIconSource { Text = "K", Foreground = new SolidColorBrush(Colors.White) },
+            ToolTipText = $"AutoSwitch KVM - {Controller.StatusText}",
+            IconSource = IconFor(_currentIconAsset),
             // Native Win32 popup menu: renders reliably (the XAML "SecondWindow" flyout showed a
             // blank box because the secondary window doesn't inherit the app theme).
             ContextMenuMode = ContextMenuMode.PopupMenu,
@@ -41,6 +49,19 @@ public partial class App : Application
         _trayIcon.DoubleClickCommand = new RelayCommand(ShowSettings);
         BuildTrayMenu(menu);   // populate up front so the popup has items on first open
         _trayIcon.ForceCreate();
+
+        // Swap the tray icon (and tooltip) to match state changes (active / inactive / paused / off).
+        Controller.StateChanged += () => _dispatcher?.TryEnqueue(UpdateTrayIcon);
+    }
+
+    private void UpdateTrayIcon()
+    {
+        if (_trayIcon is null) return;
+        _trayIcon.ToolTipText = $"AutoSwitch KVM - {Controller.StatusText}";
+        var asset = Controller.TrayIconAsset;
+        if (asset == _currentIconAsset) return;
+        _currentIconAsset = asset;
+        _trayIcon.IconSource = IconFor(asset);
     }
 
     private void BuildTrayMenu(MenuFlyout menu)
@@ -97,6 +118,22 @@ public partial class App : Application
         var exit = new MenuFlyoutItem { Text = "Exit" };
         exit.Click += (_, _) => ExitApp();
         menu.Items.Add(exit);
+    }
+
+    /// Cached tray icon (monitor glyph matching the macOS menu-bar symbol) for the given asset.
+    /// Falls back to a generated letter if the asset can't be loaded.
+    private ImageSource IconFor(string asset)
+    {
+        if (_iconCache.TryGetValue(asset, out var cached)) return cached;
+        ImageSource image;
+        try { image = new BitmapImage(new Uri($"ms-appx:///Assets/{asset}")); }
+        catch (Exception ex)
+        {
+            Log.Warn("app", $"tray icon '{asset}' load failed, using fallback: {ex.Message}");
+            image = new GeneratedIconSource { Text = "K", Foreground = new SolidColorBrush(Colors.White) };
+        }
+        _iconCache[asset] = image;
+        return image;
     }
 
     private void ShowSettings()
