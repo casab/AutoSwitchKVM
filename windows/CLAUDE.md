@@ -152,12 +152,14 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
 - **Serialize Bluetooth ops.** `WinRtBluetooth` guards pair/unpair with a `SemaphoreSlim` - without
   it, the auto-connect, the engine's retries, and manual test-connect run concurrent radio inquiries
   and produce `AuthenticationTimeout` churn (the "sometimes connects" instability seen on first run).
-- **Discover with `FindAllAsync`, NOT a plain `DeviceWatcher`.** `FindAllAsync(GetDeviceSelectorFromPairingState(false))`
-  reliably surfaces the unpaired endpoint when it's discoverable (matching Windows Settings). A
-  `DeviceWatcher` on the same selector did **not** report the device in testing (returned no match
-  even though the device was pairable) - a tried-and-reverted optimization. FindAllAsync can take
-  ~10-20s for the BR/EDR inquiry; the engine's per-call timeout bounds it and the `_opLock` prevents
-  overlapping inquiries.
+- **Do NOT run a discovery inquiry to pair - pair the resolved endpoint directly.** Diagnostics
+  proved `BluetoothDevice.FromBluetoothAddressAsync(addr)` returns the pairable AssociationEndpoint
+  **instantly** (~10ms, `CanPair=True`, same `Id` the inquiry would yield). `PairAsync` calls
+  `dev.DeviceInformation.Pairing.Custom.PairAsync(ConfirmOnly|...)` on it - no `FindAllAsync` /
+  `DeviceWatcher`. The `GetDeviceSelectorFromPairingState(false)` selector forces `IssueInquiry:=True`,
+  which blocks ~30s (and the engine's per-call timeout then cancelled it mid-pair) - that was the
+  whole cause of "auto never connects, manual-after-waiting does". Discovery (`FindAllAsync`) is only
+  used now by the "Diagnose" button, not the pairing path.
 - **Tray menu: use `ContextMenuMode.PopupMenu`.** The XAML `SecondWindow` flyout renders as a blank
   rectangle (the secondary window doesn't inherit the app theme); the native popup renders reliably.
 - **Size the Settings window** via `AppWindow.Resize` - a WinUI `Window` opens very large by default.

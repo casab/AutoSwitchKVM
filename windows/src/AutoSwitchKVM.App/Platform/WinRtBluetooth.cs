@@ -87,31 +87,26 @@ public sealed class WinRtBluetooth : IBluetoothController
         await _opLock.WaitAsync(ct);
         try
         {
-            var digits = Digits(address);
+            // FromBluetoothAddressAsync resolves the pairable AssociationEndpoint INSTANTLY (~10ms) -
+            // the exact same endpoint a 30s inquiry would "discover" (verified: identical Id, CanPair=
+            // True). So we pair it directly; no DeviceWatcher / FindAllAsync inquiry needed.
+            using var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
+            if (dev is null)
+                throw new BluetoothException($"{address}: device not known to the system (turn it on / bring it in range).");
 
-            // Idempotent: if already paired (== connected when in range), nothing to do. The engine
-            // calls pair() on every connect attempt, so this must not fail on an already-paired device.
-            try
+            var pairing = dev.DeviceInformation.Pairing;
+            Log.Info("bt", $"pair {address}: resolved '{dev.Name}' conn={dev.ConnectionStatus} " +
+                $"IsPaired={pairing.IsPaired} CanPair={pairing.CanPair}");
+
+            if (pairing.IsPaired)
             {
-                using var existing = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
-                if (existing?.DeviceInformation.Pairing.IsPaired == true)
-                {
-                    Log.Info("bt", $"pair {address}: already paired, skipping discovery");
-                    return;
-                }
+                Log.Info("bt", $"pair {address}: already paired");
+                return;
             }
-            catch { /* resolve failure -> attempt discovery + pair below */ }
 
-            // The cached device is NOT pairable; discover the freshly-enumerated unpaired endpoint.
-            Log.Info("bt", $"pair {address}: discovering unpaired endpoint...");
-            var di = await FindUnpairedEndpointAsync(digits, ct);
-            if (di is null)
-                throw new BluetoothException(
-                    $"{address} is not discoverable as an unpaired endpoint - free it from the other host / put it in pairing mode.");
+            var custom = pairing.Custom;
 
-            var custom = di.Pairing.Custom;
-
-            // Auto-accept the ConfirmOnly ceremony (a real .NET delegate; no PowerShell-style deadlock).
+            // Auto-accept the ceremony (a real .NET delegate; no PowerShell-style deadlock).
             TypedEventHandler<DeviceInformationCustomPairing, DevicePairingRequestedEventArgs> handler =
                 (_, e) =>
                 {
@@ -122,8 +117,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             custom.PairingRequested += handler;
             try
             {
-                // Accept the common HID ceremonies (the trackpad uses ConfirmOnly; the handler also
-                // handles ProvidePin). Do NOT gate on CanPair (it reads false yet pairing succeeds).
+                // The trackpad uses ConfirmOnly; accept the common HID ceremonies. Do NOT gate on CanPair.
                 const DevicePairingKinds kinds = DevicePairingKinds.ConfirmOnly
                     | DevicePairingKinds.ProvidePin
                     | DevicePairingKinds.ConfirmPinMatch
@@ -145,70 +139,6 @@ public sealed class WinRtBluetooth : IBluetoothController
         {
             _opLock.Release();
         }
-    }
-
-    /// Find the unpaired endpoint for a MAC. The slow part is that FindAllAsync waits the FULL BR/EDR
-    /// inquiry (~30s) even though the device is discoverable within a few seconds. To cut that latency
-    /// we run two things in parallel and take whichever finds the device first:
-    ///   - a DeviceWatcher, which fires Added the moment the device is discovered (fast path). We must
-    ///     NOT resolve on EnumerationCompleted - BR/EDR devices surface via Added during the ongoing
-    ///     inquiry, after the cached enumeration finishes (resolving there was the earlier bug).
-    ///   - FindAllAsync as a reliable fallback (returns after the inquiry).
-    /// Bounded by a timeout so it never hangs when the device truly isn't discoverable.
-    private async Task<DeviceInformation?> FindUnpairedEndpointAsync(string digits, CancellationToken ct, int timeoutSeconds = 40)
-    {
-        var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(false);
-        var tcs = new TaskCompletionSource<DeviceInformation?>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-        using var reg = timeoutCts.Token.Register(() => tcs.TrySetResult(null));
-
-        Log.Info("bt", $"discovery: watching unpaired selector for digits {digits}; selector={selector}");
-        var watcher = DeviceInformation.CreateWatcher(selector);
-        watcher.Added += (_, di) =>
-        {
-            Log.Info("bt", $"discovery watcher Added: name='{di.Name}' id={di.Id}");
-            if (StripSeparators(di.Id).Contains(digits, StringComparison.OrdinalIgnoreCase))
-            {
-                Log.Info("bt", "discovery watcher: MATCHED target");
-                tcs.TrySetResult(di);   // early-exit as soon as the target is discovered
-            }
-        };
-        watcher.EnumerationCompleted += (_, _) => Log.Info("bt", "discovery watcher: EnumerationCompleted (inquiry continues)");
-        watcher.Stopped += (_, _) => Log.Info("bt", "discovery watcher: Stopped");
-        watcher.Start();
-
-        // Parallel fallback: whichever (watcher Added / FindAllAsync) finds it first resolves.
-        _ = FallbackFindAllAsync(selector, digits, tcs, timeoutCts.Token);
-
-        try
-        {
-            var found = await tcs.Task;
-            Log.Info("bt", found is null ? "discovery: no match (timed out)" : $"discovery: matched {found.Id}");
-            return found;
-        }
-        finally
-        {
-            try { watcher.Stop(); } catch { /* ignore */ }
-        }
-    }
-
-    private static async Task FallbackFindAllAsync(
-        string selector, string digits, TaskCompletionSource<DeviceInformation?> tcs, CancellationToken ct)
-    {
-        try
-        {
-            var found = await DeviceInformation.FindAllAsync(selector).AsTask(ct);
-            Log.Info("bt", $"discovery FindAllAsync(unpaired): {found.Count} device(s)");
-            foreach (var d in found)
-                Log.Info("bt", $"  findall: name='{d.Name}' id={d.Id}");
-            var match = found.FirstOrDefault(d =>
-                StripSeparators(d.Id).Contains(digits, StringComparison.OrdinalIgnoreCase));
-            if (match != null) tcs.TrySetResult(match);
-        }
-        catch (OperationCanceledException) { /* timed out / cancelled - covered by watcher/timeout */ }
-        catch (Exception ex) { Log.Warn("bt", $"discovery FindAllAsync failed: {ex.Message}"); }
     }
 
     public async Task UnpairAsync(string address, CancellationToken ct = default)
