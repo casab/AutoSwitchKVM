@@ -11,8 +11,8 @@ feature parity to the macOS app: detect a USB "switcher source" appearing/disapp
 pair/connect (or unpair/disconnect) the configured Bluetooth devices, with the same model (profiles,
 per-device pairing management, timing, global shortcuts).
 
-Status: **M0 validated on real hardware; M1-M7 authored** (Core ported and unit-tested; platform
-layer, tray UI, and Settings built) - pending the first on-device build. The full milestone roadmap
+Status: **M0 validated on real hardware; M1-M7 implemented** (Core ported and unit-tested; platform
+layer, tray UI, and Settings built; WinUI app build verified) - pending on-device runtime handoff validation. The full milestone roadmap
 and per-component status live in `PLAN.md`; the proven prototype is `reference/Trackpad-AutoSwitch.ps1`
 (the Windows counterpart of the macOS Hammerspoon script).
 
@@ -20,14 +20,15 @@ and per-component status live in `PLAN.md`; the proven prototype is `reference/T
 
 Requires **Visual Studio 2022** (.NET Desktop workload + Windows App SDK C# templates) and the
 **.NET 8 SDK**. Open `AutoSwitchKVM.sln`, set **AutoSwitchKVM.App** as startup, platform **x64**, Run
-→ a tray icon appears; click it (or right-click → Open Settings) for the empty Settings window.
+→ a tray icon appears; click it (or right-click → Open Settings) for the full Settings window.
 
 - App is **unpackaged** (`WindowsPackageType=None`); the Windows App SDK bootstrapper auto-initializes.
 - NuGet versions in the `.csproj` files are a known-good baseline — bump if restore complains.
 
-**Do not attempt to compile the WinUI app in a non-Windows sandbox** — there's no Windows App SDK /
-WinUI there. Write carefully, review, and hand builds to a Windows machine. The **Core lib + tests
-are plain `net8.0`** and *can* be built/tested anywhere a .NET 8 SDK exists.
+**Compile the WinUI app only on Windows** — non-Windows sandboxes do not have the Windows App SDK /
+WinUI stack. The app build is now verified on Windows; if a running tray app locks the normal output
+DLLs, build to a clean output path or exit the tray app first. The **Core lib + tests are plain
+`net8.0`** and can be built/tested anywhere a .NET 8 SDK exists.
 
 ## Test
 
@@ -43,7 +44,7 @@ Unit coverage so far (mirrors the macOS suite):
 - `ModelsTests` - address digits, source display, DeviceStatus labels/equality, UsbDeviceInfo
   display, AppConfig defaults + `Normalized()`.
 - `ConfigTests` - defaults, save/load round-trip, default-on-missing, corrupt-file fallback,
-  camelCase JSON key parity with macOS, dock/paused persistence.
+  camelCase JSON key parity with macOS, dock/paused persistence, atomic/debounced writes, absent-vs-null hotkeys.
 - `ProfilesTests` - active-profile accessors, multi-profile round-trip, legacy single-source migration.
 - `SelectionEngineTests` (16) - the full engine state machine.
 - `SourceLearnerTests` - appear/disappear detection, steady-device ignore, cancel.
@@ -62,8 +63,8 @@ testability):
     `[JsonIgnore]` computed accessors onto the active profile (call sites stay simple).
   - `ConfigStore.cs` — JSON at `%LOCALAPPDATA%\AutoSwitchKVM\config.json`. **camelCase naming policy
     keeps JSON keys identical to the macOS app** for config parity. Default-on-missing comes free
-    from property initializers. (TODO M2: atomic+debounced write, absent-vs-null hotkey nuance, and
-    the legacy single-source migration the macOS `Codable` does.)
+    from property initializers; writes are atomic, app edits are debounced, legacy top-level
+    source/devices migrate to a Default profile, and absent hotkeys default while present-null means cleared.
   - `IUsbMonitor.cs`, `IBluetoothController.cs` — the platform seams (mirror the macOS protocols and
     `SPECIFICATION.md` §5). The Bluetooth interface's doc comments carry the exact Milestone 0 recipe.
   - `SourceLearner.cs` — **ported (Milestone 3)**; snapshot-diff Learn logic (baseline at Start,
@@ -82,7 +83,7 @@ testability):
     AppController state on open (status, profiles, device rows, quick actions, Settings, Exit). The
     rich-flyout-window approach was deliberately skipped (finicky/untestable blind); the menu covers
     the same surface reliably.
-  - `SettingsWindow.xaml(.cs)` — 5 tabs built in **code-behind** (avoids x:Bind compile surprises):
+  - `SettingsWindow.xaml(.cs)` — profile bar + 5 tabs built in **code-behind** (avoids x:Bind compile surprises):
     Source / Devices / General / Extras / Diagnostics. `RelayCommand.cs` is a minimal `ICommand`.
   - `Platform/PnpUsbMonitor.cs` — **implemented (Milestone 3)** via `System.Management`: Win32_PnPEntity
     enumeration + Win32_DeviceChangeEvent wakeups (debounced) + ~2s reconcile; emits on VID/PID-set
@@ -94,7 +95,7 @@ testability):
     General tab. (Note: namespaced under `Platform`, not `System`, to avoid clashing with `System.*`.)
   - `Platform/WinRtBluetooth.cs` — **implemented (Milestone 4)**: radio power, ConnectionStatus+HID
     `isConnected`, idempotent `pair` (discover endpoint + Custom.PairAsync ConfirmOnly auto-accept),
-    `unpair`, `connect`=ensure-paired, `disconnect`=no-op (Classic HID: release is unpair),
+    `unpair`=`BluetoothRemoveDevice` first + WinRT fallback, `connect`=ensure-paired, `disconnect`=no-op (Classic HID: release is unpair),
     paired-list, ConnectionStatusChanged monitoring. **Key mapping:** the engine's mid-connect
     `disconnect` is a deliberate no-op and `pair` is idempotent, so the shared connect/disconnect
     flow resolves correctly on Windows. Needs an on-device run to confirm vs the spikes.
@@ -117,7 +118,7 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   `endpoint.Pairing.Custom.PairAsync(DevicePairingKinds.ConfirmOnly)` with a `PairingRequested`
   handler that calls `args.Accept()`. **Do NOT gate on `CanPair`** (reads false yet pairing
   succeeds). ~14s typical.
-- **disconnect (= unpair)** = `Pairing.UnpairAsync()`. ~3s typical.
+- **disconnect (= unpair/release)** was first validated with `Pairing.UnpairAsync()` (~3s), but the app now uses Win32 `BluetoothRemoveDevice` first because it tears down the active link as well as the bond; WinRT `UnpairAsync()` is fallback.
 - **Authoritative paired check** = `FromBluetoothAddressAsync(...).DeviceInformation.Pairing.IsPaired`.
   Do NOT trust the `FindAll`-enumeration's `IsPaired` (reported false while connected).
 
@@ -173,5 +174,5 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
 
 - Touching the engine, config, or models → update/extend `tests/AutoSwitchKVM.Core.Tests`.
 - Adding a config field → rely on property initializers for default-on-missing; keep the JSON key in
-  sync with the macOS model. Add the absent-vs-null nuance when porting the full `ConfigStore` (M2).
+  sync with the macOS model. Preserve absent-vs-null semantics for nullable settings such as hotkeys.
 - Follow `PLAN.md` milestones; update its status markers as milestones land.

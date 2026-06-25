@@ -35,6 +35,11 @@ public sealed class AppController
         _usb = new PnpUsbMonitor(_dispatcher);   // marshal callbacks onto the UI thread
         _bt = new WinRtBluetooth(_dispatcher);
         Config = _store.Load();
+        if (EnsureWindowsPairingPolicy(Config))
+        {
+            _store.Save(Config);
+            Log.Info("app", "enabled ManagePairing for all Windows devices so switch-away can release bonds");
+        }
         Log.Info("app", $"config loaded from {_store.Path}: profile='{Config.ActiveProfileName}', " +
             $"source={(Config.Source is null ? "(none)" : Config.Source.DisplayVidPid)}, devices={Config.Devices.Count}, paused={Config.Paused}");
 
@@ -98,7 +103,7 @@ public sealed class AppController
         _toasts.Unregister();
         _usb.Stop();
         _bt.StopMonitoring();
-        Save();
+        _store.Save(Config);
     }
 
     // ---- System integration ----
@@ -124,7 +129,7 @@ public sealed class AppController
         StateChanged?.Invoke();
     }
 
-    public void SetHotkey(HotKeyAction action, KeyShortcut shortcut)
+    public void SetHotkey(HotKeyAction action, KeyShortcut? shortcut)
     {
         switch (action)
         {
@@ -196,12 +201,57 @@ public sealed class AppController
 
     public void SwitchProfile(Guid id)
     {
+        if (Config.ActiveProfileID == id || Config.Profiles.All(p => p.Id != id)) return;
         Config.ActiveProfileID = id;
         Log.Info("action", $"switch profile -> '{Config.ActiveProfileName}'");
         Save();
         Engine.RefreshMonitoring();
         _ = Engine.ReevaluateAsync();
         StateChanged?.Invoke();
+    }
+
+    public void AddProfile()
+    {
+        var profile = new Profile { Name = UniqueProfileName("Profile") };
+        Config.Profiles.Add(profile);
+        Config.ActiveProfileID = profile.Id;
+        Log.Info("action", $"add profile -> '{profile.Name}'");
+        Save();
+        Engine.RefreshMonitoring();
+        _ = Engine.ReevaluateAsync();
+        StateChanged?.Invoke();
+    }
+
+    public void RenameActiveProfile(string name)
+    {
+        var trimmed = name.Trim();
+        if (string.IsNullOrEmpty(trimmed)) return;
+        Config.ActiveProfileName = trimmed;
+        Log.Info("action", $"rename profile -> '{trimmed}'");
+        Save();
+        StateChanged?.Invoke();
+    }
+
+    public void DeleteActiveProfile()
+    {
+        if (Config.Profiles.Count <= 1) return;
+        var removed = Config.ActiveProfileID;
+        Config.Profiles.RemoveAll(p => p.Id == removed);
+        Config.ActiveProfileID = Config.Profiles[0].Id;
+        Log.Info("action", $"delete profile -> now '{Config.ActiveProfileName}'");
+        Save();
+        Engine.RefreshMonitoring();
+        _ = Engine.ReevaluateAsync();
+        StateChanged?.Invoke();
+    }
+
+    private string UniqueProfileName(string baseName)
+    {
+        var names = Config.Profiles.Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!names.Contains(baseName)) return baseName;
+        var n = 2;
+        while (names.Contains($"{baseName} {n}")) n++;
+        return $"{baseName} {n}";
     }
 
     // ---- Per-device test actions (Settings buttons) ----
@@ -264,6 +314,7 @@ public sealed class AppController
     public void Mutate(Action<AppConfig> change, bool refreshMonitoring = false, bool reevaluate = false)
     {
         change(Config);
+        EnsureWindowsPairingPolicy(Config);
         Save();
         if (refreshMonitoring) Engine.RefreshMonitoring();
         if (reevaluate) _ = Engine.ReevaluateAsync();
@@ -274,13 +325,27 @@ public sealed class AppController
     public void ReplaceConfig(AppConfig config)
     {
         Config = config.Normalized();
+        EnsureWindowsPairingPolicy(Config);
         Engine.Config = Config;
-        Save();
+        _store.Save(Config);
         Engine.RefreshMonitoring();
         _ = Engine.ReevaluateAsync();
         StateChanged?.Invoke();
     }
 
-    public void Save() => _store.Save(Config);
+    public void Save() => _store.SaveDebounced(Config);
+
+    private static bool EnsureWindowsPairingPolicy(AppConfig config)
+    {
+        var changed = false;
+        foreach (var device in config.Profiles.SelectMany(p => p.Devices))
+        {
+            if (device.ManagePairing) continue;
+            device.ManagePairing = true;
+            changed = true;
+        }
+        return changed;
+    }
+
     public string ConfigPath => _store.Path;
 }

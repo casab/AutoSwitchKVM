@@ -20,6 +20,7 @@ final class ConfigStoreTests: XCTestCase {
         store.saveNow()
 
         let reloaded = ConfigStore(directory: dir)
+        XCTAssertEqual(reloaded.config.schemaVersion, AppConfig.currentSchemaVersion)
         XCTAssertEqual(reloaded.config.source?.name, "Hub")
         XCTAssertEqual(reloaded.config.source?.productIDs, [0x0626, 0x0610])
         XCTAssertEqual(reloaded.config.devices.count, 1)

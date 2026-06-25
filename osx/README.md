@@ -153,7 +153,7 @@ swift test
 Or in Xcode (with `Package.swift` open): press ⌘U.
 
 `swift build` + `swift test` also run in CI on every push/PR via GitHub Actions
-(`.github/workflows/ci.yml`), alongside an advisory `swift-format` lint (config in `.swift-format`).
+(`.github/workflows/ci.yml`), alongside a blocking `swift-format` lint (config in `.swift-format`).
 
 ## Logs
 
@@ -184,7 +184,7 @@ logs**, where you can copy or export them to a file for sharing.
 
 ## Next steps
 
-See `IMPROVEMENTS.md` for the roadmap. Remaining: tightening concurrency to `complete` + a blocking
-lint gate, config schema versioning + an error banner, and Developer ID signing + notarization for
-distribution. (The robustness pass — power awareness, reliable connect, backoff, per-event debounce,
-disconnect notice — is done.)
+See `IMPROVEMENTS.md` for the roadmap. Remaining: Developer ID signing + notarization for
+distribution, lower-value polish, and the optional `blueutil` fallback. (The robustness and
+engineering-quality passes — power awareness, reliable connect, backoff, per-event debounce,
+disconnect notice, schema versioning, error banner, and blocking lint — are done.)

@@ -18,6 +18,7 @@ final class ProfilesTests: XCTestCase {
             """.data(using: .utf8)!
 
         let cfg = try JSONDecoder().decode(AppConfig.self, from: json)
+        XCTAssertEqual(cfg.schemaVersion, AppConfig.currentSchemaVersion)
         XCTAssertEqual(cfg.profiles.count, 1)
         XCTAssertEqual(cfg.profiles.first?.name, "Default")
         XCTAssertEqual(cfg.source?.name, "Old KVM")

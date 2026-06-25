@@ -27,6 +27,9 @@ public class ConfigTests
         Assert.Equal(2, cfg.ConnectRetrySecs);
         Assert.Equal(45, cfg.BtCallTimeoutSecs); // headroom for the Windows discovery inquiry
         Assert.False(cfg.GlobalHotkeysEnabled);
+        Assert.Equal("Ctrl+Alt+P", cfg.HotkeyPause?.Display);
+        Assert.Equal("Ctrl+Alt+C", cfg.HotkeyConnectAll?.Display);
+        Assert.Equal("Ctrl+Alt+D", cfg.HotkeyDisconnectAll?.Display);
         Assert.False(cfg.Paused);
     }
 
@@ -115,6 +118,48 @@ public class ConfigTests
             {
                 Assert.Contains(key, json);
             }
+        }
+        finally { Cleanup(tmp); }
+    }
+
+    [Fact]
+    public void Hotkey_absent_defaults_but_present_null_stays_cleared()
+    {
+        var missing = ConfigStore.FromJson("""
+        { "profiles": [{ "name": "Default" }] }
+        """).Normalized();
+        Assert.Equal("Ctrl+Alt+P", missing.HotkeyPause?.Display);
+        Assert.Equal("Ctrl+Alt+C", missing.HotkeyConnectAll?.Display);
+        Assert.Equal("Ctrl+Alt+D", missing.HotkeyDisconnectAll?.Display);
+
+        var cleared = ConfigStore.FromJson("""
+        {
+          "profiles": [{ "name": "Default" }],
+          "hotkeyPause": null,
+          "hotkeyConnectAll": null,
+          "hotkeyDisconnectAll": null
+        }
+        """).Normalized();
+        Assert.Null(cleared.HotkeyPause);
+        Assert.Null(cleared.HotkeyConnectAll);
+        Assert.Null(cleared.HotkeyDisconnectAll);
+    }
+
+    [Fact]
+    public async Task Debounced_save_writes_latest_config()
+    {
+        var tmp = TempPath();
+        try
+        {
+            var store = new ConfigStore(tmp);
+            var cfg = AppConfig.Default();
+            cfg.Paused = false;
+            store.SaveDebounced(cfg, delayMs: 100);
+            cfg.Paused = true;
+            store.SaveDebounced(cfg, delayMs: 100);
+
+            await Task.Delay(250);
+            Assert.True(new ConfigStore(tmp).Load().Paused);
         }
         finally { Cleanup(tmp); }
     }

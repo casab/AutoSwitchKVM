@@ -78,6 +78,9 @@ struct Profile: Codable, Identifiable, Hashable {
 /// plus app-wide options. `source` / `devices` are computed accessors onto the active profile so
 /// existing call sites stay simple.
 struct AppConfig: Codable {
+    static let currentSchemaVersion = 1
+
+    var schemaVersion: Int
     var profiles: [Profile]
     var activeProfileID: UUID
 
@@ -105,6 +108,7 @@ struct AppConfig: Codable {
     var hotkeyDisconnectAll: KeyShortcut?
 
     init(
+        schemaVersion: Int = AppConfig.currentSchemaVersion,
         profiles: [Profile] = [Profile(name: "Default")],
         activeProfileID: UUID? = nil,
         debounceMs: Int = 1200,
@@ -123,6 +127,7 @@ struct AppConfig: Codable {
         hotkeyDisconnectAll: KeyShortcut? = .defaultDisconnectAll
     ) {
         let list = profiles.isEmpty ? [Profile(name: "Default")] : profiles
+        self.schemaVersion = schemaVersion
         self.profiles = list
         self.activeProfileID =
             (activeProfileID.flatMap { id in list.contains { $0.id == id } ? id : nil }) ?? list[0].id
@@ -169,7 +174,7 @@ struct AppConfig: Codable {
     // MARK: Codable — custom, to migrate legacy single-source configs into a "Default" profile.
 
     enum CodingKeys: String, CodingKey {
-        case profiles, activeProfileID
+        case schemaVersion, profiles, activeProfileID
         case debounceMs, arrivalDebounceMs, connectRetryMax, connectRetrySecs, btCallTimeoutSecs
         case showNotifications, notifyUnexpectedDisconnect, launchAtLogin, paused, dockAutoHide
         case globalHotkeysEnabled, hotkeyPause, hotkeyConnectAll, hotkeyDisconnectAll
@@ -178,6 +183,7 @@ struct AppConfig: Codable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? AppConfig.currentSchemaVersion
         debounceMs = try c.decodeIfPresent(Int.self, forKey: .debounceMs) ?? 1200
         arrivalDebounceMs = try c.decodeIfPresent(Int.self, forKey: .arrivalDebounceMs) ?? 400
         connectRetryMax = try c.decodeIfPresent(Int.self, forKey: .connectRetryMax) ?? 6
@@ -213,6 +219,7 @@ struct AppConfig: Codable {
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
         try c.encode(profiles, forKey: .profiles)
         try c.encode(activeProfileID, forKey: .activeProfileID)
         try c.encode(debounceMs, forKey: .debounceMs)

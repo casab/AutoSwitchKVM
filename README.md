@@ -14,7 +14,7 @@ code, UI, and Bluetooth/USB APIs.
 | Platform | Folder | Status |
 |----------|--------|--------|
 | macOS    | [`osx/`](osx/) | **Stable** — menu bar app (SwiftUI), profiles, Learn-source, reliable handoff, global shortcuts, diagnostics. See [`osx/README.md`](osx/README.md). |
-| Windows  | [`windows/`](windows/) | **In progress** — C#/.NET 8 + WinUI 3. Bluetooth/USB validated on hardware (M0); Core (models, config, engine, source-learner) ported + unit-tested; platform layer (USB monitor, WinRT Bluetooth, hotkeys, power, login item, toasts), tray UI, and Settings authored (M1–M7). Pending first on-device build. See [`windows/README.md`](windows/README.md). |
+| Windows  | [`windows/`](windows/) | **In progress** — C#/.NET 8 + WinUI 3. Bluetooth/USB validated on hardware (M0); Core ported + unit-tested; platform layer, tray UI, and Settings implemented; WinUI app builds cleanly. Pending on-device runtime handoff validation. See [`windows/README.md`](windows/README.md). |
 | Linux    | —      | Future; not a current focus. |
 
 ## How it works (shared concept)
@@ -36,7 +36,7 @@ full, platform-neutral behavior contract is in [`SPECIFICATION.md`](SPECIFICATIO
 ```
 osx/        macOS app — sources, build files, tests, and macOS-specific docs (PLAN, IMPROVEMENTS, CLAUDE)
 windows/    Windows app (C#/.NET 8 + WinUI 3) — sources, tests, spikes, and Windows-specific docs
-.github/    CI workflows (macOS: swift build/test + lint; Windows: dotnet test on the Core library)
+.github/    CI workflows (macOS: swift build/test + lint; Windows: dotnet test Core + build WinUI app)
 README.md         This overview
 SPECIFICATION.md  Platform-neutral behavior contract (what every port must do)
 CLAUDE.md         General guidance for working in this repo

@@ -44,8 +44,8 @@ windows/
 ```
 
 CI: **added** - a `windows-latest` job in `.github/workflows/ci.yml` runs `dotnet test` on
-`AutoSwitchKVM.Core.Tests` (alongside the macOS swift build/test + lint jobs). The WinUI app is
-validated on-device, not in CI.
+`AutoSwitchKVM.Core.Tests` and builds `AutoSwitchKVM.App` (alongside the macOS swift build/test +
+blocking lint jobs). Runtime Bluetooth/USB behavior is still validated on-device.
 
 ## Component mapping (macOS → Windows)
 
@@ -54,9 +54,9 @@ validated on-device, not in CI.
 | `SelectionEngine` (Swift) | `SelectionEngine` (C#) | Port logic ~1:1; `async`/`await`; marshal to UI thread via `DispatcherQueue` |
 | `Models` + `ConfigStore` | same, `System.Text.Json` | Keep identical JSON keys; custom converters for default-on-missing + legacy migration |
 | `USBMonitor` (IOKit) | `PnpUsbMonitor` | `Windows.Devices.Enumeration.DeviceWatcher` (USB selector) or CfgMgr32 `CM_Register_Notification`; parse `USB\VID_xxxx&PID_xxxx`; + ~2 s reconcile timer |
-| `IOBluetoothController` | `WinRtBluetooth` | `DeviceInformation.Pairing` (`Custom.PairAsync`/`UnpairAsync`); see discrepancies |
+| `IOBluetoothController` | `WinRtBluetooth` | WinRT custom pairing + Win32 `BluetoothRemoveDevice` for release; see discrepancies |
 | `HotKeyManager` (Carbon) | `HotKeyService` | Win32 `RegisterHotKey` + hidden `HWND` `WM_HOTKEY` loop |
-| `Notifier` (UNUserNotification) | `ToastNotifier` | `Microsoft.Windows.AppNotifications` or `Windows.UI.Notifications`; needs an AppUserModelID + Start shortcut when unpackaged |
+| `Notifier` (UNUserNotification) | `ToastNotifier` | `Microsoft.Windows.AppNotifications`; `Register()` handles unpackaged COM registration, but toast display still needs on-device verification |
 | `SleepWakeMonitor` (NSWorkspace) | `PowerMonitor` | `Microsoft.Win32.SystemEvents.PowerModeChanged` (Suspend/Resume) |
 | `LoginItem` (SMAppService) | `LoginItem` | `HKCU\…\Run` value (or a logon scheduled task) |
 | `DockManager` (Extra) | — | macOS-only; Windows Extras tab empty for now |
@@ -89,8 +89,9 @@ validated on-device, not in CI.
 8. **Global hotkeys differ.** Defaults can't be ⌃⌥⌘ (no Command on Windows). Use e.g.
    `Ctrl+Alt+P/C/D`; the `KeyShortcut` model carries Windows modifier flags + display string.
    `RegisterHotKey` needs a message-pump window; avoid OS-reserved combos.
-9. **Toasts when unpackaged.** Must register an AppUserModelID and a Start-menu shortcut, or toasts
-   silently don't appear. Build this into first run.
+9. **Toasts when unpackaged.** Use Windows App SDK `AppNotificationManager.Register()` so the
+   calling process is registered as the unpackaged COM server. Verify display on-device; app
+   notifications are not supported for elevated/admin runs.
 10. **Addresses.** Windows uses a 64-bit Bluetooth address; store the MAC string in config and
     convert at the API boundary.
 11. **Config location.** `%LOCALAPPDATA%\AutoSwitchKVM\config.json` (vs macOS Application Support).
@@ -101,11 +102,11 @@ validated on-device, not in CI.
    **unpair**, **connection detection** (ConnectionStatus / HID nodes), and **radio power**; confirm
    the pair=connect / unpair=disconnect model and the `PID_0626` source signal. Settle the
    `IBluetoothController` shape here.
-1. **Scaffold. [DONE - authored, pending first Windows build]** `.sln` with Core lib (models +
-   ConfigStore + USB/BT interfaces), WinUI 3 unpackaged app (H.NotifyIcon tray + empty 5-tab settings
-   window), platform stubs (WinRtBluetooth/PnpUsbMonitor), xUnit project (config tests + fakes).
-   See windows/README.md "Build & run".
-2. **Core: models + config + engine. [SelectionEngine + tests DONE; ConfigStore back-compat TODO]**
+1. **Scaffold. [DONE - Windows build verified]** `.sln` with Core lib (models + ConfigStore +
+   USB/BT interfaces), WinUI 3 unpackaged app (H.NotifyIcon tray + Settings), platform services
+   (WinRtBluetooth/PnpUsbMonitor), and xUnit project (config tests + fakes). `Release|x64` app
+   build verified on Windows on 2026-06-25; runtime hardware validation remains separate.
+2. **Core: models + config + engine. [DONE]**
    `Models` and a basic `ConfigStore` landed in M1. `SelectionEngine` is now ported 1:1 (presence +
    automationActed latch, arrival/departure debounce, runToken cancellation, busyDevices,
    clean-connect-only + managePairing pair->drop->settle->connect, capped exponential backoff,
@@ -114,8 +115,9 @@ validated on-device, not in CI.
    the macOS suite (16 cases) using `Fake{Usb,Bluetooth}`. `ConfigStore` now also does **legacy
    single-source migration** (top-level source/devices -> a "Default" profile), covered by
    `ProfilesTests`. Full unit coverage for M1-M3 lives in `ModelsTests`, `ConfigTests`,
-   `ProfilesTests`, `SelectionEngineTests`, `SourceLearnerTests` (38 tests). **Still TODO:**
-   `ConfigStore` atomic+debounced write and the absent-vs-null hotkey distinction.
+   `ProfilesTests`, `SelectionEngineTests`, `SourceLearnerTests` (40 tests). `ConfigStore` now writes
+   atomically, exposes debounced saves for UI edits, migrates legacy single-source configs, and
+   preserves the absent-vs-present-null hotkey distinction.
 3. **USB monitor + Learn source. [DONE - PnpUsbMonitor + SourceLearner authored; on-device wiring at M6]**
    Spike 3 (`spikes/Spike3-Usb.ps1`) validated detection on the real KVM: VID_05E3 PID_0626 toggles
    with the switch while PID_0610 stays; `Win32_DeviceChangeEvent` fires reliably (~113 events / 60s
@@ -124,35 +126,37 @@ validated on-device, not in CI.
    wakeups (debounced) + ~2s reconcile, emitting a snapshot only on VID/PID-set change, marshaled to
    the captured SynchronizationContext. `SourceLearner` is ported to Core (snapshot-diff, tested with
    FakeUsbMonitor).
-4. **Bluetooth controller. [DONE - authored, pending on-device run]** `WinRtBluetooth` implements the
+4. **Bluetooth controller. [DONE - pending on-device runtime run]** `WinRtBluetooth` implements the
    contract per the Milestone 0 recipe: radio power (`Radio.State`), `isConnected` (ConnectionStatus +
-   BTHENUM HID node), idempotent `pair` (discover unpaired endpoint -> `Custom.PairAsync(ConfirmOnly)`
-   auto-accept), `unpair` (`UnpairAsync`), `connect` = ensure-paired, `disconnect` = no-op for
-   Classic HID (release is unpair), paired-list, and `ConnectionStatusChanged` monitoring marshaled
-   to the captured SynchronizationContext. Needs a Windows build + the trackpad to confirm the
-   translation matches the spikes.
-5. **UI parity. [DONE - authored, pending on-device build]** `AppController` coordinator wires
+   BTHENUM HID node), idempotent `pair` (`FromBluetoothAddressAsync` ->
+   `Custom.PairAsync(ConfirmOnly|...)` auto-accept), `unpair` (Win32 `BluetoothRemoveDevice` first,
+   WinRT `UnpairAsync` fallback), `connect` = ensure-paired, `disconnect` = no-op for Classic HID
+   (release is unpair), paired-list, and `ConnectionStatusChanged` monitoring marshaled to the
+   captured SynchronizationContext. Needs the trackpad/KVM runtime pass to confirm the translation
+   matches the spikes.
+5. **UI parity. [DONE - builds, pending on-device runtime run]** `AppController` coordinator wires
    config + engine + USB monitor + Bluetooth controller (load, start, seed, periodic poll marshaled
    via DispatcherQueue) and exposes state + actions; `DebugLog` buffer added. The tray uses a
    **dynamic context menu** rebuilt from live state (status header, profile radio items, device rows
    with status that toggle connect/disconnect, Connect/Disconnect all, Pause, Settings, Exit) -
    chosen over a custom borderless flyout window (finicky and untestable blind). `SettingsWindow`
    has the five tabs built in code-behind: Source (display + manual edit + Learn), Devices
-   (enable/managePairing/delay/reorder/delete/test/add-from-paired), General (timing + behavior +
-   import/export), Extras (note), Diagnostics (live USB/BT state + debug log). The **shortcut
-   recorder is deferred to Milestone 6** (with the hotkey service). Needs a Windows build to shake
-   out WinUI specifics.
-6. **System integration. [DONE - authored, pending on-device build]** `LoginItem` (HKCU Run key),
+   (enable/required-managePairing/delay/reorder/delete/test/add-from-paired), General (timing +
+   behavior + shortcut recorder + import/export), Extras (note), Diagnostics (live USB/BT state +
+   debug log), plus a profile bar for switch/add/rename/delete. Build verified; hardware behavior
+   still needs the on-device runtime pass.
+6. **System integration. [DONE - builds, pending on-device runtime run]** `LoginItem` (HKCU Run key),
    `PowerMonitor` (SystemEvents.PowerModeChanged: suspend->disconnect all, resume->reconcile,
    marshaled to UI), `HotKeyService` (Win32 RegisterHotKey on a message-only window + WndProc;
    defaults Ctrl+Alt+P/C/D), `ToastNotifier` (AppNotificationManager unpackaged Register). All wired
    into AppController; the shortcut recorder is in the General tab (ContentDialog + InputKeyboardSource
-   modifier read). **Caveat:** unpackaged toasts may also need a Start-menu shortcut carrying an AUMID
-   on some Win10/11 builds - verify on-device and create it on first run if so.
+   modifier read). **Caveat:** app notifications are registered through Windows App SDK
+   `AppNotificationManager.Register()` for unpackaged apps, but toast display still needs on-device
+   verification (and will not show for elevated/admin runs).
 7. **Diagnostics + logging. [DONE]** `DebugLog` buffer + the Diagnostics tab (live USB/BT state,
    per-device status, debug log with copy/clear) landed with Milestone 5.
-8. **Distribution (later).** Code-sign the unpackaged `.exe`; optional MSIX; extend CI to also
-   build/package the WinUI app (the `windows-latest` Core-test job already exists).
+8. **Distribution (later).** Code-sign the unpackaged `.exe`; optional MSIX; CI now builds the
+   WinUI app, but release packaging/signing is still future work.
 
 ## Milestone 0 — spike findings
 
@@ -191,8 +195,10 @@ Implementation notes:
 **Spike 2 (pairing ceremony, `spikes/Spike2-Pairing.ps1`) — DONE. Native WinRT does the full handoff
 headlessly; no PolarGoose CLI needed.** Validated on the real trackpad:
 
-- **Unpair** = `Pairing.UnpairAsync()` → `Unpaired` in ~3.2s; afterwards `conn=Disconnected`,
-  `IsPaired=False`, HID node gone. This is the switch-away action (`disconnect` ≡ unpair).
+- **Unpair / release** initially validated with `Pairing.UnpairAsync()` (`Unpaired` in ~3.2s,
+  afterwards `conn=Disconnected`, `IsPaired=False`, HID node gone). Later diagnostics showed WinRT
+  unpair can leave the active radio link attached, so the app now calls Win32 `BluetoothRemoveDevice`
+  first and keeps `UnpairAsync` as fallback.
 - **Pair** = custom **ConfirmOnly** ceremony, NOT basic pairing. Sequence that works:
   1. Discover the *unpaired* association endpoint: `FindAllAsync(GetDeviceSelectorFromPairingState($false))`,
      match the target by MAC — the endpoint `Id` carries the MAC **with colons**
@@ -222,15 +228,15 @@ validated on-device, like the macOS Bluetooth layer.
 
 ## Open questions / risks
 
-- WinUI 3 tray approach (`H.NotifyIcon` vs raw `Shell_NotifyIcon`).
+- ~~WinUI 3 tray approach (`H.NotifyIcon` vs raw `Shell_NotifyIcon`).~~ **Settled:** H.NotifyIcon native popup menu builds and renders reliably enough for the tray surface.
 - Reliability of WinRT custom pairing for Classic-HID across the handoff (the spike answers this; the
   PolarGoose CLI remains a documented fallback behind `IBluetoothController`, mirroring the macOS
   native-with-blueutil-fallback design).
 - ~~Whether `DeviceWatcher` reports the KVM hub add/remove reliably~~ **Settled (Spike 3):**
   `Win32_DeviceChangeEvent` (WMI) fires reliably as a wakeup; `PnpUsbMonitor` uses it + a ~2s
   reconcile. CfgMgr32 remains a possible later optimization if WMI enumeration cost matters.
-- Unpackaged toast registration on Windows 10 vs 11: `AppNotificationManager.Register()` is wired,
-  but some builds also need a Start-menu shortcut with an AUMID for toasts to surface - confirm on-device.
+- Unpackaged toast display on Windows 10 vs 11: `AppNotificationManager.Register()` is wired for
+  unpackaged COM registration; confirm on-device, especially non-elevated vs elevated runs.
 - **USB source detection is VID/PID-set coarse (known limitation).** `selected` = any matching VID/PID
   present; there's no instance-group scoping to a specific physical hub (the PowerShell prototype had
   it). Works as long as the source keys on the *disappearing* PID (e.g. `0626`); but an always-on PID

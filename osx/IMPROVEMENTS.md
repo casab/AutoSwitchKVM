@@ -13,13 +13,6 @@ This document tracks what's still **outstanding**; completed items are pruned fr
 
 ## 1. Engineering quality
 
-- **Make lint a hard gate.** The CI lint job is advisory (`continue-on-error`) and `swift-format`
-  runs `--strict`; once a clean local `swift-format lint` is confirmed, flip it to blocking
-  (`continue-on-error: false` in `.github/workflows/ci.yml`).
-- **Config migration/versioning.** Add a `schemaVersion` to `AppConfig` so future shape changes
-  decode old files gracefully instead of resetting to defaults.
-- **Error surfacing.** Promote `.error` statuses into a visible, dismissible banner in Settings,
-  not just a log line.
 - **Optional: full module split.** The logic currently lives in the app target and is tested via
   `@testable import`. If a hard boundary is ever wanted, extract an `AutoSwitchKVMCore` library
   target (requires making the used types `public`).
@@ -67,14 +60,13 @@ Lower value / nice-to-have:
 ## 5. Suggested order of work
 
 Done so far: self-signing (ad-hoc), app icon / asset catalog, engineering hygiene (`os.Logger`
-logging + exportable Diagnostics log, GitHub Actions CI, `swift-format` config,
-`-strict-concurrency=complete`), config import/export, named profiles, per-device connect
-order/delay, user-assignable global keyboard shortcuts (off by default), and **the full robustness pass**
-(§2: power awareness, robust pairing, reliable synchronous connect, backoff, per-event debounce,
-disconnect notice).
+logging + exportable Diagnostics log, GitHub Actions CI with blocking `swift-format`,
+`-strict-concurrency=complete`), config import/export, config `schemaVersion`, visible Settings
+error banner for engine errors, named profiles, per-device connect order/delay, user-assignable
+global keyboard shortcuts (off by default), and **the full robustness pass** (§2: power awareness,
+robust pairing, reliable synchronous connect, backoff, per-event debounce, disconnect notice).
 
 Remaining:
-1. Flip the lint gate to blocking (concurrency is already at `complete` and clean).
-2. Config schema versioning + error-surfacing banner (engineering quality, §1).
-3. Developer ID signing + notarization when ready to distribute the `.app`.
-4. Lower-value polish (icon badge, sounds) and the optional `blueutil` fallback.
+1. Developer ID signing + notarization when ready to distribute the `.app`.
+2. Lower-value polish (icon badge, sounds) and the optional `blueutil` fallback.
+3. Optional full module split if a harder app/core boundary is ever worth the churn.

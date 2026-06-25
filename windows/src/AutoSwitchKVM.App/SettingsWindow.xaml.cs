@@ -38,11 +38,26 @@ public sealed partial class SettingsWindow : Window
     // General tab - shortcut combo labels (updated after record/restore)
     private readonly Dictionary<HotKeyAction, TextBlock> _shortcutLabels = new();
 
+    // Profile bar
+    private ComboBox _profileCombo = null!;
+    private TextBox _profileName = null!;
+    private bool _refreshingProfiles;
+
+    private sealed class ProfileItem
+    {
+        public Guid Id { get; init; }
+        public string Name { get; init; } = "";
+        public override string ToString() => Name;
+    }
+
     public SettingsWindow()
     {
         InitializeComponent();
         Title = "AutoSwitch KVM - Settings";
         try { AppWindow.Resize(new Windows.Graphics.SizeInt32(720, 640)); } catch { /* sizing is best-effort */ }
+
+        var shell = new StackPanel { Spacing = 0 };
+        shell.Children.Add(BuildProfilesBar());
 
         var tabs = new TabView { IsAddTabButtonVisible = false, CanReorderTabs = false, CanDragTabs = false };
         tabs.TabItems.Add(new TabViewItem { Header = "Source", IsClosable = false, Content = BuildSourceTab() });
@@ -50,7 +65,8 @@ public sealed partial class SettingsWindow : Window
         tabs.TabItems.Add(new TabViewItem { Header = "General", IsClosable = false, Content = BuildGeneralTab() });
         tabs.TabItems.Add(new TabViewItem { Header = "Extras", IsClosable = false, Content = BuildExtrasTab() });
         tabs.TabItems.Add(new TabViewItem { Header = "Diagnostics", IsClosable = false, Content = BuildDiagnosticsTab() });
-        Root.Children.Add(tabs);
+        shell.Children.Add(tabs);
+        Root.Children.Add(shell);
 
         C.StateChanged += OnStateChanged;
         Log.Changed += OnLogChanged;
@@ -63,8 +79,10 @@ public sealed partial class SettingsWindow : Window
 
     private void OnStateChanged() => DispatcherQueue.TryEnqueue(() =>
     {
+        RefreshProfiles();
         RefreshSource();
         RefreshDevices();
+        RefreshShortcutLabels();
         RefreshDiagnostics();
     });
 
@@ -72,6 +90,76 @@ public sealed partial class SettingsWindow : Window
     {
         if (_logBox != null) _logBox.Text = Log.PlainText();
     });
+
+    // ===================== Profiles =====================
+
+    private UIElement BuildProfilesBar()
+    {
+        var panel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Margin = new Thickness(16, 12, 16, 4),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Profile",
+            VerticalAlignment = VerticalAlignment.Center,
+            FontWeight = FontWeights.SemiBold,
+        });
+
+        _profileCombo = new ComboBox { Width = 190 };
+        _profileCombo.SelectionChanged += (_, _) =>
+        {
+            if (_refreshingProfiles) return;
+            if (_profileCombo.SelectedItem is ProfileItem item) C.SwitchProfile(item.Id);
+        };
+        panel.Children.Add(_profileCombo);
+
+        _profileName = new TextBox { Width = 180, PlaceholderText = "Profile name" };
+        panel.Children.Add(_profileName);
+
+        var rename = new Button { Content = "Rename" };
+        rename.Click += (_, _) => C.RenameActiveProfile(_profileName.Text);
+        var add = new Button { Content = "Add" };
+        add.Click += (_, _) => C.AddProfile();
+        var delete = new Button { Content = "Delete" };
+        delete.Click += (_, _) => C.DeleteActiveProfile();
+        panel.Children.Add(rename);
+        panel.Children.Add(add);
+        panel.Children.Add(delete);
+
+        RefreshProfiles();
+        return panel;
+    }
+
+    private void RefreshProfiles()
+    {
+        if (_profileCombo is null || _profileName is null) return;
+        _refreshingProfiles = true;
+        try
+        {
+            _profileCombo.Items.Clear();
+            foreach (var p in C.Config.Profiles)
+                _profileCombo.Items.Add(new ProfileItem { Id = p.Id, Name = p.Name });
+
+            for (var i = 0; i < _profileCombo.Items.Count; i++)
+            {
+                if (_profileCombo.Items[i] is ProfileItem item && item.Id == C.Config.ActiveProfileID)
+                {
+                    _profileCombo.SelectedIndex = i;
+                    break;
+                }
+            }
+            _profileName.Text = C.Config.ActiveProfileName;
+        }
+        finally
+        {
+            _refreshingProfiles = false;
+        }
+    }
 
     // ===================== Source =====================
 
@@ -94,7 +182,15 @@ public sealed partial class SettingsWindow : Window
         save.Click += (_, _) => SaveSource();
         var learn = new Button { Content = "Learn source..." };
         learn.Click += async (_, _) => await LearnSourceAsync();
-        panel.Children.Add(Row(save, learn));
+        var clear = new Button { Content = "Clear source" };
+        clear.Click += (_, _) =>
+        {
+            _srcName.Text = "";
+            _srcVendor.Text = "";
+            _srcPids.Text = "";
+            C.Mutate(cfg => cfg.Source = null, refreshMonitoring: true, reevaluate: true);
+        };
+        panel.Children.Add(Row(save, learn, clear));
 
         RefreshSource();
         return new ScrollViewer { Content = panel };
@@ -211,8 +307,12 @@ public sealed partial class SettingsWindow : Window
             var enabled = new ToggleSwitch { Header = "Enabled", IsOn = device.Enabled };
             enabled.Toggled += (_, _) => C.Mutate(_ => device.Enabled = enabled.IsOn, reevaluate: true);
 
-            var pairing = new CheckBox { Content = "Manage pairing (pair on connect / unpair on disconnect)", IsChecked = device.ManagePairing };
-            pairing.Click += (_, _) => C.Mutate(_ => device.ManagePairing = pairing.IsChecked == true);
+            var pairing = new CheckBox
+            {
+                Content = "Manage pairing (required on Windows to release Classic HID devices)",
+                IsChecked = true,
+                IsEnabled = false,
+            };
 
             var delay = new NumberBox
             {
@@ -334,16 +434,14 @@ public sealed partial class SettingsWindow : Window
 
         panel.Children.Add(Header("Global shortcuts"));
         panel.Children.Add(ToggleRow("Enable global shortcuts", C.Config.GlobalHotkeysEnabled, on => C.SetGlobalHotkeysEnabled(on)));
-        panel.Children.Add(ShortcutRow("Pause", HotKeyAction.TogglePause, C.Config.HotkeyPause ?? HotKeyService.DefaultPause));
-        panel.Children.Add(ShortcutRow("Connect all", HotKeyAction.ConnectAll, C.Config.HotkeyConnectAll ?? HotKeyService.DefaultConnectAll));
-        panel.Children.Add(ShortcutRow("Disconnect all", HotKeyAction.DisconnectAll, C.Config.HotkeyDisconnectAll ?? HotKeyService.DefaultDisconnectAll));
+        panel.Children.Add(ShortcutRow("Pause", HotKeyAction.TogglePause, C.Config.HotkeyPause));
+        panel.Children.Add(ShortcutRow("Connect all", HotKeyAction.ConnectAll, C.Config.HotkeyConnectAll));
+        panel.Children.Add(ShortcutRow("Disconnect all", HotKeyAction.DisconnectAll, C.Config.HotkeyDisconnectAll));
         var restore = new Button { Content = "Restore default shortcuts" };
         restore.Click += (_, _) =>
         {
             C.RestoreDefaultHotkeys();
-            UpdateShortcutLabel(HotKeyAction.TogglePause, "Pause", HotKeyService.DefaultPause);
-            UpdateShortcutLabel(HotKeyAction.ConnectAll, "Connect all", HotKeyService.DefaultConnectAll);
-            UpdateShortcutLabel(HotKeyAction.DisconnectAll, "Disconnect all", HotKeyService.DefaultDisconnectAll);
+            RefreshShortcutLabels();
         };
         panel.Children.Add(restore);
 
@@ -509,11 +607,11 @@ public sealed partial class SettingsWindow : Window
         return wrap;
     }
 
-    private UIElement ShortcutRow(string label, HotKeyAction action, KeyShortcut current)
+    private UIElement ShortcutRow(string label, HotKeyAction action, KeyShortcut? current)
     {
         var text = new TextBlock
         {
-            Text = $"{label}: {current.Display}",
+            Text = ShortcutLabel(label, current),
             VerticalAlignment = VerticalAlignment.Center,
             MinWidth = 220,
         };
@@ -521,13 +619,29 @@ public sealed partial class SettingsWindow : Window
 
         var record = new Button { Content = "Record..." };
         record.Click += async (_, _) => await RecordShortcutAsync(label, action);
-        return Row(text, record);
+        var clear = new Button { Content = "Clear", IsEnabled = current != null };
+        clear.Click += (_, _) =>
+        {
+            C.SetHotkey(action, null);
+            RefreshShortcutLabels();
+        };
+        return Row(text, record, clear);
     }
 
-    private void UpdateShortcutLabel(HotKeyAction action, string label, KeyShortcut s)
+    private void RefreshShortcutLabels()
     {
-        if (_shortcutLabels.TryGetValue(action, out var tb)) tb.Text = $"{label}: {s.Display}";
+        UpdateShortcutLabel(HotKeyAction.TogglePause, "Pause", C.Config.HotkeyPause);
+        UpdateShortcutLabel(HotKeyAction.ConnectAll, "Connect all", C.Config.HotkeyConnectAll);
+        UpdateShortcutLabel(HotKeyAction.DisconnectAll, "Disconnect all", C.Config.HotkeyDisconnectAll);
     }
+
+    private void UpdateShortcutLabel(HotKeyAction action, string label, KeyShortcut? s)
+    {
+        if (_shortcutLabels.TryGetValue(action, out var tb)) tb.Text = ShortcutLabel(label, s);
+    }
+
+    private static string ShortcutLabel(string label, KeyShortcut? s) =>
+        $"{label}: {s?.Display ?? "Cleared"}";
 
     private async Task RecordShortcutAsync(string label, HotKeyAction action)
     {
@@ -565,7 +679,7 @@ public sealed partial class SettingsWindow : Window
         if (await dialog.ShowAsync() == ContentDialogResult.Primary && captured != null)
         {
             C.SetHotkey(action, captured);
-            UpdateShortcutLabel(action, label, captured);
+            RefreshShortcutLabels();
         }
     }
 

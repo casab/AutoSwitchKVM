@@ -39,8 +39,8 @@ which `Mocks.swift` fakes. `SelectionEngine.evaluateNow()` / `handleUSB(_:)` are
 seams that drive the state machine deterministically (no debounce timers). `ConfigStore(directory:)`
 takes an injectable directory so tests don't touch the real config.
 
-CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` on every push/PR, plus an
-advisory `swift-format` lint (`.swift-format` config). The lint is `continue-on-error` for now.
+CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` on every push/PR, plus a
+blocking `swift-format` lint (`.swift-format` config).
 
 ## Architecture
 

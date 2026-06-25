@@ -6,6 +6,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             ProfilesBar()
             Divider()
+            ErrorBanner()
             TabView {
                 SourceTab().tabItem { Label("Source", systemImage: "cable.connector") }
                 DevicesTab().tabItem { Label("Devices", systemImage: "dot.radiowaves.left.and.right") }
@@ -14,6 +15,44 @@ struct SettingsView: View {
                 DiagnosticsTab().tabItem { Label("Diagnostics", systemImage: "waveform.path.ecg") }
             }
             .padding()
+        }
+    }
+}
+
+private struct ErrorBanner: View {
+    @EnvironmentObject var engine: SelectionEngine
+    @State private var dismissedMessage: String?
+
+    private var message: String? {
+        for status in engine.statuses.values {
+            if case .error(let message) = status { return message }
+        }
+        return nil
+    }
+
+    var body: some View {
+        if let message, dismissedMessage != message {
+            HStack(spacing: 10) {
+                Label {
+                    Text("Bluetooth error: \(message)")
+                        .lineLimit(2)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                Spacer()
+                Button {
+                    dismissedMessage = message
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Dismiss")
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.red)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.red.opacity(0.10))
         }
     }
 }

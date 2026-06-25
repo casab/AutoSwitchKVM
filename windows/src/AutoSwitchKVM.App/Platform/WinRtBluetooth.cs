@@ -20,7 +20,7 @@ namespace AutoSwitchKVM.App.Platform;
 ///                     its mid-connect "disconnect" becomes a no-op, and disconnect-on-leave is the
 ///                     no-op followed by UnpairAsync.)
 ///   PairAsync       = discover the unpaired endpoint + Custom.PairAsync(ConfirmOnly) auto-accept.
-///   UnpairAsync     = Pairing.UnpairAsync().
+///   UnpairAsync     = BluetoothRemoveDevice first (tears down the active link + bond), WinRT UnpairAsync fallback.
 ///   IsConnected     = ConnectionStatus == Connected (primary), corroborated by a BTHENUM HID node.
 ///   IsPoweredOn     = Bluetooth Radio.State == On.
 ///

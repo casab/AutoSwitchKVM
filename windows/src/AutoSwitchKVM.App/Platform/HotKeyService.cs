@@ -18,9 +18,9 @@ public sealed class HotKeyService : IDisposable
     private const uint WM_HOTKEY = 0x0312;
     private static readonly IntPtr HWND_MESSAGE = new(-3);
 
-    public static KeyShortcut DefaultPause => new() { KeyCode = 0x50, Modifiers = MOD_CONTROL | MOD_ALT, Display = "Ctrl+Alt+P" };       // P
-    public static KeyShortcut DefaultConnectAll => new() { KeyCode = 0x43, Modifiers = MOD_CONTROL | MOD_ALT, Display = "Ctrl+Alt+C" };  // C
-    public static KeyShortcut DefaultDisconnectAll => new() { KeyCode = 0x44, Modifiers = MOD_CONTROL | MOD_ALT, Display = "Ctrl+Alt+D" }; // D
+    public static KeyShortcut DefaultPause => KeyShortcut.DefaultPause;
+    public static KeyShortcut DefaultConnectAll => KeyShortcut.DefaultConnectAll;
+    public static KeyShortcut DefaultDisconnectAll => KeyShortcut.DefaultDisconnectAll;
 
     public Action<HotKeyAction>? OnAction;
 
@@ -57,14 +57,14 @@ public sealed class HotKeyService : IDisposable
     {
         Unregister();
         if (!enabled || _hwnd == IntPtr.Zero) return;
-        Register((int)HotKeyAction.TogglePause, pause ?? DefaultPause);
-        Register((int)HotKeyAction.ConnectAll, connectAll ?? DefaultConnectAll);
-        Register((int)HotKeyAction.DisconnectAll, disconnectAll ?? DefaultDisconnectAll);
+        Register((int)HotKeyAction.TogglePause, pause);
+        Register((int)HotKeyAction.ConnectAll, connectAll);
+        Register((int)HotKeyAction.DisconnectAll, disconnectAll);
     }
 
-    private void Register(int id, KeyShortcut s)
+    private void Register(int id, KeyShortcut? s)
     {
-        if (s.Modifiers == 0 || s.KeyCode == 0) return; // a bare key makes a poor global hotkey
+        if (s is null || s.Modifiers == 0 || s.KeyCode == 0) return; // a bare key makes a poor global hotkey
         if (RegisterHotKey(_hwnd, id, s.Modifiers | MOD_NOREPEAT, s.KeyCode))
             _registered.Add(id);
         else

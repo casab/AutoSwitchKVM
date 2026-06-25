@@ -28,11 +28,8 @@ jobs:
         run: swift test
 
   macos-lint:
-    name: Format lint (advisory)
+    name: Format lint
     runs-on: macos-14
-    # Advisory for now — surfaces style issues without blocking the build. Flip to a hard gate
-    # once the codebase is fully conformant.
-    continue-on-error: true
     defaults:
       run:
         working-directory: osx
@@ -54,9 +51,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      # The Core library + tests are plain net8.0 (no WinUI / Windows App SDK), so they build and run
-      # on a standard runner. The WinUI app (AutoSwitchKVM.App) is validated on-device, not in CI.
-      - name: Restore
+      - name: Restore Core Tests
         run: dotnet restore tests/AutoSwitchKVM.Core.Tests/AutoSwitchKVM.Core.Tests.csproj
       - name: Test Core
         run: dotnet test tests/AutoSwitchKVM.Core.Tests/AutoSwitchKVM.Core.Tests.csproj -c Release
+      - name: Restore App
+        run: dotnet restore src/AutoSwitchKVM.App/AutoSwitchKVM.App.csproj -p:Platform=x64
+      - name: Build App
+        run: dotnet build src/AutoSwitchKVM.App/AutoSwitchKVM.App.csproj -c Release -p:Platform=x64 --no-restore

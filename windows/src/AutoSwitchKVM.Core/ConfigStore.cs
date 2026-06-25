@@ -11,9 +11,6 @@ namespace AutoSwitchKVM.Core;
 /// gives the same "default-on-missing" backward compatibility the macOS custom decoder provides.
 /// A pre-profiles config (top-level "source"/"devices", no "profiles") is migrated into one
 /// "Default" profile, matching the macOS Codable.
-///
-/// TODO (later): atomic write (temp + move), debounced save, and the absent-vs-null hotkey
-/// distinction the macOS Codable implements.
 public sealed class ConfigStore
 {
     private static readonly JsonSerializerOptions Options = new()
@@ -22,6 +19,10 @@ public sealed class ConfigStore
         WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
+
+    private readonly object _saveGate = new();
+    private Timer? _debounceTimer;
+    private string? _pendingJson;
 
     public string Path { get; }
 
@@ -81,12 +82,69 @@ public sealed class ConfigStore
         return cfg;
     }
 
+    /// Write immediately, replacing the existing config atomically.
     public void Save(AppConfig config)
+    {
+        CancelDebouncedSave();
+        WriteJsonAtomic(Serialize(config));
+    }
+
+    /// Schedule an atomic write. Rapid UI edits coalesce into one disk write.
+    public void SaveDebounced(AppConfig config, int delayMs = 400)
+    {
+        var json = Serialize(config);
+        lock (_saveGate)
+        {
+            _pendingJson = json;
+            _debounceTimer?.Dispose();
+            _debounceTimer = new Timer(_ => FlushPendingSave(), null, Math.Max(0, delayMs), Timeout.Infinite);
+        }
+    }
+
+    public void FlushPendingSave()
+    {
+        string? json;
+        lock (_saveGate)
+        {
+            json = _pendingJson;
+            _pendingJson = null;
+            _debounceTimer?.Dispose();
+            _debounceTimer = null;
+        }
+
+        if (json != null)
+            WriteJsonAtomic(json);
+    }
+
+    private static string Serialize(AppConfig config) =>
+        JsonSerializer.Serialize(config.Normalized(), Options);
+
+    private void CancelDebouncedSave()
+    {
+        lock (_saveGate)
+        {
+            _pendingJson = null;
+            _debounceTimer?.Dispose();
+            _debounceTimer = null;
+        }
+    }
+
+    private void WriteJsonAtomic(string json)
     {
         var dir = System.IO.Path.GetDirectoryName(Path);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
-        var json = JsonSerializer.Serialize(config.Normalized(), Options);
-        File.WriteAllText(Path, json);
+
+        var tmp = Path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(tmp, json);
+            File.Move(tmp, Path, overwrite: true);
+        }
+        finally
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); }
+            catch { /* best-effort cleanup */ }
+        }
     }
 }

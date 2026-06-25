@@ -59,9 +59,33 @@ public sealed class BTDevice
 /// platform-specific here, registered by HotKeyService.)
 public sealed class KeyShortcut
 {
+    private const uint ModAlt = 0x1;
+    private const uint ModControl = 0x2;
+
     public uint KeyCode { get; set; }
     public uint Modifiers { get; set; }
     public string Display { get; set; } = "";
+
+    public static KeyShortcut DefaultPause => new()
+    {
+        KeyCode = 0x50, // P
+        Modifiers = ModControl | ModAlt,
+        Display = "Ctrl+Alt+P",
+    };
+
+    public static KeyShortcut DefaultConnectAll => new()
+    {
+        KeyCode = 0x43, // C
+        Modifiers = ModControl | ModAlt,
+        Display = "Ctrl+Alt+C",
+    };
+
+    public static KeyShortcut DefaultDisconnectAll => new()
+    {
+        KeyCode = 0x44, // D
+        Modifiers = ModControl | ModAlt,
+        Display = "Ctrl+Alt+D",
+    };
 }
 
 /// A named configuration: a source plus its managed devices. Global options live on AppConfig.
@@ -106,9 +130,9 @@ public sealed class AppConfig
 
     // Global shortcuts (off by default).
     public bool GlobalHotkeysEnabled { get; set; }
-    public KeyShortcut? HotkeyPause { get; set; }
-    public KeyShortcut? HotkeyConnectAll { get; set; }
-    public KeyShortcut? HotkeyDisconnectAll { get; set; }
+    public KeyShortcut? HotkeyPause { get; set; } = KeyShortcut.DefaultPause;
+    public KeyShortcut? HotkeyConnectAll { get; set; } = KeyShortcut.DefaultConnectAll;
+    public KeyShortcut? HotkeyDisconnectAll { get; set; } = KeyShortcut.DefaultDisconnectAll;
 
     // ---- Active-profile accessors (not serialized) ----
 

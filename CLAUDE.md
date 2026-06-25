@@ -16,11 +16,11 @@ This is a **monorepo organized by platform**:
 - `windows/` — the Windows app (C#/.NET 8 + WinUI 3). **In progress:** Bluetooth/USB validated on
   real hardware (M0); Core (models, config, engine, source-learner) ported and unit-tested; the
   platform layer (USB monitor, WinRT Bluetooth, hotkeys, power, login item, toasts), tray UI, and
-  Settings are authored (M1–M7); pending a first on-device build. Windows source, build files, and
+  Settings are implemented (M1–M7); the WinUI app builds on Windows; pending on-device runtime handoff validation. Windows source, build files, and
   docs live here, including `windows/CLAUDE.md` (detailed Windows guidance), `windows/PLAN.md`, and
   `windows/README.md`.
-- `.github/` — CI: macOS job (`swift build`/`swift test` + advisory lint) and a Windows job
-  (`dotnet test` on `AutoSwitchKVM.Core.Tests`).
+- `.github/` — CI: macOS job (`swift build`/`swift test` + blocking lint) and a Windows job
+  (`dotnet test` on `AutoSwitchKVM.Core.Tests` + WinUI app build).
 
 ## Where to work
 

@@ -1,7 +1,8 @@
 # AutoSwitch KVM — Windows
 
-Native Windows port of AutoSwitch KVM. **Status: M0 validated on hardware; M1-M7 authored — Core
-ported and unit-tested, platform layer + tray UI + Settings built; pending the first on-device build.**
+Native Windows port of AutoSwitch KVM. **Status: M0 validated on hardware; M1-M7 implemented — Core
+ported and unit-tested, platform layer + tray UI + Settings built, and the WinUI app builds cleanly
+on Windows. Pending on-device runtime validation of the full KVM/Bluetooth handoff.**
 
 The goal is feature parity with the macOS app (`../osx/`): a background **system-tray** app that
 detects a USB "switcher source" appearing/disappearing and pairs/connects (or unpairs/disconnects)
@@ -48,7 +49,7 @@ AutoSwitchKVM.sln
 src/
   AutoSwitchKVM.Core/        net8.0 class library (portable, unit-tested) - NO WinUI/WinRT deps
     Models/Models.cs          USBSource, BTDevice, Profile, KeyShortcut, AppConfig (System.Text.Json)
-    ConfigStore.cs            %LOCALAPPDATA%\AutoSwitchKVM\config.json (camelCase parity + legacy migration)
+    ConfigStore.cs            %LOCALAPPDATA%\AutoSwitchKVM\config.json (atomic/debounced + legacy migration)
     SelectionEngine.cs        ported state machine     DeviceStatus.cs   per-device status
     SourceLearner.cs          Learn-source (snapshot diff)
     IUsbMonitor.cs / IBluetoothController.cs           platform seams
@@ -56,15 +57,15 @@ src/
     App.xaml(.cs)             tray app + dynamic context menu (status/profiles/devices/quick actions)
     SettingsWindow.xaml(.cs)  Source / Devices / General / Extras / Diagnostics tabs (code-behind)
     Services/AppController.cs  coordinator: wires config + engine + monitors, exposes state + actions
-    Support/DebugLog.cs        in-memory log buffer
+    Support/Log.cs             Trace + rolling file + in-app Diagnostics buffer
     Platform/PnpUsbMonitor.cs  IUsbMonitor via WMI (Win32_PnPEntity + Win32_DeviceChangeEvent + reconcile)
-    Platform/WinRtBluetooth.cs IBluetoothController via WinRT (pair/unpair/connection/radio)
+    Platform/WinRtBluetooth.cs IBluetoothController via WinRT pair/connect + Win32 remove-device release
     Platform/HotKeyService.cs  global hotkeys (RegisterHotKey + message-only window)
     Platform/PowerMonitor.cs   sleep/wake (SystemEvents.PowerModeChanged)
     Platform/LoginItem.cs      run-at-login (HKCU Run key)
     Platform/ToastNotifier.cs  toasts (AppNotificationManager)
 tests/
-  AutoSwitchKVM.Core.Tests/  xUnit (38 tests): models, config, profiles, engine, source-learner
+  AutoSwitchKVM.Core.Tests/  xUnit (40 tests): models, config, profiles, engine, source-learner
 spikes/                      PowerShell hardware validations (Spike1 read-state, Spike2 pairing, Spike3 USB)
 ```
 
@@ -78,16 +79,17 @@ templates** (or the standalone Windows App SDK), and the **.NET 8 SDK**.
 - Open `AutoSwitchKVM.sln`, set **AutoSwitchKVM.App** as startup, platform **x64**, and run. You
   get a tray icon; left-click opens Settings, right-click shows the status/quick-actions menu.
 - Tests: `dotnet test tests/AutoSwitchKVM.Core.Tests` (the Core lib + tests are plain `net8.0`, no
-  Windows SDK needed). These also run in CI (`.github/workflows/ci.yml`, `windows-latest`).
+  Windows SDK needed). CI also builds the WinUI app on `windows-latest`.
 
 Notes:
 - The app is **unpackaged**; the Windows App SDK bootstrapper auto-initializes (`WindowsPackageType=None`).
 - NuGet versions in the `.csproj` files are a known-good baseline — if restore complains, let VS
   update the packages. The tray creation in `App.xaml.cs` follows H.NotifyIcon 2.x.
-- The **App project** was authored on a Mac and **not yet compiled on Windows** — expect to smooth
-  over minor WinUI/build hiccups on first open. The **Core library + tests** are CI-built on Windows.
-- A couple of items need on-device confirmation: the WinRT pair/unpair flow vs. the spikes, and
-  whether unpackaged toasts need a Start-menu shortcut with an AUMID (see `PLAN.md`).
+- The **App project** builds cleanly on Windows (`Release|x64` verified 2026-06-25). If the app is
+  already running, build to a clean output directory or exit the tray app first because the runtime
+  locks its DLLs.
+- Remaining validation is runtime/hardware: full KVM switch-away/back, `BluetoothRemoveDevice`
+  release, sleep/resume release timing, global hotkeys, and toast visibility.
 
 ## Reference
 
