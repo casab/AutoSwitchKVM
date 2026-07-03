@@ -1,4 +1,7 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
+// Requires a Swift 6 toolchain (Xcode 16+): the sources use Swift 6 compiler features
+// (e.g. `@preconcurrency` conformances, SE-0423). The code itself stays in the Swift 5
+// language mode (`swiftLanguageModes` below) with complete strict-concurrency checking.
 import PackageDescription
 
 let package = Package(
@@ -47,5 +50,6 @@ let package = Package(
                 .linkedFramework("Carbon")
             ]
         )
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )

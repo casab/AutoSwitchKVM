@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+      "name": "Desk",
+      "source": {
+        "name": "Desk KVM",
+        "vendorID": 1507,
+        "productIDs": [1552, 1574]
+      },
+      "devices": [
+        {
+          "id": "7C9E6679-7425-40DE-944B-E07FC1F90AE7",
+          "name": "Magic Trackpad",
+          "address": "3c-50-02-bf-22-45",
+          "enabled": true,
+          "managePairing": true,
+          "connectDelayMs": 250
+        }
+      ]
+    },
+    {
+      "id": "16FD2706-8BAF-433B-82EB-8C7FADA847DA",
+      "name": "Travel",
+      "source": null,
+      "devices": []
+    }
+  ],
+  "activeProfileID": "6F9619FF-8B86-D011-B42D-00C04FC964FF",
+  "debounceMs": 900,
+  "arrivalDebounceMs": 300,
+  "connectRetryMax": 4,
+  "connectRetrySecs": 3,
+  "btCallTimeoutSecs": 25,
+  "showNotifications": true,
+  "notifyUnexpectedDisconnect": true,
+  "launchAtLogin": true,
+  "paused": false,
+  "dockAutoHide": true,
+  "globalHotkeysEnabled": false,
+  "hotkeyPause": null,
+  "hotkeyConnectAll": null,
+  "hotkeyDisconnectAll": null
+}

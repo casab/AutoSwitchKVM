@@ -50,11 +50,22 @@ public sealed partial class SettingsWindow : Window
         public override string ToString() => Name;
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
+
     public SettingsWindow()
     {
         InitializeComponent();
         Title = "AutoSwitch KVM - Settings";
-        try { AppWindow.Resize(new Windows.Graphics.SizeInt32(720, 640)); } catch { /* sizing is best-effort */ }
+        try
+        {
+            // AppWindow.Resize takes physical pixels; scale the 720x640 logical size by the
+            // window DPI (the app is PerMonitorV2-aware, so 100% assumptions render tiny at 150%).
+            var scale = GetDpiForWindow(WindowNative.GetWindowHandle(this)) / 96.0;
+            if (scale <= 0) scale = 1.0;
+            AppWindow.Resize(new Windows.Graphics.SizeInt32((int)(720 * scale), (int)(640 * scale)));
+        }
+        catch { /* sizing is best-effort */ }
 
         var shell = new StackPanel { Spacing = 0 };
         shell.Children.Add(BuildProfilesBar());
@@ -182,6 +193,8 @@ public sealed partial class SettingsWindow : Window
         save.Click += (_, _) => SaveSource();
         var learn = new Button { Content = "Learn source..." };
         learn.Click += async (_, _) => await LearnSourceAsync();
+        var pick = new Button { Content = "Pick manually..." };
+        pick.Click += async (_, _) => await PickSourceManuallyAsync();
         var clear = new Button { Content = "Clear source" };
         clear.Click += (_, _) =>
         {
@@ -190,7 +203,7 @@ public sealed partial class SettingsWindow : Window
             _srcPids.Text = "";
             C.Mutate(cfg => cfg.Source = null, refreshMonitoring: true, reevaluate: true);
         };
-        panel.Children.Add(Row(save, learn, clear));
+        panel.Children.Add(Row(save, learn, pick, clear));
 
         RefreshSource();
         return new ScrollViewer { Content = panel };
@@ -253,14 +266,95 @@ public sealed partial class SettingsWindow : Window
 
         if (result != ContentDialogResult.Primary) { learner.Cancel(); return; }
 
-        var candidates = learner.Finish();
-        if (candidates.Count == 0) return;
+        // Spec §6: present the changed devices as pre-checked, named candidates for review.
+        await PickSourceFromCandidatesAsync(
+            "Learn source", learner.Finish(), defaultName: "KVM", precheckMajorityVendor: true);
+    }
 
-        // Prefer the vendor with the most changed product IDs (the KVM hub).
-        var vendor = candidates.GroupBy(c => c.VendorID).OrderByDescending(g => g.Count()).First();
+    /// Spec §6 manual path: pick the source from the currently-attached USB devices.
+    private async Task PickSourceManuallyAsync()
+    {
+        var attached = C.UsbSnapshot()
+            .GroupBy(d => ((uint)d.VendorID << 16) | d.ProductID)
+            .Select(g => g.First())
+            .ToList();
+        await PickSourceFromCandidatesAsync(
+            "Pick source", attached, defaultName: "Source", precheckMajorityVendor: false);
+    }
+
+    /// Shared candidate picker (spec §6): named checkboxes + a source-name box. The source model
+    /// is a single vendor + product IDs; if the ticks span vendors, the vendor with the most
+    /// ticked devices wins.
+    private async Task PickSourceFromCandidatesAsync(
+        string title, IReadOnlyList<UsbDeviceInfo> candidates, string defaultName, bool precheckMajorityVendor)
+    {
+        if (candidates.Count == 0)
+        {
+            await new ContentDialog
+            {
+                Title = title,
+                Content = "No candidate USB devices detected.",
+                CloseButtonText = "OK",
+                XamlRoot = Root.XamlRoot,
+            }.ShowAsync();
+            return;
+        }
+
+        var majorityVendor = candidates
+            .GroupBy(c => c.VendorID).OrderByDescending(g => g.Count()).First().Key;
+
+        var checks = new List<(CheckBox Box, UsbDeviceInfo Device)>();
+        var list = new StackPanel { Spacing = 4 };
+        foreach (var dev in candidates.OrderBy(d => d.VendorID).ThenBy(d => d.ProductID))
+        {
+            var box = new CheckBox
+            {
+                Content = dev.DisplayName,
+                IsChecked = precheckMajorityVendor && dev.VendorID == majorityVendor,
+            };
+            checks.Add((box, dev));
+            list.Children.Add(box);
+        }
+
+        var nameBox = new TextBox { Header = "Source name", Text = defaultName };
+        var body = new StackPanel { Spacing = 10 };
+        body.Children.Add(new TextBlock
+        {
+            Text = "Tick the devices that belong to the switcher (the source is one vendor; "
+                + "prefer the entries that disappear when you switch away).",
+            TextWrapping = TextWrapping.WrapWholeWords,
+        });
+        body.Children.Add(new ScrollViewer { Content = list, MaxHeight = 260 });
+        body.Children.Add(nameBox);
+
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = body,
+            PrimaryButtonText = "Use as source",
+            CloseButtonText = "Cancel",
+            XamlRoot = Root.XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        var chosen = checks.Where(c => c.Box.IsChecked == true).Select(c => c.Device).ToList();
+        if (chosen.Count == 0) return;
+        var vendor = chosen.GroupBy(d => d.VendorID).OrderByDescending(g => g.Count()).First();
+        var name = string.IsNullOrWhiteSpace(nameBox.Text) ? defaultName : nameBox.Text.Trim();
+
+        C.Mutate(
+            cfg => cfg.Source = new USBSource
+            {
+                Name = name,
+                VendorID = vendor.Key,
+                ProductIDs = vendor.Select(d => d.ProductID).ToHashSet(),
+            },
+            refreshMonitoring: true, reevaluate: true);
+
+        _srcName.Text = name;
         _srcVendor.Text = vendor.Key.ToString("X4");
-        _srcPids.Text = string.Join(", ", vendor.Select(c => c.ProductID.ToString("X4")));
-        if (string.IsNullOrWhiteSpace(_srcName.Text)) _srcName.Text = "KVM";
+        _srcPids.Text = string.Join(", ", vendor.Select(d => d.ProductID.ToString("X4")));
+        RefreshSource();
     }
 
     // ===================== Devices =====================
@@ -307,12 +401,16 @@ public sealed partial class SettingsWindow : Window
             var enabled = new ToggleSwitch { Header = "Enabled", IsOn = device.Enabled };
             enabled.Toggled += (_, _) => C.Mutate(_ => device.Enabled = enabled.IsOn, reevaluate: true);
 
+            // Default-on for new devices, but a real user choice: Classic-HID devices (Magic
+            // Trackpad) need it — the bond is exclusive — while e.g. a headset would be
+            // re-paired on every switch if it were forced on.
             var pairing = new CheckBox
             {
-                Content = "Manage pairing (required on Windows to release Classic HID devices)",
-                IsChecked = true,
-                IsEnabled = false,
+                Content = "Manage pairing (pair on connect / unpair on release — required for Classic HID devices like the Magic Trackpad)",
+                IsChecked = device.ManagePairing,
             };
+            pairing.Checked += (_, _) => C.Mutate(_ => device.ManagePairing = true);
+            pairing.Unchecked += (_, _) => C.Mutate(_ => device.ManagePairing = false);
 
             var delay = new NumberBox
             {
@@ -473,7 +571,28 @@ public sealed partial class SettingsWindow : Window
         InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         var file = await picker.PickSingleFileAsync();
         if (file is null) return;
-        var imported = new ConfigStore(file.Path).Load();
+
+        // Strict parse: a bad file must surface an error — the forgiving ConfigStore.Load()
+        // fallback would silently replace the whole config with defaults.
+        AppConfig imported;
+        try
+        {
+            imported = ConfigStore.Parse(await File.ReadAllTextAsync(file.Path));
+        }
+        catch (Exception ex)
+        {
+            Log.Error("config", $"import of '{file.Path}' failed", ex);
+            var dialog = new ContentDialog
+            {
+                Title = "Import failed",
+                Content = $"'{file.Name}' is not a valid AutoSwitch KVM configuration.\n\n{ex.Message}",
+                CloseButtonText = "OK",
+                XamlRoot = Content.XamlRoot,
+            };
+            await dialog.ShowAsync();
+            return;
+        }
+
         C.ReplaceConfig(imported);
         RefreshDevices();
         RefreshSource();

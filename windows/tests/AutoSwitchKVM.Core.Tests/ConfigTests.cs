@@ -25,7 +25,7 @@ public class ConfigTests
         Assert.Equal(400, cfg.ArrivalDebounceMs);
         Assert.Equal(6, cfg.ConnectRetryMax);
         Assert.Equal(2, cfg.ConnectRetrySecs);
-        Assert.Equal(45, cfg.BtCallTimeoutSecs); // headroom for the Windows discovery inquiry
+        Assert.Equal(45, cfg.BtCallTimeoutSecs); // Windows default: ~14s pair + other-host-release race headroom
         Assert.False(cfg.GlobalHotkeysEnabled);
         Assert.Equal("Ctrl+Alt+P", cfg.HotkeyPause?.Display);
         Assert.Equal("Ctrl+Alt+C", cfg.HotkeyConnectAll?.Display);
@@ -146,7 +146,7 @@ public class ConfigTests
     }
 
     [Fact]
-    public async Task Debounced_save_writes_latest_config()
+    public void Debounced_save_writes_latest_config()
     {
         var tmp = TempPath();
         try
@@ -154,14 +154,152 @@ public class ConfigTests
             var store = new ConfigStore(tmp);
             var cfg = AppConfig.Default();
             cfg.Paused = false;
-            store.SaveDebounced(cfg, delayMs: 100);
+            store.SaveDebounced(cfg, delayMs: 60_000);  // far future: the flush below decides
             cfg.Paused = true;
-            store.SaveDebounced(cfg, delayMs: 100);
+            store.SaveDebounced(cfg, delayMs: 60_000);
 
-            await Task.Delay(250);
+            store.FlushPendingSave();  // deterministic — no wall-clock race with the timer
             Assert.True(new ConfigStore(tmp).Load().Paused);
         }
         finally { Cleanup(tmp); }
+    }
+
+    /// A config exported on macOS stores hotkeys as `carbonModifiers` (macOS virtual-key space);
+    /// deserializing here yields Modifiers == 0 and a wrong-space key code. It must fall back to
+    /// the platform default — never register a bare-key global hotkey like "End".
+    [Fact]
+    public void Macos_exported_hotkey_falls_back_to_platform_default()
+    {
+        var cfg = ConfigStore.Parse("""
+        {
+          "profiles": [
+            {"id": "6f9619ff-8b86-d011-b42d-00c04fc964ff", "name": "Default", "devices": []}
+          ],
+          "activeProfileID": "6f9619ff-8b86-d011-b42d-00c04fc964ff",
+          "paused": true,
+          "hotkeyPause": {"keyCode": 35, "carbonModifiers": 4352, "display": "^~P"},
+          "hotkeyConnectAll": null
+        }
+        """);
+
+        Assert.True(cfg.Paused);                                              // the import itself succeeds
+        Assert.Equal(KeyShortcut.DefaultPause.KeyCode, cfg.HotkeyPause?.KeyCode);  // not the macOS kVK code
+        Assert.NotEqual(0u, cfg.HotkeyPause!.Modifiers);                       // never a bare-key hotkey
+        Assert.Null(cfg.HotkeyConnectAll);                                     // explicit null stays cleared
+    }
+
+    /// Parity with macOS: the schemaVersion stamp must be written and survive a round-trip
+    /// (today Windows strips it from configs that came from the Mac).
+    [Fact]
+    public void SchemaVersion_is_written_and_preserved()
+    {
+        var tmp = TempPath();
+        try
+        {
+            var store = new ConfigStore(tmp);
+            store.Save(AppConfig.Default());
+            Assert.Contains("\"schemaVersion\": 1", File.ReadAllText(tmp));
+            Assert.Equal(1, store.Load().SchemaVersion);
+        }
+        finally { Cleanup(tmp); }
+    }
+
+    /// A corrupt config falls back to defaults, but the unreadable original must be preserved —
+    /// the next save would otherwise silently destroy the user's profiles.
+    [Fact]
+    public void Corrupt_config_is_backed_up_before_defaulting()
+    {
+        var tmp = TempPath();
+        try
+        {
+            File.WriteAllText(tmp, "{this is not json");
+            var cfg = new ConfigStore(tmp).Load();
+
+            Assert.Single(cfg.Profiles);  // defaults in use
+            Assert.True(File.Exists(tmp + ".bad"), "the corrupt original must be backed up for recovery");
+        }
+        finally
+        {
+            Cleanup(tmp);
+            if (File.Exists(tmp + ".bad")) File.Delete(tmp + ".bad");
+        }
+    }
+
+    /// Import path: Parse must throw on input that is not an AutoSwitch KVM config, so the UI
+    /// can show an error instead of silently replacing the user's config with defaults.
+    [Fact]
+    public void Parse_rejects_invalid_input_and_accepts_a_real_config()
+    {
+        Assert.ThrowsAny<Exception>(() => ConfigStore.Parse("not json at all"));
+        Assert.ThrowsAny<Exception>(() => ConfigStore.Parse("""{"unrelated": true}"""));
+
+        var cfg = AppConfig.Default();
+        cfg.Paused = true;
+        var json = System.Text.Json.JsonSerializer.Serialize(cfg, new System.Text.Json.JsonSerializerOptions
+        {
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+        });
+        Assert.True(ConfigStore.Parse(json).Paused);
+    }
+
+    /// A debounced flush that grabbed its JSON before a newer immediate Save must not clobber
+    /// the newer file contents when it finally writes.
+    [Fact]
+    public async Task Debounced_flush_does_not_overwrite_newer_save()
+    {
+        var tmp = TempPath();
+        try
+        {
+            var store = new ConfigStore(tmp);
+            var reachedWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var armed = true;
+            store.BeforeWrite = () =>
+            {
+                if (!armed) return;
+                armed = false;
+                reachedWrite.SetResult();
+                release.Task.Wait();
+            };
+
+            var oldCfg = AppConfig.Default();
+            oldCfg.Paused = false;
+            store.SaveDebounced(oldCfg, delayMs: 0);  // flush grabs the stale JSON...
+            await reachedWrite.Task;                  // ...and is suspended just before writing
+
+            var newCfg = AppConfig.Default();
+            newCfg.Paused = true;
+            store.Save(newCfg);                       // newer immediate save lands first
+
+            release.SetResult();
+            await Task.Delay(150);                    // let the stale flush finish
+
+            Assert.True(new ConfigStore(tmp).Load().Paused,
+                "a stale debounced write must not clobber a newer save");
+        }
+        finally { Cleanup(tmp); }
+    }
+
+    /// A failed disk write (here: the config path is a directory) must be reported via
+    /// OnSaveError, never thrown — an exception in the debounce Timer callback kills the process.
+    [Fact]
+    public void Save_failure_is_reported_not_thrown()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"autoswitchkvm-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);  // the config *path* itself is a directory → writes fail
+        try
+        {
+            var store = new ConfigStore(dir);
+            Exception? reported = null;
+            store.OnSaveError = ex => reported = ex;
+
+            store.Save(AppConfig.Default());                    // must not throw
+            store.SaveDebounced(AppConfig.Default(), delayMs: 0);
+            store.FlushPendingSave();                           // must not throw
+
+            Assert.NotNull(reported);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
     }
 
     [Fact]

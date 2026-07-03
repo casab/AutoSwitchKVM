@@ -23,7 +23,9 @@ Two paths — both open the same sources:
 
 The app is menu-bar-only (`NSApp.setActivationPolicy(.accessory)` + `LSUIElement`).
 
-**Building requires macOS + Xcode 15+** (IOKit/IOBluetooth, SwiftUI `MenuBarExtra`, `SMAppService`).
+**Building requires macOS + Xcode 16+** (Swift 6 toolchain — the sources use Swift 6 compiler
+features like `@preconcurrency` conformances (SE-0423), while staying in the Swift 5 language
+mode; plus IOKit/IOBluetooth, SwiftUI `MenuBarExtra`, `SMAppService`).
 Do not attempt to compile in a non-macOS sandbox — there's no SDK there. Write carefully, review,
 and hand builds/tests to a macOS environment.
 
@@ -39,8 +41,9 @@ which `Mocks.swift` fakes. `SelectionEngine.evaluateNow()` / `handleUSB(_:)` are
 seams that drive the state machine deterministically (no debounce timers). `ConfigStore(directory:)`
 takes an injectable directory so tests don't touch the real config.
 
-CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` on every push/PR, plus a
-blocking `swift-format` lint (`.swift-format` config).
+CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` on pushes to `main` and on
+every PR (pinned Xcode 16.x), plus a blocking `swift-format` lint using the Xcode toolchain's
+swift-format (`.swift-format` config).
 
 ## Architecture
 

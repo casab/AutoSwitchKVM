@@ -34,14 +34,19 @@ final class IOBluetoothController: NSObject, BluetoothController {
 
     func connect(_ address: String) async throws {
         let dev = try device(address)
+        // Deliberately NO early-return on isConnected(): in the managed (post-pair) flow the
+        // engine just dropped the transient link, and a lingering isConnected() there is exactly
+        // the link-only ACL state the clean-reconnect exists to replace. The engine already
+        // pre-checks isConnected for the unmanaged path, so a redundant open is not the norm.
         if dev.isConnected() {
-            Log.bluetooth.log("connect \(address): isConnected already true — skipping openConnection")
-            return
+            Log.bluetooth.log("connect \(address): isConnected already true — reopening for a clean connect")
         }
         // Synchronous open: blocks until the connection is fully established (HID up) and returns a
         // real result code. This is the reliable success signal — the async openConnection(_:)
         // callback proved unreliable (it sometimes never fires even when the link comes up).
-        // The call internally spins the run loop, and always returns, so it can't hang `withTimeout`.
+        // NOTE: this call cannot observe task cancellation. `withTimeout` therefore abandons it on
+        // deadline (it keeps running and finishes on its own), and the engine re-checks
+        // isConnected after a connect timeout so a late success isn't torn down as a failure.
         Log.bluetooth.log("openConnection() \(address)…")
         let rc = dev.openConnection()
         Log.bluetooth.log("openConnection() \(address): rc=\(String(format: "0x%X", rc))")

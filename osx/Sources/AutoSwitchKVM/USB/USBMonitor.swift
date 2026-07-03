@@ -32,6 +32,7 @@ final class USBMonitor: ObservableObject, USBMonitoring {
     private var notifyPort: IONotificationPortRef?
     private var addedIterator: io_iterator_t = 0
     private var removedIterator: io_iterator_t = 0
+    private var reconcileTimer: Timer?
 
     func start() {
         guard notifyPort == nil else { return }
@@ -47,7 +48,7 @@ final class USBMonitor: ObservableObject, USBMonitoring {
 
         // --- Added ---
         var addIter: io_iterator_t = 0
-        IOServiceAddMatchingNotification(
+        let addRC = IOServiceAddMatchingNotification(
             port, kIOFirstMatchNotification, matching,
             { (refcon, iterator) in
                 // Callbacks are dispatched on the main queue (see IONotificationPortSetDispatchQueue).
@@ -57,6 +58,9 @@ final class USBMonitor: ObservableObject, USBMonitoring {
                 }
             },
             selfPtr, &addIter)
+        if addRC != KERN_SUCCESS {
+            Log.usb.error("IOServiceAddMatchingNotification (attach) failed: \(addRC) — relying on the reconcile timer")
+        }
         addedIterator = addIter
         handleIterator(addIter, added: true)  // drain initial matches + seed
 
@@ -64,7 +68,7 @@ final class USBMonitor: ObservableObject, USBMonitoring {
         // IOServiceMatching is consumed by each call, so build a fresh dictionary.
         let matchingRemove = IOServiceMatching(Self.usbDeviceClass)
         var remIter: io_iterator_t = 0
-        IOServiceAddMatchingNotification(
+        let removeRC = IOServiceAddMatchingNotification(
             port, kIOTerminatedNotification, matchingRemove,
             { (refcon, iterator) in
                 MainActor.assumeIsolated {
@@ -73,13 +77,29 @@ final class USBMonitor: ObservableObject, USBMonitoring {
                 }
             },
             selfPtr, &remIter)
+        if removeRC != KERN_SUCCESS {
+            Log.usb.error(
+                "IOServiceAddMatchingNotification (detach) failed: \(removeRC) — relying on reconcile")
+        }
         removedIterator = remIter
         drain(remIter)  // arm the notification (initial set are already-present devices)
 
         refreshAttached()
+
+        // Safety-net reconcile (spec §4): a missed or property-less kIOTerminatedNotification
+        // would leave presence stale until the next event or wake. Compare a fresh enumeration
+        // every 2 s and emit synthetic events for anything the notifications missed.
+        // (.common mode so it keeps running while a menu/modal is open.)
+        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.reconcile() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        reconcileTimer = timer
     }
 
     func stop() {
+        reconcileTimer?.invalidate()
+        reconcileTimer = nil
         if addedIterator != 0 { IOObjectRelease(addedIterator); addedIterator = 0 }
         if removedIterator != 0 { IOObjectRelease(removedIterator); removedIterator = 0 }
         if let port = notifyPort { IONotificationPortDestroy(port); notifyPort = nil }
@@ -117,6 +137,27 @@ final class USBMonitor: ObservableObject, USBMonitoring {
     private func drain(_ iterator: io_iterator_t) {
         while case let service = IOIteratorNext(iterator), service != 0 {
             IOObjectRelease(service)
+        }
+    }
+
+    private static func presenceKey(_ d: USBDeviceInfo) -> UInt32 {
+        (UInt32(d.vendorID) << 16) | UInt32(d.productID)
+    }
+
+    /// Diff a fresh enumeration against the last snapshot and emit synthetic attach/detach
+    /// events for anything the IOKit notifications missed.
+    private func reconcile() {
+        let before = Set(attachedDevices.map(Self.presenceKey))
+        refreshAttached()
+        let after = Set(attachedDevices.map(Self.presenceKey))
+        guard before != after else { return }
+
+        Log.usb.log("reconcile: presence drifted (\(before.count) → \(after.count) ids); emitting corrections")
+        for key in before.subtracting(after) {
+            events.send((vendorID: UInt16(key >> 16), productID: UInt16(key & 0xFFFF), added: false))
+        }
+        for key in after.subtracting(before) {
+            events.send((vendorID: UInt16(key >> 16), productID: UInt16(key & 0xFFFF), added: true))
         }
     }
 

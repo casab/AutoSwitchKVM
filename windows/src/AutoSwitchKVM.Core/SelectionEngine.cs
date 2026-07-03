@@ -116,8 +116,10 @@ public sealed class SelectionEngine
 
     // MARK: - Seeding & USB input
 
-    /// Establish presence from scratch (launch, wake, profile switch) and evaluate.
-    public async Task SeedAsync()
+    /// Establish presence from scratch (launch, wake, profile switch) and schedule a debounced
+    /// evaluation — the macOS seed() behavior, so a KVM re-enumeration storm at seed time gets
+    /// the same debounce as any other USB activity. Tests drive EvaluateNowAsync directly.
+    public Task SeedAsync()
     {
         _presentProductIDs.Clear();
         _automationActed = false;
@@ -129,7 +131,8 @@ public sealed class SelectionEngine
                     _presentProductIDs.Add(d.ProductID);
         }
         LastReason = "initial scan";
-        await EvaluateNowAsync();
+        ScheduleEvaluate();
+        return Task.CompletedTask;
     }
 
     public Task ReevaluateAsync() => SeedAsync();
@@ -220,7 +223,7 @@ public sealed class SelectionEngine
         {
             _automationActed = false;
             _runToken++;
-            await DisconnectAllAsync();
+            await DisconnectAllAsync(_runToken);
         }
     }
 
@@ -232,19 +235,23 @@ public sealed class SelectionEngine
         var token = _runToken;
         foreach (var device in Config.Devices)
         {
+            if (token != _runToken) return;  // superseded by a newer run
             _busyDevices.Add(device.Id);
-            await ConnectOneAsync(device, token, respectSelection: false);
-            _busyDevices.Remove(device.Id);
+            try { await ConnectOneAsync(device, token, respectSelection: false); }
+            finally { _busyDevices.Remove(device.Id); }
         }
     }
 
     public async Task DisconnectAllNowAsync()
     {
+        _runToken++;  // invalidate any in-flight connect run — the user asked for release
+        var token = _runToken;
         foreach (var device in Config.Devices)
         {
+            if (token != _runToken) return;
             _busyDevices.Add(device.Id);
-            await DisconnectOneAsync(device);
-            _busyDevices.Remove(device.Id);
+            try { await DisconnectOneAsync(device, token); }
+            finally { _busyDevices.Remove(device.Id); }
         }
     }
 
@@ -260,11 +267,13 @@ public sealed class SelectionEngine
         return Math.Min(value, MaxBackoffSeconds);
     }
 
-    /// Backoff in milliseconds with +/-15% jitter (used between connect retries).
+    /// Backoff in milliseconds with +/-15% jitter (used between connect retries). The 30 s cap
+    /// applies after jitter — the spec's cap bounds the real sleep.
     internal int BackoffMillisJittered(int @base, int attempt)
     {
         var jittered = BackoffSeconds(@base, attempt) * (0.85 + _rng.NextDouble() * 0.30);
-        return (int)Math.Max(0, jittered * 1000.0);
+        var capped = Math.Min(jittered, MaxBackoffSeconds);
+        return (int)Math.Max(0, capped * 1000.0);
     }
 
     // MARK: - Actions
@@ -276,8 +285,8 @@ public sealed class SelectionEngine
             if (!device.Enabled) continue;
             if (token != _runToken) return;
             _busyDevices.Add(device.Id);
-            await ConnectOneAsync(device, token, respectSelection: true);
-            _busyDevices.Remove(device.Id);
+            try { await ConnectOneAsync(device, token, respectSelection: true); }
+            finally { _busyDevices.Remove(device.Id); }
         }
     }
 
@@ -355,31 +364,55 @@ public sealed class SelectionEngine
         }
     }
 
-    private async Task DisconnectAllAsync()
+    private async Task DisconnectAllAsync(int token)
     {
         foreach (var device in Config.Devices)
         {
             if (!device.Enabled) continue;
+            if (token != _runToken) return;  // superseded (e.g. the source came back)
             _busyDevices.Add(device.Id);
-            await DisconnectOneAsync(device);
-            _busyDevices.Remove(device.Id);
+            try { await DisconnectOneAsync(device, token); }
+            finally { _busyDevices.Remove(device.Id); }
         }
     }
 
-    private async Task DisconnectOneAsync(BTDevice device)
+    /// Tear down one device: disconnect, then (managePairing) unpair. Token staleness is
+    /// re-checked after every await — a newer run owns the devices once it starts, and a stale
+    /// disconnect must not undo the connect/pair the new run just performed.
+    private async Task DisconnectOneAsync(BTDevice device, int token)
     {
         var addr = device.Address;
-        try
+
+        Exception? disconnectError = null;
+        try { await WithTimeoutAsync(ct => _bt.DisconnectAsync(addr, ct)); }
+        catch (Exception ex) { disconnectError = ex; }
+        if (token != _runToken) return;
+
+        // Release the bond even if the disconnect call failed — the bond is what blocks the
+        // other host (Magic Trackpad), and unpair tears the link down anyway.
+        if (device.ManagePairing)
         {
-            await WithTimeoutAsync(ct => _bt.DisconnectAsync(addr, ct));
-            if (device.ManagePairing)
-                await WithTimeoutAsync(ct => _bt.UnpairAsync(addr, ct));
+            try { await WithTimeoutAsync(ct => _bt.UnpairAsync(addr, ct)); }
+            catch (Exception ex)
+            {
+                if (token != _runToken) return;
+                SetStatus(device.Id, DeviceStatus.Error(ex.Message));
+                return;
+            }
+            if (token != _runToken) return;
             SetStatus(device.Id, DeviceStatus.Disconnected);
             OnNotice?.Invoke("Disconnected", device.Name);
+            return;
         }
-        catch (Exception ex)
+
+        if (disconnectError is not null)
         {
-            SetStatus(device.Id, DeviceStatus.Error(ex.Message));
+            SetStatus(device.Id, DeviceStatus.Error(disconnectError.Message));
+        }
+        else
+        {
+            SetStatus(device.Id, DeviceStatus.Disconnected);
+            OnNotice?.Invoke("Disconnected", device.Name);
         }
     }
 

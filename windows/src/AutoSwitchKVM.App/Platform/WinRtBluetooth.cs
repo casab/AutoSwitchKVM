@@ -66,12 +66,25 @@ public sealed class WinRtBluetooth : IBluetoothController
         try
         {
             using var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
-            if (dev != null && dev.ConnectionStatus == BluetoothConnectionStatus.Connected)
-                return true;
+            // WinRT answered: trust it. An unknown device (null) is certainly not connected to
+            // us. Falling through to the HID node on a mere "not connected" answer would let a
+            // stale PnP entry masquerade as a working connection.
+            if (dev is not null)
+                return dev.ConnectionStatus == BluetoothConnectionStatus.Connected;
+            return false;
         }
-        catch { /* fall through to HID check */ }
-
-        return HidNodePresent(Digits(address));
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // WinRT itself failed — corroborate via the BTHENUM HID node, off-thread (a
+            // synchronous WMI query on the UI thread would jank every poll).
+            Log.Warn("bt", $"isConnected({address}) WinRT query failed ({ex.Message}); using HID node fallback");
+            var digits = Digits(address);
+            return await Task.Run(() => HidNodePresent(digits), ct);
+        }
     }
 
     // ---- Connect / disconnect (Classic-HID semantics; see class doc) ----
@@ -130,6 +143,9 @@ public sealed class WinRtBluetooth : IBluetoothController
                 {
                     throw new BluetoothException($"Pair {address} failed: {result.Status}");
                 }
+                // Pairing created a fresh device record — the old ConnectionStatusChanged
+                // subscription (if any) points at a dead object.
+                RearmMonitoring(address);
             }
             finally
             {
@@ -187,6 +203,9 @@ public sealed class WinRtBluetooth : IBluetoothController
                     Log.Info("bt", $"unpair {address}: already unpaired");
                 }
             }
+
+            // The unpair destroyed the device record; drop (and later re-create) its subscription.
+            RearmMonitoring(address);
         }
         finally
         {
@@ -222,6 +241,21 @@ public sealed class WinRtBluetooth : IBluetoothController
     // ---- Diagnostics (Settings "Diagnose" button): dump everything WinRT sees for this MAC ----
 
     public async Task DiagnoseAsync(string address)
+    {
+        // Serialize with pair/unpair: the unpaired-state selector below forces a ~30 s radio
+        // inquiry, and concurrent radio operations are exactly what _opLock exists to prevent.
+        await _opLock.WaitAsync();
+        try
+        {
+            await DiagnoseCoreAsync(address);
+        }
+        finally
+        {
+            _opLock.Release();
+        }
+    }
+
+    private async Task DiagnoseCoreAsync(string address)
     {
         var digits = Digits(address);
         Log.Info("diag", $"===== Diagnose {address} (match digits: {digits}) =====");
@@ -278,34 +312,112 @@ public sealed class WinRtBluetooth : IBluetoothController
 
     // ---- Monitoring (best-effort; the engine also polls as a safety-net) ----
 
+    private CancellationTokenSource? _monitorCts;
+    private List<string> _monitoredAddresses = new();
+    private Action<ConnectionChange>? _monitorCallback;
+
     public void StartMonitoring(IEnumerable<string> addresses, Action<ConnectionChange> onChange)
     {
-        StopMonitoring();
-        _ = SetupMonitoringAsync(addresses.ToList(), onChange);
+        CancellationTokenSource cts;
+        lock (_gate)
+        {
+            // Cancel any in-flight setup from a previous call — otherwise its stragglers
+            // repopulate _subs after StopMonitoring cleared them.
+            _monitorCts?.Cancel();
+            _monitorCts = cts = new CancellationTokenSource();
+            _monitoredAddresses = addresses.ToList();
+            _monitorCallback = onChange;
+        }
+        RemoveAllSubscriptions();
+        _ = SetupMonitoringAsync(_monitoredAddresses, onChange, cts.Token);
     }
 
-    private async Task SetupMonitoringAsync(List<string> addresses, Action<ConnectionChange> onChange)
+    private async Task SetupMonitoringAsync(
+        List<string> addresses, Action<ConnectionChange> onChange, CancellationToken ct)
     {
         foreach (var address in addresses)
         {
-            try
-            {
-                var digits = Digits(address);
-                var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address));
-                if (dev is null) continue;
-
-                TypedEventHandler<BluetoothDevice, object> handler = (sender, _) =>
-                    Post(() => onChange(new ConnectionChange(
-                        digits, sender.ConnectionStatus == BluetoothConnectionStatus.Connected)));
-
-                dev.ConnectionStatusChanged += handler;
-                lock (_gate) { _subs.Add((dev, handler)); }
-            }
-            catch { /* skip an address we can't resolve */ }
+            if (ct.IsCancellationRequested) return;
+            await SubscribeAsync(address, onChange, ct);
         }
     }
 
+    private async Task SubscribeAsync(string address, Action<ConnectionChange> onChange, CancellationToken ct)
+    {
+        try
+        {
+            var digits = Digits(address);
+            var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
+            if (dev is null) return;
+
+            TypedEventHandler<BluetoothDevice, object> handler = (sender, _) =>
+            {
+                // Read the status HERE, not inside the dispatched lambda: StopMonitoring
+                // disposes the BluetoothDevice, and a queued lambda touching a disposed
+                // sender throws ObjectDisposedException on the UI thread.
+                bool isConnected;
+                try { isConnected = sender.ConnectionStatus == BluetoothConnectionStatus.Connected; }
+                catch { return; }  // device already disposed/removed mid-event
+                Post(() => onChange(new ConnectionChange(digits, isConnected)));
+            };
+
+            dev.ConnectionStatusChanged += handler;
+            lock (_gate)
+            {
+                if (ct.IsCancellationRequested)
+                {
+                    try { dev.ConnectionStatusChanged -= handler; dev.Dispose(); } catch { /* ignore */ }
+                    return;
+                }
+                _subs.Add((dev, handler));
+            }
+        }
+        catch (OperationCanceledException) { /* superseded */ }
+        catch { /* skip an address we can't resolve */ }
+    }
+
+    /// Unpair destroys the system's device record, killing its ConnectionStatusChanged
+    /// subscription; pairing creates a fresh record. Re-arm the monitored address so the engine
+    /// keeps getting events instead of degrading to the 10 s poll.
+    private void RearmMonitoring(string address)
+    {
+        Action<ConnectionChange>? onChange;
+        CancellationToken ct;
+        var digits = Digits(address);
+        lock (_gate)
+        {
+            if (_monitorCts is null || _monitorCallback is null) return;
+            if (!_monitoredAddresses.Any(a => Digits(a) == digits)) return;
+            onChange = _monitorCallback;
+            ct = _monitorCts.Token;
+
+            for (var i = _subs.Count - 1; i >= 0; i--)
+            {
+                var (dev, handler) = _subs[i];
+                string subDigits;
+                try { subDigits = dev.BluetoothAddress.ToString("X12"); }
+                catch { subDigits = ""; }
+                if (subDigits != digits) continue;
+                try { dev.ConnectionStatusChanged -= handler; dev.Dispose(); } catch { /* ignore */ }
+                _subs.RemoveAt(i);
+            }
+        }
+        _ = SubscribeAsync(address, onChange, ct);
+    }
+
     public void StopMonitoring()
+    {
+        lock (_gate)
+        {
+            _monitorCts?.Cancel();
+            _monitorCts = null;
+            _monitorCallback = null;
+            _monitoredAddresses = new List<string>();
+        }
+        RemoveAllSubscriptions();
+    }
+
+    private void RemoveAllSubscriptions()
     {
         lock (_gate)
         {
@@ -326,7 +438,15 @@ public sealed class WinRtBluetooth : IBluetoothController
     }
 
     /// MAC string ("3C:50:02:BF:22:45" or "3c-50-...") -> 64-bit Bluetooth address for the WinRT API.
-    internal static ulong ParseAddress(string mac) => Convert.ToUInt64(Digits(mac), 16);
+    /// Validates the shape: a short or malformed string would otherwise silently parse into a
+    /// wrong address (or throw an untyped FormatException deep inside a Bluetooth call).
+    internal static ulong ParseAddress(string mac)
+    {
+        var digits = Digits(mac);
+        if (digits.Length != 12 || !digits.All(Uri.IsHexDigit))
+            throw new BluetoothException($"Invalid Bluetooth address '{mac}' (expected 6 hex octets).");
+        return Convert.ToUInt64(digits, 16);
+    }
 
     private static string Digits(string mac) =>
         mac.Replace(":", "").Replace("-", "").Trim().ToUpperInvariant();

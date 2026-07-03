@@ -43,20 +43,22 @@ final class AppController: ObservableObject {
         self.engine = SelectionEngine(store: store, usb: usb, bt: bt)
         self.learner = SourceLearner(usb: usb)
 
+        // DispatchQueue.main, not RunLoop.main: run-loop delivery stalls while a menu/modal is
+        // open, which would freeze the menu-bar icon state mid-interaction.
         engine.$selected
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] value in MainActor.assumeIsolated { self?.sourceActive = value } }
             .store(in: &cancellables)
 
         store.$config
             .map(\.paused)
             .removeDuplicates()
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] value in MainActor.assumeIsolated { self?.paused = value } }
             .store(in: &cancellables)
 
         engine.$bluetoothPowered
-            .receive(on: RunLoop.main)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] value in MainActor.assumeIsolated { self?.bluetoothPowered = value } }
             .store(in: &cancellables)
     }
@@ -68,7 +70,7 @@ final class AppController: ObservableObject {
         started = true
         usb.start()
         sleepWake.start()
-        sleepWake.onWillSleep = { [weak self] in self?.handleWillSleep() }
+        sleepWake.onWillSleep = { [weak self] in await self?.handleWillSleep() }
         sleepWake.onDidWake = { [weak self] in self?.handleDidWake() }
 
         // Apply persisted system-integration settings.
@@ -108,10 +110,12 @@ final class AppController: ObservableObject {
         append("Started. Source: \(store.config.source?.name ?? "none")")
     }
 
-    private func handleWillSleep() {
-        append("System sleep → disconnecting")
-        // Engine treats source-absence as the trigger; force a disconnect of enabled devices.
-        Task { await self.manualDisconnectAll() }
+    /// Awaited by SleepWakeMonitor, which holds the sleep transition (bounded) until this
+    /// returns — so the release/unpair the other host depends on actually happens before sleep.
+    private func handleWillSleep() async {
+        append("System sleep → releasing devices")
+        await manualDisconnectAll()
+        append("Devices released; allowing sleep")
     }
 
     private func handleDidWake() {
@@ -124,7 +128,7 @@ final class AppController: ObservableObject {
 
     func setLaunchAtLogin(_ on: Bool) {
         store.config.launchAtLogin = on
-        LoginItem.setEnabled(on)
+        if let notice = LoginItem.setEnabled(on) { append(notice) }
     }
 
     func setDockAutoHide(_ on: Bool) {
@@ -166,11 +170,12 @@ final class AppController: ObservableObject {
     }
 
     private func applyHotkeys() {
-        hotKeys.apply(
+        let failures = hotKeys.apply(
             enabled: store.config.globalHotkeysEnabled,
             pause: store.config.hotkeyPause,
             connectAll: store.config.hotkeyConnectAll,
             disconnectAll: store.config.hotkeyDisconnectAll)
+        for failure in failures { append("Shortcut \(failure)") }
     }
 
     // MARK: - Pause & quick actions (menu)
@@ -286,6 +291,10 @@ final class AppController: ObservableObject {
             // Re-apply system integration and reconcile to the new config.
             LoginItem.setEnabled(imported.launchAtLogin)
             dock.setEnabled(imported.dockAutoHide)
+            applyHotkeys()
+            if imported.showNotifications || imported.notifyUnexpectedDisconnect {
+                notifier.requestAuthorizationIfNeeded()
+            }
             engine.refreshMonitoring()
             engine.reevaluate()
             append("Imported settings from \(url.lastPathComponent)")

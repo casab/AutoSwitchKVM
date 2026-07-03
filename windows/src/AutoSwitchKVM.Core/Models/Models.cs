@@ -101,6 +101,10 @@ public sealed class Profile
 /// Source/Devices are computed accessors onto the active profile so call sites stay simple.
 public sealed class AppConfig
 {
+    /// Config schema version stamp (parity with the macOS AppConfig.schemaVersion; bump when a
+    /// migration is introduced).
+    public int SchemaVersion { get; set; } = 1;
+
     public List<Profile> Profiles { get; set; } = new() { new Profile { Name = "Default" } };
     public Guid ActiveProfileID { get; set; }
 
@@ -112,9 +116,10 @@ public sealed class AppConfig
     /// Base retry interval (seconds). Backoff between attempts is ConnectRetrySecs * 2^(attempt-1).
     public int ConnectRetrySecs { get; set; } = 2;
 
-    /// Per Bluetooth-call timeout. On Windows a pair includes a BR/EDR discovery inquiry (~30s for the
-    /// FindAllAsync fallback), so this must comfortably exceed that or the engine cancels its own
-    /// discovery mid-flight. Default 45s (vs macOS 15s).
+    /// Per Bluetooth-call timeout. Default 45s (vs macOS 15s): a Windows Classic-HID pair
+    /// legitimately takes ~14s, and the first attempts after a handoff must also absorb the
+    /// other-host-release race (the Mac may still hold the bond), so give the engine's
+    /// pair-retry loop generous per-call headroom.
     public int BtCallTimeoutSecs { get; set; } = 45;
 
     // Behavior
@@ -160,16 +165,26 @@ public sealed class AppConfig
         set { var p = ActiveProfile; if (p != null) p.Name = value; }
     }
 
-    /// Ensure invariants after construction/deserialization: at least one profile, and a valid
-    /// active id. Mirrors the macOS init/migration guard.
+    /// Ensure invariants after construction/deserialization: at least one profile, a valid
+    /// active id, and sane hotkeys. Mirrors the macOS init/migration guard.
     public AppConfig Normalized()
     {
         if (Profiles.Count == 0)
             Profiles.Add(new Profile { Name = "Default" });
         if (!Profiles.Any(p => p.Id == ActiveProfileID))
             ActiveProfileID = Profiles[0].Id;
+        HotkeyPause = SanitizeHotkey(HotkeyPause, KeyShortcut.DefaultPause);
+        HotkeyConnectAll = SanitizeHotkey(HotkeyConnectAll, KeyShortcut.DefaultConnectAll);
+        HotkeyDisconnectAll = SanitizeHotkey(HotkeyDisconnectAll, KeyShortcut.DefaultDisconnectAll);
         return this;
     }
+
+    /// A foreign (macOS) or mangled hotkey deserializes with Modifiers == 0 — its
+    /// `carbonModifiers` key is unknown here and its key code is in the wrong virtual-key space.
+    /// Never keep a bare-key global hotkey; fall back to the platform default. Explicit null
+    /// (cleared) stays null.
+    private static KeyShortcut? SanitizeHotkey(KeyShortcut? shortcut, KeyShortcut def)
+        => shortcut is null ? null : shortcut.Modifiers == 0 ? def : shortcut;
 
     public static AppConfig Default()
     {

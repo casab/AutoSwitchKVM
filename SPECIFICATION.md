@@ -81,7 +81,7 @@ display string convention, e.g. `⌃⌥⌘P` / on Windows `Ctrl+Alt+Cmd⇒Win` e
 | `arrivalDebounceMs` | int | `400` | **Arrival** debounce (snappier connect) |
 | `connectRetryMax` | int | `6` | Max connect attempts per handoff |
 | `connectRetrySecs` | int | `2` | Backoff **base** seconds |
-| `btCallTimeoutSecs` | int | `15` | Per Bluetooth-call timeout |
+| `btCallTimeoutSecs` | int | `15` macOS / `45` Windows | Per Bluetooth-call timeout. Platform default differs by design: a Windows pair legitimately takes ~14 s and must absorb the other-host-release race |
 | `showNotifications` | bool | `false` | Connect/disconnect alerts |
 | `notifyUnexpectedDisconnect` | bool | `false` | Alert on passive drops |
 | `launchAtLogin` | bool | `false` | Autostart |

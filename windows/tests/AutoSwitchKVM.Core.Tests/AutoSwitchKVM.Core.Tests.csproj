@@ -21,4 +21,11 @@
     <ProjectReference Include="..\..\src\AutoSwitchKVM.Core\AutoSwitchKVM.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The cross-platform golden config fixture (repo root testdata/) — the macOS suite reads
+         the same file, so a key rename on either side fails CI. -->
+    <Content Include="..\..\..\testdata\config-golden.json" Link="testdata\config-golden.json"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

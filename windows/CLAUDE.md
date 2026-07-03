@@ -101,7 +101,8 @@ testability):
     flow resolves correctly on Windows. Needs an on-device run to confirm vs the spikes.
 - `tests/AutoSwitchKVM.Core.Tests/` — xUnit; `ConfigTests.cs` + `Fakes/Fake{Usb,Bluetooth}*`.
 
-CI: a `windows-latest` job in `.github/workflows/ci.yml` runs `dotnet test` on the Core tests.
+CI: a `windows-latest` job in `.github/workflows/ci.yml` runs `dotnet test` on the Core tests and
+builds the WinUI app (x64 Release). Push builds run on `main`; PRs always build.
 
 ## Milestone 0 findings — the validated Bluetooth/USB contract
 
@@ -146,7 +147,7 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   `Pairing.PairAsync()` instant-fails this device. A PowerShell **scriptblock** `PairingRequested`
   handler deadlocks (single-threaded runspace) → `RejectedByHandler`; the spike uses a compiled
   delegate. In the C# app this is a non-issue (the callback runs on a threadpool thread).
-- **Pair is slow (~14s)** — set the per-call timeout generously (Core default `BtCallTimeoutSecs=30`,
+- **Pair is slow (~14s)** — set the per-call timeout generously (Core default `BtCallTimeoutSecs=45`,
   vs macOS 15). The Mac-release race (`CanPair=false` / not discoverable while the Mac still holds it)
   is absorbed by the engine's bounded retry + backoff; re-discover the endpoint on each attempt.
 - **Source signal nuance** (from the prototype): the KVM hub exposes an always-on instance
@@ -166,8 +167,11 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   which blocks ~30s (and the engine's per-call timeout then cancelled it mid-pair) - that was the
   whole cause of "auto never connects, manual-after-waiting does". Discovery (`FindAllAsync`) is only
   used now by the "Diagnose" button, not the pairing path.
-- **Tray menu: use `ContextMenuMode.PopupMenu`.** The XAML `SecondWindow` flyout renders as a blank
-  rectangle (the secondary window doesn't inherit the app theme); the native popup renders reliably.
+- **Tray menu: use `ContextMenuMode.PopupMenu` + `Command`, not `Click`.** The XAML `SecondWindow`
+  flyout renders as a blank rectangle (the secondary window doesn't inherit the app theme); the
+  native popup renders reliably. In PopupMenu mode the flyout is converted to a Win32 menu:
+  `MenuFlyout.Opening` never fires (rebuild the menu from `RightClickCommand` instead) and item
+  selection executes the item's `ICommand` — `Click` handlers are never raised.
 - **Size the Settings window** via `AppWindow.Resize` - a WinUI `Window` opens very large by default.
 
 ## When making changes

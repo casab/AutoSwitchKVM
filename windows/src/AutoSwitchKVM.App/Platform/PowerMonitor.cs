@@ -3,10 +3,13 @@ using Microsoft.Win32;
 namespace AutoSwitchKVM.App.Platform;
 
 /// Observes system sleep/wake (mirrors the macOS SleepWakeMonitor). On suspend we proactively
-/// disconnect (so another host can take the device while this PC sleeps); on resume we re-seed.
+/// release devices (so another host can take them while this PC sleeps); on resume we re-seed.
 ///
-/// SystemEvents callbacks arrive on a dedicated SystemEvents thread - the consumer (AppController)
-/// marshals OnSuspend/OnResume onto the UI thread before touching the engine.
+/// SystemEvents raises these on its broadcast thread (delivery requires a pumping message loop
+/// somewhere in the process — the WinUI dispatcher provides one). OnSuspend deliberately runs
+/// (and may block, bounded) on that thread: Windows gives only ~2 s of suspend grace, so the
+/// consumer must NOT defer the release to a queue that may never get pumped. OnResume may be
+/// marshaled to the UI thread as usual.
 public sealed class PowerMonitor : IDisposable
 {
     public Action? OnSuspend;

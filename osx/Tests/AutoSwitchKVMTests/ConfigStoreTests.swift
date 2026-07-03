@@ -37,4 +37,19 @@ final class ConfigStoreTests: XCTestCase {
         XCTAssertTrue(store.config.devices.isEmpty)
         XCTAssertEqual(store.config.debounceMs, AppConfig.default.debounceMs)
     }
+
+    /// A corrupt config falls back to defaults, but the unreadable original must be preserved —
+    /// the next debounced save would otherwise silently destroy the user's profiles.
+    func testCorruptConfigIsBackedUpBeforeDefaulting() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("{this is not json".utf8).write(to: dir.appendingPathComponent("config.json"))
+
+        let store = ConfigStore(directory: dir)
+
+        XCTAssertEqual(store.config.profiles.count, 1)  // defaults in use
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: dir.appendingPathComponent("config.json.bad").path),
+            "the corrupt original must be backed up for recovery")
+    }
 }

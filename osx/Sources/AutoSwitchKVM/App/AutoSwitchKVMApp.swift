@@ -46,4 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         AppController.shared.start()
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Flush any debounced config write — quitting inside the 0.4 s window would lose it.
+        AppController.shared.store.saveNow()
+    }
 }

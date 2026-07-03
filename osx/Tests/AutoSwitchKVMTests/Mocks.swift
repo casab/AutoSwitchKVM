@@ -19,6 +19,14 @@ final class MockBluetoothController: BluetoothController {
     private(set) var pairedAddrs = Set<String>()
     private(set) var calls: [String] = []
 
+    /// Awaited at the start of connect/disconnect — lets tests suspend a call mid-flight
+    /// to interleave engine runs at a realistic suspension point.
+    var beforeConnect: (@MainActor () async -> Void)?
+    var beforeDisconnect: (@MainActor () async -> Void)?
+    /// When set, connect/disconnect record the call, then throw without changing state.
+    var connectError: Error?
+    var disconnectError: Error?
+
     private func norm(_ a: String) -> String {
         a.replacingOccurrences(of: ":", with: "-").lowercased()
     }
@@ -26,12 +34,16 @@ final class MockBluetoothController: BluetoothController {
     func isConnected(_ address: String) async -> Bool { connectedAddrs.contains(norm(address)) }
 
     func connect(_ address: String) async throws {
+        if let hook = beforeConnect { await hook() }
         calls.append("connect:\(norm(address))")
+        if let error = connectError { throw error }
         connectedAddrs.insert(norm(address))
     }
 
     func disconnect(_ address: String) async throws {
+        if let hook = beforeDisconnect { await hook() }
         calls.append("disconnect:\(norm(address))")
+        if let error = disconnectError { throw error }
         connectedAddrs.remove(norm(address))
     }
 
@@ -52,6 +64,16 @@ final class MockBluetoothController: BluetoothController {
     var powered = true
     func isPoweredOn() async -> Bool? { powered }
 
-    func startMonitoring(addresses: [String], onChange: @escaping (String, Bool) -> Void) {}
-    func stopMonitoring() {}
+    private(set) var monitoringOnChange: ((String, Bool) -> Void)?
+
+    func startMonitoring(addresses: [String], onChange: @escaping (String, Bool) -> Void) {
+        monitoringOnChange = onChange
+    }
+
+    func stopMonitoring() { monitoringOnChange = nil }
+
+    /// Simulate an IOBluetooth connect/disconnect notification for a monitored device.
+    func fireConnectionChange(_ address: String, _ connected: Bool) {
+        monitoringOnChange?(norm(address), connected)
+    }
 }

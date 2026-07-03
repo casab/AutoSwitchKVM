@@ -21,8 +21,19 @@ public sealed class ConfigStore
     };
 
     private readonly object _saveGate = new();
+    private readonly object _writeGate = new();
     private Timer? _debounceTimer;
     private string? _pendingJson;
+    private long _pendingSeq;
+    private long _serializeSeq;   // guarded by _saveGate; stamps each serialized snapshot
+    private long _lastWrittenSeq;  // guarded by _writeGate; blocks stale flushes from clobbering newer saves
+
+    /// Invoked when a disk write fails — the host app logs/surfaces it. Saves never throw
+    /// (an exception in the debounce Timer callback would kill the process).
+    public Action<Exception>? OnSaveError { get; set; }
+
+    /// Test seam: runs just before a write attempts to hit the disk.
+    internal Action? BeforeWrite;
 
     public string Path { get; }
 
@@ -49,9 +60,31 @@ public sealed class ConfigStore
         }
         catch
         {
-            // Corrupt/unreadable config should not crash startup; fall back to defaults.
+            // Corrupt/unreadable config should not crash startup; fall back to defaults — but
+            // preserve the original first, or the next save silently destroys the user's profiles.
+            try { File.Copy(Path, Path + ".bad", overwrite: true); }
+            catch { /* best-effort */ }
             return AppConfig.Default();
         }
+    }
+
+    /// Strict parse for Import: throws on invalid JSON or JSON that is clearly not an
+    /// AutoSwitch KVM config, so the UI can surface an error instead of silently replacing the
+    /// user's config with defaults (which is what the forgiving Load() fallback would do).
+    public static AppConfig Parse(string json)
+    {
+        using (var doc = JsonDocument.Parse(json))
+        {
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                (!root.TryGetProperty("profiles", out _)
+                 && !root.TryGetProperty("source", out _)
+                 && !root.TryGetProperty("devices", out _)))
+            {
+                throw new JsonException("Not an AutoSwitch KVM configuration (no profiles/source/devices).");
+            }
+        }
+        return FromJson(json).Normalized();
     }
 
     /// Deserialize, migrating a legacy pre-profiles config (top-level source/devices, no profiles)
@@ -85,17 +118,26 @@ public sealed class ConfigStore
     /// Write immediately, replacing the existing config atomically.
     public void Save(AppConfig config)
     {
-        CancelDebouncedSave();
-        WriteJsonAtomic(Serialize(config));
+        string json;
+        long seq;
+        lock (_saveGate)
+        {
+            _pendingJson = null;   // cancel any debounced snapshot — this one is newer
+            _debounceTimer?.Dispose();
+            _debounceTimer = null;
+            json = Serialize(config);
+            seq = ++_serializeSeq;
+        }
+        WriteJsonAtomic(json, seq);
     }
 
     /// Schedule an atomic write. Rapid UI edits coalesce into one disk write.
     public void SaveDebounced(AppConfig config, int delayMs = 400)
     {
-        var json = Serialize(config);
         lock (_saveGate)
         {
-            _pendingJson = json;
+            _pendingJson = Serialize(config);
+            _pendingSeq = ++_serializeSeq;
             _debounceTimer?.Dispose();
             _debounceTimer = new Timer(_ => FlushPendingSave(), null, Math.Max(0, delayMs), Timeout.Infinite);
         }
@@ -104,47 +146,58 @@ public sealed class ConfigStore
     public void FlushPendingSave()
     {
         string? json;
+        long seq;
         lock (_saveGate)
         {
             json = _pendingJson;
+            seq = _pendingSeq;
             _pendingJson = null;
             _debounceTimer?.Dispose();
             _debounceTimer = null;
         }
 
         if (json != null)
-            WriteJsonAtomic(json);
+            WriteJsonAtomic(json, seq);
     }
 
     private static string Serialize(AppConfig config) =>
         JsonSerializer.Serialize(config.Normalized(), Options);
 
-    private void CancelDebouncedSave()
-    {
-        lock (_saveGate)
-        {
-            _pendingJson = null;
-            _debounceTimer?.Dispose();
-            _debounceTimer = null;
-        }
-    }
+    /// Test seam: serialize exactly as Save() would (golden-file parity tests).
+    internal static string ToJson(AppConfig config) => Serialize(config);
 
-    private void WriteJsonAtomic(string json)
+    private void WriteJsonAtomic(string json, long seq)
     {
-        var dir = System.IO.Path.GetDirectoryName(Path);
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
-
-        var tmp = Path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            File.WriteAllText(tmp, json);
-            File.Move(tmp, Path, overwrite: true);
+            BeforeWrite?.Invoke();
+            lock (_writeGate)
+            {
+                if (seq < _lastWrittenSeq) return;  // a newer snapshot already hit the disk
+                _lastWrittenSeq = seq;
+
+                var dir = System.IO.Path.GetDirectoryName(Path);
+                if (!string.IsNullOrEmpty(dir))
+                    Directory.CreateDirectory(dir);
+
+                var tmp = Path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    File.WriteAllText(tmp, json);
+                    File.Move(tmp, Path, overwrite: true);
+                }
+                finally
+                {
+                    try { if (File.Exists(tmp)) File.Delete(tmp); }
+                    catch { /* best-effort cleanup */ }
+                }
+            }
         }
-        finally
+        catch (Exception ex)
         {
-            try { if (File.Exists(tmp)) File.Delete(tmp); }
-            catch { /* best-effort cleanup */ }
+            // Never throw: this runs on the debounce Timer's pool thread, where an unhandled
+            // exception would take the whole process down.
+            OnSaveError?.Invoke(ex);
         }
     }
 }

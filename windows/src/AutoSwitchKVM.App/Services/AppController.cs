@@ -34,12 +34,8 @@ public sealed class AppController
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _usb = new PnpUsbMonitor(_dispatcher);   // marshal callbacks onto the UI thread
         _bt = new WinRtBluetooth(_dispatcher);
+        _store.OnSaveError = ex => Log.Error("config", "config save failed", ex);
         Config = _store.Load();
-        if (EnsureWindowsPairingPolicy(Config))
-        {
-            _store.Save(Config);
-            Log.Info("app", "enabled ManagePairing for all Windows devices so switch-away can release bonds");
-        }
         Log.Info("app", $"config loaded from {_store.Path}: profile='{Config.ActiveProfileName}', " +
             $"source={(Config.Source is null ? "(none)" : Config.Source.DisplayVidPid)}, devices={Config.Devices.Count}, paused={Config.Paused}");
 
@@ -71,12 +67,26 @@ public sealed class AppController
         _pollTimer = new Timer(_ => _dispatcher.TryEnqueue(() => { _ = Engine.PollStatusesAsync(); }),
             null, 10_000, 10_000);
 
-        // Sleep/wake: release on suspend, reconcile on resume (marshaled onto the UI thread).
-        _power.OnSuspend = () => _dispatcher.TryEnqueue(() =>
+        // Sleep/wake. Suspend runs on the SystemEvents thread and blocks it (bounded): an
+        // enqueued-to-UI handler may never get pumped before the machine sleeps, and the unpair
+        // is what frees the devices for the other host. The release talks to the Bluetooth
+        // controller directly (not the engine, which is UI-thread-only); resume re-seeds the
+        // engine so statuses reconcile.
+        _power.OnSuspend = () =>
         {
-            Log.Info("power", "suspend -> disconnect all");
-            _ = Engine.DisconnectAllNowAsync();
-        });
+            Log.Info("power", "suspend -> releasing enabled devices (bounded)");
+            try
+            {
+                // Task.Run keeps continuations off this thread's SynchronizationContext so the
+                // bounded Wait cannot deadlock.
+                var released = Task.Run(ReleaseEnabledDevicesAsync).Wait(TimeSpan.FromMilliseconds(1500));
+                Log.Info("power", released ? "suspend release complete" : "suspend release still running at sleep");
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("power", $"suspend release failed: {ex.Message}");
+            }
+        };
         _power.OnResume = () => _dispatcher.TryEnqueue(() =>
         {
             Log.Info("power", "resume -> re-evaluate");
@@ -107,6 +117,26 @@ public sealed class AppController
     }
 
     // ---- System integration ----
+
+    /// Release every *enabled* device (disconnect + unpair where managed) — the pre-sleep path.
+    /// Mirrors the macOS manualDisconnectAll: talks to the Bluetooth controller directly so it
+    /// can run off the UI thread; the engine reconciles statuses on resume.
+    private async Task ReleaseEnabledDevicesAsync()
+    {
+        var devices = Config.Devices.Where(d => d.Enabled).ToList();
+        foreach (var device in devices)
+        {
+            try
+            {
+                await _bt.DisconnectAsync(device.Address);
+                if (device.ManagePairing) await _bt.UnpairAsync(device.Address);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("power", $"release {device.Name} failed: {ex.Message}");
+            }
+        }
+    }
 
     private void HandleHotkey(HotKeyAction action)
     {
@@ -195,7 +225,9 @@ public sealed class AppController
         Config.Paused = !Config.Paused;
         Log.Info("action", $"pause -> {Config.Paused}");
         Save();
-        _ = Engine.EvaluateNowAsync();
+        // Resuming re-seeds so the engine reconciles to the current state (spec §3); pausing
+        // just stops acting — presence keeps updating via the USB monitor.
+        if (!Config.Paused) _ = Engine.ReevaluateAsync();
         StateChanged?.Invoke();
     }
 
@@ -314,38 +346,27 @@ public sealed class AppController
     public void Mutate(Action<AppConfig> change, bool refreshMonitoring = false, bool reevaluate = false)
     {
         change(Config);
-        EnsureWindowsPairingPolicy(Config);
         Save();
         if (refreshMonitoring) Engine.RefreshMonitoring();
         if (reevaluate) _ = Engine.ReevaluateAsync();
         StateChanged?.Invoke();
     }
 
-    /// Replace the whole config (e.g. after an import) and re-seed everything.
+    /// Replace the whole config (e.g. after an import) and re-seed everything, including the
+    /// system integrations that are keyed off config (hotkeys, launch-at-login).
     public void ReplaceConfig(AppConfig config)
     {
         Config = config.Normalized();
-        EnsureWindowsPairingPolicy(Config);
         Engine.Config = Config;
         _store.Save(Config);
         Engine.RefreshMonitoring();
+        ApplyHotkeys();
+        LoginItem.SetEnabled(Config.LaunchAtLogin);
         _ = Engine.ReevaluateAsync();
         StateChanged?.Invoke();
     }
 
     public void Save() => _store.SaveDebounced(Config);
-
-    private static bool EnsureWindowsPairingPolicy(AppConfig config)
-    {
-        var changed = false;
-        foreach (var device in config.Profiles.SelectMany(p => p.Devices))
-        {
-            if (device.ManagePairing) continue;
-            device.ManagePairing = true;
-            changed = true;
-        }
-        return changed;
-    }
 
     public string ConfigPath => _store.Path;
 }

@@ -65,10 +65,12 @@ final class SelectionEngine: ObservableObject {
 
         // Re-register Bluetooth observers whenever the device list changes (debounced so rapid
         // settings edits don't thrash). dropFirst avoids double-registering at startup.
+        // DispatchQueue.main, not RunLoop.main: the run-loop scheduler stalls in tracking mode
+        // (menu open / modal panel), which would freeze automation while the UI is interacted with.
         store.$config
             .map(\.devices)
             .removeDuplicates()
-            .debounce(for: .milliseconds(300), scheduler: RunLoop.main)
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .dropFirst()
             .sink { [weak self] _ in MainActor.assumeIsolated { self?.refreshMonitoring() } }
             .store(in: &cancellables)
@@ -79,9 +81,13 @@ final class SelectionEngine: ObservableObject {
     func startStatusMonitor(pollIntervalSeconds: Double = 10.0) {
         refreshMonitoring()
         statusTimer?.invalidate()
-        statusTimer = Timer.scheduledTimer(withTimeInterval: pollIntervalSeconds, repeats: true) { [weak self] _ in
+        // .common mode so the poll keeps running while a menu or modal panel is open
+        // (.default-mode timers stall during run-loop tracking).
+        let timer = Timer(timeInterval: pollIntervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.pollStatuses() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        statusTimer = timer
         Task { @MainActor in await pollStatuses() }
     }
 
@@ -178,9 +184,12 @@ final class SelectionEngine: ObservableObject {
         // Source present now → arrival debounce (snappier connect); gone → departure debounce.
         let ms = presentProductIDs.isEmpty ? store.config.debounceMs : store.config.arrivalDebounceMs
         let interval = Double(ms) / 1000.0
-        debounceTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+        // .common mode: the handoff must fire even while the user has a menu or panel open.
+        let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.evaluate() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        debounceTimer = timer
     }
 
     private func evaluate() {
@@ -206,7 +215,7 @@ final class SelectionEngine: ObservableObject {
             automationActed = false
             runToken += 1
             Log.engine.log("source absent → disconnecting enabled devices")
-            await disconnectAll()
+            await disconnectAll(token: runToken)
         }
     }
 
@@ -219,17 +228,21 @@ final class SelectionEngine: ObservableObject {
         runToken += 1
         let token = runToken
         for device in store.config.devices {
+            guard token == runToken else { return }  // superseded by a newer run
             busyDevices.insert(device.id)
+            defer { busyDevices.remove(device.id) }
             await connectOne(device, token: token, respectSelection: false)
-            busyDevices.remove(device.id)
         }
     }
 
     func disconnectAllNowImpl() async {
+        runToken += 1  // invalidate any in-flight connect run — the user asked for release
+        let token = runToken
         for device in store.config.devices {
+            guard token == runToken else { return }
             busyDevices.insert(device.id)
-            await disconnectOne(device)
-            busyDevices.remove(device.id)
+            defer { busyDevices.remove(device.id) }
+            await disconnectOne(device, token: token)
         }
     }
 
@@ -244,10 +257,12 @@ final class SelectionEngine: ObservableObject {
         return min(value, maxBackoffSeconds)
     }
 
-    /// Backoff with ±15% jitter, in nanoseconds (used between connect retries).
+    /// Backoff with ±15% jitter, in nanoseconds (used between connect retries). The 30 s cap
+    /// applies after jitter — the spec's cap bounds the real sleep.
     static func backoffNanos(base: Int, attempt: Int) -> UInt64 {
         let jittered = backoffSeconds(base: base, attempt: attempt) * Double.random(in: 0.85...1.15)
-        return UInt64(max(0, jittered) * 1_000_000_000)
+        let capped = min(jittered, Self.maxBackoffSeconds)
+        return UInt64(max(0, capped) * 1_000_000_000)
     }
 
     // MARK: - Actions
@@ -256,8 +271,8 @@ final class SelectionEngine: ObservableObject {
         for device in store.config.devices where device.enabled {
             guard token == runToken else { return }
             busyDevices.insert(device.id)
+            defer { busyDevices.remove(device.id) }
             await connectOne(device, token: token, respectSelection: true)
-            busyDevices.remove(device.id)
         }
     }
 
@@ -310,8 +325,16 @@ final class SelectionEngine: ObservableObject {
                 connectedCleanly = true
                 Log.bluetooth.log("openConnection \(device.name): completed cleanly")
             } catch {
-                statuses[device.id] = .error(String(describing: error))
-                Log.bluetooth.error("connect \(device.name): \(error)")
+                if case BTError.timeout = error, await bt.isConnected(addr) {
+                    // openConnection can complete just after the deadline (withTimeout abandons
+                    // it rather than waiting). A connection that arrived late is a success —
+                    // don't tear it down and burn a retry.
+                    connectedCleanly = true
+                    Log.bluetooth.log("connect \(device.name): completed just after timeout; keeping it")
+                } else {
+                    statuses[device.id] = .error(String(describing: error))
+                    Log.bluetooth.error("connect \(device.name): \(error)")
+                }
             }
 
             if connectedCleanly, await bt.isConnected(addr) {
@@ -337,27 +360,53 @@ final class SelectionEngine: ObservableObject {
         }
     }
 
-    private func disconnectAll() async {
+    private func disconnectAll(token: Int) async {
         for device in store.config.devices where device.enabled {
+            guard token == runToken else { return }  // superseded (e.g. the source came back)
             busyDevices.insert(device.id)
-            await disconnectOne(device)
-            busyDevices.remove(device.id)
+            defer { busyDevices.remove(device.id) }
+            await disconnectOne(device, token: token)
         }
     }
 
-    private func disconnectOne(_ device: BTDevice) async {
+    /// Tear down one device: disconnect, then (managePairing) unpair. `token` staleness is
+    /// re-checked after every await — a newer run owns the devices once it starts, and a stale
+    /// disconnect must not undo the connect/pair the new run just performed.
+    private func disconnectOne(_ device: BTDevice, token: Int) async {
         let cfg = store.config
         let addr = device.normalizedAddress
+
+        var disconnectError: Error?
         do {
             try await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.disconnect(addr) }
-            if device.managePairing {
+        } catch {
+            disconnectError = error
+            Log.bluetooth.error("disconnect \(device.name): \(error)")
+        }
+        guard token == runToken else { return }
+
+        // Release the bond even if the disconnect call failed — the bond is what blocks the
+        // other host (Magic Trackpad), and unpair tears the link down anyway.
+        if device.managePairing {
+            do {
                 try await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.unpair(addr) }
+            } catch {
+                guard token == runToken else { return }
+                statuses[device.id] = .error(String(describing: error))
+                Log.bluetooth.error("unpair \(device.name): \(error)")
+                return
             }
+            guard token == runToken else { return }
             statuses[device.id] = .disconnected
             onNotice?("Disconnected", device.name)
-        } catch {
-            statuses[device.id] = .error(String(describing: error))
-            Log.bluetooth.error("disconnect \(device.name): \(error)")
+            return
+        }
+
+        if let disconnectError {
+            statuses[device.id] = .error(String(describing: disconnectError))
+        } else {
+            statuses[device.id] = .disconnected
+            onNotice?("Disconnected", device.name)
         }
     }
 

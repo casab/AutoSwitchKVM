@@ -195,16 +195,13 @@ struct AppConfig: Codable {
         paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
         dockAutoHide = try c.decodeIfPresent(Bool.self, forKey: .dockAutoHide) ?? false
         globalHotkeysEnabled = try c.decodeIfPresent(Bool.self, forKey: .globalHotkeysEnabled) ?? false
-        // Absent key (old config) → the default combo; present-but-null → intentionally cleared.
-        hotkeyPause =
-            c.contains(.hotkeyPause)
-            ? try c.decodeIfPresent(KeyShortcut.self, forKey: .hotkeyPause) : .defaultPause
-        hotkeyConnectAll =
-            c.contains(.hotkeyConnectAll)
-            ? try c.decodeIfPresent(KeyShortcut.self, forKey: .hotkeyConnectAll) : .defaultConnectAll
-        hotkeyDisconnectAll =
-            c.contains(.hotkeyDisconnectAll)
-            ? try c.decodeIfPresent(KeyShortcut.self, forKey: .hotkeyDisconnectAll) : .defaultDisconnectAll
+        // Absent key (old config) → the default combo; present-but-null → intentionally cleared;
+        // present-but-foreign/malformed (e.g. a Windows export stores `modifiers` in the Windows
+        // virtual-key space instead of `carbonModifiers`) → the platform default, so an import
+        // never fails wholesale and never registers a wrong-key shortcut.
+        hotkeyPause = Self.decodeHotkey(c, .hotkeyPause, default: .defaultPause)
+        hotkeyConnectAll = Self.decodeHotkey(c, .hotkeyConnectAll, default: .defaultConnectAll)
+        hotkeyDisconnectAll = Self.decodeHotkey(c, .hotkeyDisconnectAll, default: .defaultDisconnectAll)
 
         var list = try c.decodeIfPresent([Profile].self, forKey: .profiles) ?? []
         if list.isEmpty {
@@ -215,6 +212,21 @@ struct AppConfig: Codable {
         profiles = list
         let saved = try c.decodeIfPresent(UUID.self, forKey: .activeProfileID)
         activeProfileID = (saved.flatMap { id in list.contains { $0.id == id } ? id : nil }) ?? list[0].id
+    }
+
+    /// Tolerant hotkey decode: absent → `default`; explicit null → nil (cleared); a value that
+    /// doesn't decode as a native shortcut (foreign platform / hand-edited) → `default`.
+    /// (do/catch, not `try?` — `try?` would flatten the nested optional and turn an explicit
+    /// null into the default instead of "cleared".)
+    private static func decodeHotkey(
+        _ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys, default def: KeyShortcut?
+    ) -> KeyShortcut? {
+        guard c.contains(key) else { return def }
+        do {
+            return try c.decodeIfPresent(KeyShortcut.self, forKey: key)
+        } catch {
+            return def
+        }
     }
 
     func encode(to encoder: Encoder) throws {

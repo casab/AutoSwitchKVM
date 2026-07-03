@@ -33,14 +33,17 @@ final class DockManager {
     }
 
     private static func setAutohide(_ flag: Bool) {
-        run("/usr/bin/defaults", ["write", "com.apple.dock", "autohide", "-bool", flag ? "true" : "false"])
+        // Wait for the pref write to land before restarting the Dock — launching killall
+        // concurrently races the write, and the Dock can relaunch with the old value.
+        run("/usr/bin/defaults", ["write", "com.apple.dock", "autohide", "-bool", flag ? "true" : "false"], wait: true)
         run("/usr/bin/killall", ["Dock"])
     }
 
-    private static func run(_ path: String, _ args: [String]) {
+    private static func run(_ path: String, _ args: [String], wait: Bool = false) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: path)
         p.arguments = args
         try? p.run()
+        if wait { p.waitUntilExit() }
     }
 }

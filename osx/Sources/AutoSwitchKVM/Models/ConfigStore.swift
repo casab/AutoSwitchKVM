@@ -22,10 +22,18 @@ final class ConfigStore: ObservableObject {
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("config.json")
 
-        if let data = try? Data(contentsOf: fileURL),
-            let loaded = try? JSONDecoder().decode(AppConfig.self, from: data)
-        {
-            self.config = loaded
+        if let data = try? Data(contentsOf: fileURL) {
+            if let loaded = try? JSONDecoder().decode(AppConfig.self, from: data) {
+                self.config = loaded
+            } else {
+                // Preserve the unreadable original before defaulting — the next debounced save
+                // would otherwise silently destroy the user's profiles.
+                let backup = fileURL.appendingPathExtension("bad")
+                try? fm.removeItem(at: backup)
+                try? fm.copyItem(at: fileURL, to: backup)
+                Log.app.error("config.json was unreadable; backed it up to config.json.bad and reset to defaults")
+                self.config = .default
+            }
         } else {
             self.config = .default
         }

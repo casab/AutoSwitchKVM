@@ -54,13 +54,19 @@ final class HotKeyManager {
     private var handlerRef: EventHandlerRef?
     private let signature: OSType = 0x41534B56  // 'ASKV'
 
-    func apply(enabled: Bool, pause: KeyShortcut?, connectAll: KeyShortcut?, disconnectAll: KeyShortcut?) {
+    /// Returns human-readable descriptions of any combos that failed to register (e.g. already
+    /// taken by another app) so the caller can surface them — a silent failure looks like an
+    /// assigned-but-dead shortcut.
+    @discardableResult
+    func apply(enabled: Bool, pause: KeyShortcut?, connectAll: KeyShortcut?, disconnectAll: KeyShortcut?) -> [String] {
         unregister()
-        guard enabled else { return }
+        guard enabled else { return [] }
         installHandler()
-        register(pause, action: .togglePause)
-        register(connectAll, action: .connectAll)
-        register(disconnectAll, action: .disconnectAll)
+        var failures: [String] = []
+        register(pause, action: .togglePause, failures: &failures)
+        register(connectAll, action: .connectAll, failures: &failures)
+        register(disconnectAll, action: .disconnectAll, failures: &failures)
+        return failures
     }
 
     private func installHandler() {
@@ -84,13 +90,18 @@ final class HotKeyManager {
             }, 1, &eventType, selfPtr, &handlerRef)
     }
 
-    private func register(_ shortcut: KeyShortcut?, action: Action) {
+    private func register(_ shortcut: KeyShortcut?, action: Action, failures: inout [String]) {
         guard let shortcut else { return }
         var ref: EventHotKeyRef?
         let hkID = EventHotKeyID(signature: signature, id: action.rawValue)
-        RegisterEventHotKey(
+        let status = RegisterEventHotKey(
             shortcut.keyCode, shortcut.carbonModifiers, hkID,
             GetApplicationEventTarget(), 0, &ref)
+        if status != noErr || ref == nil {
+            Log.app.error("RegisterEventHotKey failed for \(shortcut.display) (OSStatus \(status))")
+            failures.append("\(shortcut.display) could not be registered (in use by another app?)")
+            return
+        }
         hotKeyRefs.append(ref)
     }
 

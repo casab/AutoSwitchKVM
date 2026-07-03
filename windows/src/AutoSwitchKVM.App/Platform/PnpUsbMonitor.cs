@@ -91,20 +91,35 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
         old?.Dispose();
     }
 
+    private int _reconciling;
+
     private void Reconcile()
     {
-        List<UsbDeviceInfo> snapshot;
-        try { snapshot = Enumerate(); }
-        catch (Exception ex) { Log.Warn("usb", $"reconcile enumerate failed: {ex.Message}"); return; }
-
-        var signature = new HashSet<uint>(snapshot.Select(d => ((uint)d.VendorID << 16) | d.ProductID));
-        lock (_gate)
+        // One reconcile at a time: overlapping runs (debounce + periodic timer during the KVM
+        // re-enumeration storm) can emit snapshots out of order and leave _lastSignature stale.
+        // A skipped run is fine — the next periodic tick converges.
+        if (Interlocked.Exchange(ref _reconciling, 1) == 1) return;
+        try
         {
-            if (signature.SetEquals(_lastSignature)) return;
-            _lastSignature = signature;
+            lock (_gate) { if (!_started) return; }  // don't emit after Stop()
+
+            List<UsbDeviceInfo> snapshot;
+            try { snapshot = Enumerate(); }
+            catch (Exception ex) { Log.Warn("usb", $"reconcile enumerate failed: {ex.Message}"); return; }
+
+            var signature = new HashSet<uint>(snapshot.Select(d => ((uint)d.VendorID << 16) | d.ProductID));
+            lock (_gate)
+            {
+                if (signature.SetEquals(_lastSignature)) return;
+                _lastSignature = signature;
+            }
+            Log.Info("usb", $"snapshot changed: {snapshot.Count} USB device(s)");
+            Emit(snapshot);
         }
-        Log.Info("usb", $"snapshot changed: {snapshot.Count} USB device(s)");
-        Emit(snapshot);
+        finally
+        {
+            Interlocked.Exchange(ref _reconciling, 0);
+        }
     }
 
     private void Emit(IReadOnlyList<UsbDeviceInfo> snapshot)
