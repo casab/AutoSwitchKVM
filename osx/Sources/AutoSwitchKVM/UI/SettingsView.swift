@@ -469,6 +469,11 @@ struct GeneralTab: View {
                         get: { store.config.notifyUnexpectedDisconnect },
                         set: { controller.setNotifyUnexpectedDisconnect($0) }))
                 Toggle(
+                    "Auto-reconnect when a device drops unexpectedly",
+                    isOn: Binding(
+                        get: { store.config.autoReconnectOnDrop },
+                        set: { store.config.autoReconnectOnDrop = $0 }))
+                Toggle(
                     "Launch at login",
                     isOn: Binding(
                         get: { store.config.launchAtLogin },

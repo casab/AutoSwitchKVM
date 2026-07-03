@@ -108,6 +108,12 @@ the new profile but does not force-disconnect the previous profile's devices.
   via an IMP cast in `IOBluetoothController` — there is no public unpair API. Its return value is
   unreliable, so success is judged by re-checking `isPaired()`. Validated on a Magic Trackpad; if it
   ever breaks, the fallback is to bundle `blueutil` behind the `BluetoothController` protocol.
+- **A bond record can go stale** (observed on hardware): the other host's late release — or a
+  device power-cycle — can invalidate the link key while `isPaired()` still reads true, producing
+  endless "pair: skipped" + `openConnection` timeouts. The engine self-heals: connect retries ≥ 2
+  for `managePairing` devices unpair and re-pair from scratch, and an unexpected drop while the
+  source is present triggers one rate-limited auto-reconnect (`autoReconnectOnDrop`, default on).
+  Don't reintroduce a bare pair-if-not-paired retry loop.
 - **Notifications and launch-at-login require a real `.app` bundle.** `Notifier` no-ops unless
   `Bundle.main.bundleURL.pathExtension == "app"` because `UNUserNotificationCenter.current()`
   crashes in a bare SwiftPM executable.

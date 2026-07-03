@@ -52,9 +52,14 @@ final class MockBluetoothController: BluetoothController {
         pairedAddrs.insert(norm(address))
     }
 
+    /// Invoked after a successful unpair — lets tests model state that a fresh bond repairs
+    /// (e.g. clear `connectError` to simulate a dead link key being replaced).
+    var afterUnpair: (@MainActor () -> Void)?
+
     func unpair(_ address: String) async throws {
         calls.append("unpair:\(norm(address))")
         pairedAddrs.remove(norm(address))
+        afterUnpair?()
     }
 
     func pairedDevices() async -> [PairedDeviceInfo] {
@@ -75,5 +80,11 @@ final class MockBluetoothController: BluetoothController {
     /// Simulate an IOBluetooth connect/disconnect notification for a monitored device.
     func fireConnectionChange(_ address: String, _ connected: Bool) {
         monitoringOnChange?(norm(address), connected)
+    }
+
+    /// Simulate a passive drop: the device disconnects on its own and the notification fires.
+    func simulateConnectionDrop(_ address: String) {
+        connectedAddrs.remove(norm(address))
+        monitoringOnChange?(norm(address), false)
     }
 }

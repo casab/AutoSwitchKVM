@@ -249,10 +249,51 @@ final class SelectionEngineTests: XCTestCase {
         XCTAssertTrue(message.contains("gave up"), "exhaustion message expected, got: \(message)")
     }
 
+    /// A bond record can survive while the device no longer honors its link key (the other host
+    /// re-paired it, or it was power-cycled) — seen on hardware as endless "pair: skipped" +
+    /// openConnection timeouts until the user manually removes the device in System Settings.
+    /// Retries must escalate to a fresh re-pair instead of trusting isPaired().
+    func testStaleBondEscalatesToRepairOnRetry() async {
+        let (engine, bt, store) = makeEngine(managePairing: true)
+        store.config.connectRetryMax = 2
+        store.config.connectRetrySecs = 0  // no real backoff sleep in the test
+
+        try? await bt.pair(addr)  // the bond record exists...
+        bt.connectError = BTError.connectFailed(-1)  // ...but the device won't honor it
+        bt.afterUnpair = { bt.connectError = nil }  // a fresh bond makes connect work again
+
+        engine.handleUSB((vendorID: vendor, productID: product, added: true))
+        await engine.evaluateNow()
+
+        guard let unpairIndex = bt.calls.firstIndex(of: "unpair:\(addr)") else {
+            return XCTFail("retry must unpair the stale bond; calls: \(bt.calls)")
+        }
+        guard let lastPairIndex = bt.calls.lastIndex(of: "pair:\(addr)") else {
+            return XCTFail("expected a pair call; calls: \(bt.calls)")
+        }
+        XCTAssertLessThan(unpairIndex, lastPairIndex, "unpair must precede the fresh pair")
+        XCTAssertTrue(bt.connectedAddrs.contains(addr))
+        XCTAssertEqual(engine.statuses.values.first, .connected)
+    }
+
+    /// The escalation is for managed bonds only — unmanaged devices must never be unpaired.
+    func testUnmanagedRetryNeverUnpairs() async {
+        let (engine, bt, store) = makeEngine(managePairing: false)
+        store.config.connectRetryMax = 2
+        store.config.connectRetrySecs = 0
+        bt.connectError = BTError.connectFailed(-1)
+
+        engine.handleUSB((vendorID: vendor, productID: product, added: true))
+        await engine.evaluateNow()
+
+        XCTAssertFalse(bt.calls.contains("unpair:\(addr)"))
+    }
+
     /// Spec §3: a passive drop while the source is present, BT is on, and no transition is in
     /// flight is an unexpected disconnect.
     func testUnexpectedDisconnectFiresWhenDeviceDropsWhileSelected() async {
-        let (engine, bt, _) = makeEngine()
+        let (engine, bt, store) = makeEngine()
+        store.config.autoReconnectOnDrop = false  // isolate the notification/status behavior
         var dropped: BTDevice?
         engine.onUnexpectedDisconnect = { dropped = $0 }
         engine.refreshMonitoring()
@@ -265,6 +306,82 @@ final class SelectionEngineTests: XCTestCase {
 
         XCTAssertEqual(dropped?.name, "Trackpad")
         XCTAssertEqual(engine.statuses.values.first, .disconnected)
+    }
+
+    // MARK: - Auto-reconnect on unexpected drop
+
+    /// A device that drops unexpectedly while the source is present must reconnect by itself —
+    /// on hardware, a mid-session drop otherwise leaves the device dead until manual action.
+    func testAutoReconnectsAfterUnexpectedDrop() async {
+        let (engine, bt, _) = makeEngine()
+        engine.autoReconnectDelayMs = 0
+        engine.refreshMonitoring()
+        engine.handleUSB((vendorID: vendor, productID: product, added: true))
+        await engine.evaluateNow()
+        XCTAssertTrue(bt.connectedAddrs.contains(addr))
+
+        bt.simulateConnectionDrop(addr)
+
+        await waitUntil({ bt.connectedAddrs.contains(addr) }, "device was not auto-reconnected")
+        XCTAssertEqual(engine.statuses.values.first, .connected)
+    }
+
+    /// One reconnect per drop, rate-limited — a flapping device must not cause a reconnect storm.
+    func testAutoReconnectIsRateLimited() async {
+        let (engine, bt, _) = makeEngine()
+        engine.autoReconnectDelayMs = 0
+        engine.refreshMonitoring()
+        engine.handleUSB((vendorID: vendor, productID: product, added: true))
+        await engine.evaluateNow()
+
+        bt.simulateConnectionDrop(addr)
+        await waitUntil({ bt.connectedAddrs.contains(addr) }, "first drop must auto-reconnect")
+
+        let callsAfterFirst = bt.calls.count
+        bt.simulateConnectionDrop(addr)  // second drop inside the rate window
+        for _ in 0..<20 {  // give a (wrong) reconnect a chance to run
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertEqual(bt.calls.count, callsAfterFirst, "second drop within the rate window must not reconnect")
+        XCTAssertEqual(engine.statuses.values.first, .disconnected)
+    }
+
+    /// Paused means paused: no automatic reconnect either.
+    func testAutoReconnectSkippedWhilePaused() async {
+        let (engine, bt, store) = makeEngine()
+        engine.autoReconnectDelayMs = 0
+        engine.refreshMonitoring()
+        engine.handleUSB((vendorID: vendor, productID: product, added: true))
+        await engine.evaluateNow()
+
+        store.config.paused = true
+        bt.simulateConnectionDrop(addr)
+        for _ in 0..<20 {
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertFalse(bt.connectedAddrs.contains(addr))
+    }
+
+    /// The trigger requires the source to be present (manual connects while switched away
+    /// must not fight the other host over a dropped device).
+    func testAutoReconnectSkippedWhenSourceAbsent() async {
+        let (engine, bt, _) = makeEngine()
+        engine.autoReconnectDelayMs = 0
+        engine.refreshMonitoring()
+        await engine.connectAllNowImpl()  // manual connect; source absent
+        XCTAssertTrue(bt.connectedAddrs.contains(addr))
+
+        bt.simulateConnectionDrop(addr)
+        for _ in 0..<20 {
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertFalse(bt.connectedAddrs.contains(addr))
     }
 
     /// Spec §3 connect flow: pair → drop the transient post-pair link → clean reconnect,

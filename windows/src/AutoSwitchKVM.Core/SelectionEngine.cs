@@ -48,6 +48,10 @@ public sealed class SelectionEngine
     internal Func<int, Task> SleepHook = ms => Task.Delay(ms);
     /// Settle delay after pairing before the clean reconnect (ms).
     internal int PostPairSettleMs = 800;
+    /// Auto-reconnect scheduling (internal so tests can make it deterministic).
+    internal int AutoReconnectDelayMs = 2000;
+    internal int AutoReconnectMinIntervalSecs = 30;
+    private readonly Dictionary<Guid, DateTime> _lastAutoReconnect = new();
 
     public SelectionEngine(AppConfig config, IUsbMonitor usb, IBluetoothController bt)
     {
@@ -101,7 +105,36 @@ public sealed class SelectionEngine
         if (!connected && old == DeviceStatus.Connected && Selected && BluetoothPowered && device.Enabled)
         {
             OnUnexpectedDisconnect?.Invoke(device);
+            MaybeAutoReconnect(device);
         }
+    }
+
+    /// One bounded, rate-limited reconnect after an unexpected drop (opt-out via
+    /// AutoReconnectOnDrop). Uses the current run token so any newer run supersedes it;
+    /// combined with the retry escalation (re-pair from scratch on attempt >= 2) this
+    /// self-heals even when the device stopped honoring its bond.
+    private void MaybeAutoReconnect(BTDevice device)
+    {
+        if (!Config.AutoReconnectOnDrop || Config.Paused) return;
+        if (_busyDevices.Contains(device.Id)) return;
+        var now = DateTime.UtcNow;
+        if (_lastAutoReconnect.TryGetValue(device.Id, out var last) &&
+            (now - last).TotalSeconds < AutoReconnectMinIntervalSecs)
+        {
+            return;
+        }
+        _lastAutoReconnect[device.Id] = now;
+        _ = AutoReconnectAsync(device, _runToken);
+    }
+
+    private async Task AutoReconnectAsync(BTDevice device, int token)
+    {
+        await SleepHook(AutoReconnectDelayMs);
+        if (token != _runToken || !Selected || !BluetoothPowered || Config.Paused) return;
+        if (_busyDevices.Contains(device.Id)) return;
+        _busyDevices.Add(device.Id);
+        try { await ConnectOneAsync(device, token, respectSelection: true); }
+        finally { _busyDevices.Remove(device.Id); }
     }
 
     /// Refresh adapter power; on a false->true transition, re-seed so devices reconnect.
@@ -328,6 +361,15 @@ public sealed class SelectionEngine
             {
                 if (device.ManagePairing)
                 {
+                    if (attempt > 1)
+                    {
+                        // A bond that survived a failed attempt may be a link key the device no
+                        // longer honors (the other host re-paired it, or it was power-cycled) —
+                        // observed on hardware as endless pair-skips + connect timeouts. Re-pair
+                        // from scratch; PairAsync alone short-circuits on IsPaired, so drop the
+                        // stale bond first (best-effort).
+                        try { await WithTimeoutAsync(ct => _bt.UnpairAsync(addr, ct)); } catch { }
+                    }
                     await WithTimeoutAsync(ct => _bt.PairAsync(addr, ct));
                     // The connection reported right after pairing is unreliable; drop and reconnect.
                     try { await WithTimeoutAsync(ct => _bt.DisconnectAsync(addr, ct)); } catch { }

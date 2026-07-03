@@ -528,6 +528,7 @@ public sealed partial class SettingsWindow : Window
         panel.Children.Add(ToggleRow("Pause automation", C.Config.Paused, on => C.Mutate(c => c.Paused = on, reevaluate: true)));
         panel.Children.Add(ToggleRow("Show notifications", C.Config.ShowNotifications, on => C.Mutate(c => c.ShowNotifications = on)));
         panel.Children.Add(ToggleRow("Notify on unexpected disconnect", C.Config.NotifyUnexpectedDisconnect, on => C.Mutate(c => c.NotifyUnexpectedDisconnect = on)));
+        panel.Children.Add(ToggleRow("Auto-reconnect on unexpected disconnect", C.Config.AutoReconnectOnDrop, on => C.Mutate(c => c.AutoReconnectOnDrop = on)));
         panel.Children.Add(ToggleRow("Launch at login", C.Config.LaunchAtLogin, on => C.SetLaunchAtLogin(on)));
 
         panel.Children.Add(Header("Global shortcuts"));

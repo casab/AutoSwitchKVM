@@ -37,6 +37,7 @@ public class GoldenConfigTests
         Assert.Equal(25, cfg.BtCallTimeoutSecs);
         Assert.True(cfg.ShowNotifications);
         Assert.True(cfg.NotifyUnexpectedDisconnect);
+        Assert.True(cfg.AutoReconnectOnDrop);
         Assert.True(cfg.LaunchAtLogin);
         Assert.False(cfg.Paused);
         Assert.True(cfg.DockAutoHide);

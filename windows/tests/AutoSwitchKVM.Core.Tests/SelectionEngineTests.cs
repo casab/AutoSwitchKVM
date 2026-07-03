@@ -272,12 +272,54 @@ public class SelectionEngineTests
         Assert.Contains("gave up", status.Label);
     }
 
+    /// A bond record can survive while the device no longer honors its link key (the other host
+    /// re-paired it, or it was power-cycled) — seen on hardware as endless pair-skips + connect
+    /// timeouts until the user manually removes the device. Retries must escalate to a fresh
+    /// re-pair instead of trusting IsPaired.
+    [Fact]
+    public async Task Stale_bond_escalates_to_repair_on_retry()
+    {
+        var engine = MakeEngine(out var bt, out var config, managePairing: true);
+        config.ConnectRetryMax = 2;
+        config.ConnectRetrySecs = 0;
+
+        await bt.PairAsync(Addr);                                  // the bond record exists...
+        bt.ConnectError = new BluetoothException("dead link key"); // ...but the device won't honor it
+        bt.AfterUnpair = () => bt.ConnectError = null;             // a fresh bond makes connect work
+
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+
+        var unpairIndex = bt.Calls.IndexOf($"unpair:{Norm(Addr)}");
+        var lastPairIndex = bt.Calls.LastIndexOf($"pair:{Norm(Addr)}");
+        Assert.True(unpairIndex >= 0, $"retry must unpair the stale bond; calls: [{string.Join(", ", bt.Calls)}]");
+        Assert.True(unpairIndex < lastPairIndex, "unpair must precede the fresh pair");
+        Assert.Contains(Norm(Addr), bt.Connected);
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
+    }
+
+    /// The escalation is for managed bonds only — unmanaged devices must never be unpaired.
+    [Fact]
+    public async Task Unmanaged_retry_never_unpairs()
+    {
+        var engine = MakeEngine(out var bt, out var config, managePairing: false);
+        config.ConnectRetryMax = 2;
+        config.ConnectRetrySecs = 0;
+        bt.ConnectError = new BluetoothException("nope");
+
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+
+        Assert.DoesNotContain($"unpair:{Norm(Addr)}", bt.Calls);
+    }
+
     /// Spec §3: a passive drop while the source is present, BT is on, and no transition is in
     /// flight is an unexpected disconnect.
     [Fact]
     public async Task Unexpected_disconnect_fires_when_device_drops_while_selected()
     {
-        var engine = MakeEngine(out var bt, out _);
+        var engine = MakeEngine(out var bt, out var config);
+        config.AutoReconnectOnDrop = false;  // isolate the notification/status behavior
         BTDevice? dropped = null;
         engine.OnUnexpectedDisconnect = d => dropped = d;
         engine.RefreshMonitoring();
@@ -290,6 +332,84 @@ public class SelectionEngineTests
 
         Assert.Equal("Trackpad", dropped?.Name);
         Assert.Equal(DeviceStatus.Disconnected, engine.Statuses.Values.Single());
+    }
+
+    // ---- Auto-reconnect on unexpected drop (mirrors the macOS tests) ----
+
+    private static void SimulateDrop(FakeBluetoothController bt, string address)
+    {
+        bt.Connected.Remove(Norm(address));
+        bt.FireConnectionChange(address, connected: false);
+    }
+
+    /// A device that drops unexpectedly while the source is present must reconnect by itself —
+    /// on hardware, a mid-session drop otherwise leaves the device dead until manual action.
+    [Fact]
+    public async Task Auto_reconnects_after_unexpected_drop()
+    {
+        var engine = MakeEngine(out var bt, out _);
+        engine.AutoReconnectDelayMs = 0;
+        engine.RefreshMonitoring();
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+        Assert.Contains(Norm(Addr), bt.Connected);
+
+        SimulateDrop(bt, Addr);  // fakes complete synchronously, so the reconnect has run
+
+        Assert.Contains(Norm(Addr), bt.Connected);
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
+    }
+
+    /// One reconnect per drop, rate-limited — a flapping device must not cause a reconnect storm.
+    [Fact]
+    public async Task Auto_reconnect_is_rate_limited()
+    {
+        var engine = MakeEngine(out var bt, out _);
+        engine.AutoReconnectDelayMs = 0;
+        engine.RefreshMonitoring();
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+
+        SimulateDrop(bt, Addr);
+        Assert.Contains(Norm(Addr), bt.Connected);  // first drop reconnected
+
+        var callsAfterFirst = bt.Calls.Count;
+        SimulateDrop(bt, Addr);  // second drop inside the rate window
+
+        Assert.Equal(callsAfterFirst, bt.Calls.Count);
+        Assert.Equal(DeviceStatus.Disconnected, engine.Statuses.Values.Single());
+    }
+
+    /// Paused means paused: no automatic reconnect either.
+    [Fact]
+    public async Task Auto_reconnect_skipped_while_paused()
+    {
+        var engine = MakeEngine(out var bt, out var config);
+        engine.AutoReconnectDelayMs = 0;
+        engine.RefreshMonitoring();
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+
+        config.Paused = true;
+        SimulateDrop(bt, Addr);
+
+        Assert.DoesNotContain(Norm(Addr), bt.Connected);
+    }
+
+    /// The trigger requires the source to be present (manual connects while switched away
+    /// must not fight the other host over a dropped device).
+    [Fact]
+    public async Task Auto_reconnect_skipped_when_source_absent()
+    {
+        var engine = MakeEngine(out var bt, out _);
+        engine.AutoReconnectDelayMs = 0;
+        engine.RefreshMonitoring();
+        await engine.ConnectAllNowAsync();  // manual connect; source absent
+        Assert.Contains(Norm(Addr), bt.Connected);
+
+        SimulateDrop(bt, Addr);
+
+        Assert.DoesNotContain(Norm(Addr), bt.Connected);
     }
 
     /// Spec §3 connect flow: pair → drop the transient post-pair link → clean reconnect,

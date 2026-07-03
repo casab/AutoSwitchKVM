@@ -41,6 +41,7 @@ final class GoldenConfigTests: XCTestCase {
         XCTAssertEqual(cfg.btCallTimeoutSecs, 25)
         XCTAssertTrue(cfg.showNotifications)
         XCTAssertTrue(cfg.notifyUnexpectedDisconnect)
+        XCTAssertTrue(cfg.autoReconnectOnDrop)
         XCTAssertTrue(cfg.launchAtLogin)
         XCTAssertFalse(cfg.paused)
         XCTAssertTrue(cfg.dockAutoHide)

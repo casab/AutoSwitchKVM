@@ -138,6 +138,12 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
 - **The bond is exclusive.** While Windows holds the pairing the Mac can't connect, so the handoff is
   pair-on-arrive / **unpair-on-leave** — there is no passive "disconnect" for Classic HID, and
   `disconnect` ≡ unpair. `managePairing` is effectively **mandatory**, not optional, for such devices.
+- **The release can land AFTER the other host re-paired** (observed on hardware): the departure
+  chain (USB storm → snapshot → departure debounce → `BluetoothRemoveDevice`) takes several
+  seconds, and a fast Mac re-pairs first — the late removal then disturbs the device and can
+  leave the Mac holding a bond the device no longer honors. Both engines self-heal (retry ≥ 2
+  re-pairs from scratch; `autoReconnectOnDrop` recovers mid-session drops); the structural fix is
+  the planned LAN release-ack handshake.
 - **Release with the Win32 `BluetoothRemoveDevice`, not just WinRT `UnpairAsync`.** WinRT unpair
   removes the pairing record on the Windows side but can leave the device attached at the radio level,
   so the trackpad won't release to the other host. `BluetoothRemoveDevice` (the classic "Remove

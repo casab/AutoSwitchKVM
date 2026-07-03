@@ -52,6 +52,11 @@ final class SelectionEngine: ObservableObject {
     /// Devices with an in-flight connect/disconnect; the poller leaves their status alone.
     private var busyDevices = Set<UUID>()
 
+    // Auto-reconnect scheduling (internal so tests can make it deterministic).
+    var autoReconnectDelayMs = 2000
+    var autoReconnectMinInterval: TimeInterval = 30
+    private var lastAutoReconnect: [UUID: Date] = [:]
+
     init(store: ConfigStore, usb: USBMonitoring, bt: BluetoothController) {
         self.store = store
         self.usb = usb
@@ -128,6 +133,35 @@ final class SelectionEngine: ObservableObject {
         if !connected, old == .connected, selected, bluetoothPowered, device.enabled {
             Log.engine.log("\(device.name) dropped unexpectedly while source present")
             onUnexpectedDisconnect?(device)
+            maybeAutoReconnect(device)
+        }
+    }
+
+    /// One bounded, rate-limited reconnect after an unexpected drop (opt-out via
+    /// `autoReconnectOnDrop`). Uses the current runToken so any newer run supersedes it;
+    /// combined with the retry escalation (re-pair from scratch on attempt ≥ 2) this
+    /// self-heals even when the device stopped honoring its bond.
+    private func maybeAutoReconnect(_ device: BTDevice) {
+        guard store.config.autoReconnectOnDrop, !store.config.paused else { return }
+        guard !busyDevices.contains(device.id) else { return }
+        let now = Date()
+        if let last = lastAutoReconnect[device.id], now.timeIntervalSince(last) < autoReconnectMinInterval {
+            Log.engine.log("not auto-reconnecting \(device.name) (rate-limited)")
+            return
+        }
+        lastAutoReconnect[device.id] = now
+        Log.engine.log("auto-reconnecting \(device.name) after unexpected drop")
+
+        let token = runToken
+        let delayMs = autoReconnectDelayMs
+        Task { @MainActor [weak self] in
+            if delayMs > 0 { try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000) }
+            guard let self, token == self.runToken, self.selected, self.bluetoothPowered,
+                !self.store.config.paused, !self.busyDevices.contains(device.id)
+            else { return }
+            self.busyDevices.insert(device.id)
+            defer { self.busyDevices.remove(device.id) }
+            await self.connectOne(device, token: token, respectSelection: true)
         }
     }
 
@@ -311,6 +345,15 @@ final class SelectionEngine: ObservableObject {
             var connectedCleanly = false
             do {
                 if device.managePairing {
+                    if attempt > 1 {
+                        // A bond that survived a failed attempt may be a link key the device no
+                        // longer honors (the other host re-paired it, or it was power-cycled) —
+                        // observed on hardware as endless "pair: skipped" + openConnection
+                        // timeouts. Re-pair from scratch; pair() alone short-circuits on
+                        // isPaired(), so drop the stale bond first (best-effort).
+                        Log.bluetooth.log("re-pairing \(device.name) from scratch (attempt \(attempt))")
+                        try? await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.unpair(addr) }
+                    }
                     Log.bluetooth.log("pair \(device.name)…")
                     try await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.pair(addr) }
                     Log.bluetooth.log("pair \(device.name): ok")

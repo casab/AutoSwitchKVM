@@ -97,6 +97,10 @@ struct AppConfig: Codable {
     /// Notify when a managed device drops while the source is still present (e.g. another host
     /// claimed it). Off by default.
     var notifyUnexpectedDisconnect: Bool
+    /// One rate-limited automatic reconnect after an unexpected drop while the source is
+    /// present. On by default (a mid-session drop otherwise strands the device until manual
+    /// action); user-disableable.
+    var autoReconnectOnDrop: Bool
     var launchAtLogin: Bool
     /// When true, automatic handoff is suspended (manual actions still work).
     var paused: Bool
@@ -118,6 +122,7 @@ struct AppConfig: Codable {
         btCallTimeoutSecs: Int = 15,
         showNotifications: Bool = false,
         notifyUnexpectedDisconnect: Bool = false,
+        autoReconnectOnDrop: Bool = true,
         launchAtLogin: Bool = false,
         paused: Bool = false,
         dockAutoHide: Bool = false,
@@ -138,6 +143,7 @@ struct AppConfig: Codable {
         self.btCallTimeoutSecs = btCallTimeoutSecs
         self.showNotifications = showNotifications
         self.notifyUnexpectedDisconnect = notifyUnexpectedDisconnect
+        self.autoReconnectOnDrop = autoReconnectOnDrop
         self.launchAtLogin = launchAtLogin
         self.paused = paused
         self.dockAutoHide = dockAutoHide
@@ -176,7 +182,8 @@ struct AppConfig: Codable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion, profiles, activeProfileID
         case debounceMs, arrivalDebounceMs, connectRetryMax, connectRetrySecs, btCallTimeoutSecs
-        case showNotifications, notifyUnexpectedDisconnect, launchAtLogin, paused, dockAutoHide
+        case showNotifications, notifyUnexpectedDisconnect, autoReconnectOnDrop
+        case launchAtLogin, paused, dockAutoHide
         case globalHotkeysEnabled, hotkeyPause, hotkeyConnectAll, hotkeyDisconnectAll
         case source, devices  // legacy top-level keys (pre-profiles)
     }
@@ -191,6 +198,7 @@ struct AppConfig: Codable {
         btCallTimeoutSecs = try c.decodeIfPresent(Int.self, forKey: .btCallTimeoutSecs) ?? 15
         showNotifications = try c.decodeIfPresent(Bool.self, forKey: .showNotifications) ?? false
         notifyUnexpectedDisconnect = try c.decodeIfPresent(Bool.self, forKey: .notifyUnexpectedDisconnect) ?? false
+        autoReconnectOnDrop = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectOnDrop) ?? true
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
         paused = try c.decodeIfPresent(Bool.self, forKey: .paused) ?? false
         dockAutoHide = try c.decodeIfPresent(Bool.self, forKey: .dockAutoHide) ?? false
@@ -241,6 +249,7 @@ struct AppConfig: Codable {
         try c.encode(btCallTimeoutSecs, forKey: .btCallTimeoutSecs)
         try c.encode(showNotifications, forKey: .showNotifications)
         try c.encode(notifyUnexpectedDisconnect, forKey: .notifyUnexpectedDisconnect)
+        try c.encode(autoReconnectOnDrop, forKey: .autoReconnectOnDrop)
         try c.encode(launchAtLogin, forKey: .launchAtLogin)
         try c.encode(paused, forKey: .paused)
         try c.encode(dockAutoHide, forKey: .dockAutoHide)

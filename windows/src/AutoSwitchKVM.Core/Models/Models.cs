@@ -125,6 +125,12 @@ public sealed class AppConfig
     // Behavior
     public bool ShowNotifications { get; set; }
     public bool NotifyUnexpectedDisconnect { get; set; }
+
+    /// One rate-limited automatic reconnect after an unexpected drop while the source is
+    /// present. On by default (a mid-session drop otherwise strands the device until manual
+    /// action); user-disableable.
+    public bool AutoReconnectOnDrop { get; set; } = true;
+
     public bool LaunchAtLogin { get; set; }
 
     /// When true, automatic handoff is suspended (manual actions still work).

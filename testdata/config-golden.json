@@ -35,6 +35,7 @@
   "btCallTimeoutSecs": 25,
   "showNotifications": true,
   "notifyUnexpectedDisconnect": true,
+  "autoReconnectOnDrop": true,
   "launchAtLogin": true,
   "paused": false,
   "dockAutoHide": true,

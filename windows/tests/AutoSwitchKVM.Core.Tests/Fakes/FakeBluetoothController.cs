@@ -53,10 +53,15 @@ public sealed class FakeBluetoothController : IBluetoothController
         return Task.CompletedTask;
     }
 
+    /// Invoked after a successful unpair — lets tests model state that a fresh bond repairs
+    /// (e.g. clear ConnectError to simulate a dead link key being replaced).
+    public Action? AfterUnpair { get; set; }
+
     public Task UnpairAsync(string address, CancellationToken ct = default)
     {
         Calls.Add($"unpair:{Norm(address)}");
         Paired.Remove(Norm(address));
+        AfterUnpair?.Invoke();
         return Task.CompletedTask;
     }
 

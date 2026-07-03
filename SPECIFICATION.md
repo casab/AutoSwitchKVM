@@ -84,6 +84,7 @@ display string convention, e.g. `⌃⌥⌘P` / on Windows `Ctrl+Alt+Cmd⇒Win` e
 | `btCallTimeoutSecs` | int | `15` macOS / `45` Windows | Per Bluetooth-call timeout. Platform default differs by design: a Windows pair legitimately takes ~14 s and must absorb the other-host-release race |
 | `showNotifications` | bool | `false` | Connect/disconnect alerts |
 | `notifyUnexpectedDisconnect` | bool | `false` | Alert on passive drops |
+| `autoReconnectOnDrop` | bool | `true` | One rate-limited automatic reconnect after a passive drop (§3) |
 | `launchAtLogin` | bool | `false` | Autostart |
 | `paused` | bool | `false` | Suspend automation |
 | `dockAutoHide` | bool | `false` | **macOS-only** Extra |
@@ -166,6 +167,19 @@ controller** (the operations in §5). It owns no platform APIs directly.
 - If a managed device drops to disconnected **while the source is present, the adapter is on, and
   we're not mid-transition**, treat it as an **unexpected disconnect**: always log it; raise a
   notification if `notifyUnexpectedDisconnect` is on.
+- If `autoReconnectOnDrop` is on (default), additionally schedule **one** automatic reconnect for
+  the dropped device: short delay (~2 s), re-check source-present/power/pause/busy, then run the
+  normal connect flow under the current run token (a newer run supersedes it). Rate-limit to one
+  auto-reconnect per device per ~30 s so a flapping device cannot cause a reconnect storm.
+  Trade-off: if the *other* host legitimately claimed the device this may briefly contend — the
+  source-present guard makes that rare, and the option is user-disableable.
+
+### Stale-bond recovery (connect retries)
+- A bond record can outlive the device's willingness to honor it (the other host re-paired the
+  device, or it was power-cycled) — observed on hardware as "pair skipped (already paired)"
+  followed by connect timeouts on every retry. For `managePairing` devices, retry attempts ≥ 2
+  must **unpair (best-effort) and re-pair from scratch** instead of trusting the platform's
+  "already paired" state, so the retry loop can always recover without manual intervention.
 
 ### Per-device status states
 `idle`, `connecting`, `connected`, `disconnected`, `bluetoothOff`, `error`.
