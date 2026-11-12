@@ -1,0 +1,4 @@
+# Markdown (specs, CLAUDE.md files, agent-notes) is shared by the macOS and Windows agents.
+# Store and check it out with LF on both, so an editor's line endings can't turn a one-line
+# edit into a whole-file diff.
+*.md text eol=lf
