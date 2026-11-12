@@ -436,6 +436,7 @@ struct AddDeviceSheet: View {
 struct GeneralTab: View {
     @EnvironmentObject var store: ConfigStore
     @EnvironmentObject var controller: AppController
+    @ObservedObject private var updater = AppUpdater.shared
 
     var body: some View {
         Form {
@@ -534,6 +535,21 @@ struct GeneralTab: View {
                     .font(.caption).foregroundStyle(.secondary)
             } header: {
                 Label("Configuration", systemImage: "square.and.arrow.up.on.square")
+            }
+            Section {
+                LabeledContent("Version", value: AppUpdater.versionDescription)
+                if updater.isAvailable {
+                    Toggle(
+                        "Check for updates automatically",
+                        isOn: Binding(get: { updater.automaticallyChecks }, set: { updater.automaticallyChecks = $0 }))
+                    Button("Check for Updates…") { updater.checkForUpdates() }
+                        .disabled(!updater.canCheckForUpdates)
+                } else {
+                    Text("Automatic updates are available in the released app (from GitHub Releases).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                Label("Updates", systemImage: "arrow.down.circle")
             }
         }
         .formStyle(.grouped)

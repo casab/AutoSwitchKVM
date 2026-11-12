@@ -13,6 +13,13 @@ options:
     macOS: "13.0"
   createIntermediateGroups: true
 
+# Sparkle (automatic updates) is linked only into this .app target. The SwiftPM build used by
+# the tests and CI stays dependency-free; AppUpdater compiles the updater `#if canImport(Sparkle)`.
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.10.1"
+
 targets:
   AutoSwitchKVM:
     type: application
@@ -31,12 +38,21 @@ targets:
         LSUIElement: true
         NSBluetoothAlwaysUsageDescription: "AutoSwitch KVM connects and disconnects your Bluetooth devices when your KVM switches this Mac in and out."
         NSBluetoothPeripheralUsageDescription: "AutoSwitch KVM connects and disconnects your Bluetooth devices when your KVM switches this Mac in and out."
+        # Sparkle: the appcast is attached to the latest *stable* GitHub release by
+        # .github/workflows/macos-release.yml (pre-releases are never "latest").
+        SUFeedURL: "https://github.com/casab/AutoSwitchKVM/releases/latest/download/appcast.xml"
+        SUEnableAutomaticChecks: true
+        # Public half of the EdDSA key that signs updates (Sparkle's generate_keys; the private
+        # half is the SPARKLE_ED_PRIVATE_KEY repository secret, and the key also lives in the
+        # maintainer's login keychain). Empty = updater off.
+        SUPublicEDKey: "POszCs7yFBHJXf6WCYTYIMhEKa/giXrTXH0a2XB+OCg="
     dependencies:
       - sdk: IOKit.framework
       - sdk: IOBluetooth.framework
       - sdk: CoreBluetooth.framework
       - sdk: UserNotifications.framework
       - sdk: Carbon.framework
+      - package: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.enginal.AutoSwitchKVM

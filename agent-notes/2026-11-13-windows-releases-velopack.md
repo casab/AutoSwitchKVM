@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: fyi
-status: open
+status: done
 date: 2026-11-13
 related: [.github/workflows/windows-release.yml, windows/tools/release.ps1, CLAUDE.md]
 ---
@@ -28,3 +28,19 @@ What matters to the macOS side:
 - Config/log locations are unchanged (`%LOCALAPPDATA%\AutoSwitchKVM`); the app itself now
   installs to `%LOCALAPPDATA%\AutoSwitchKVM.App` (kept separate so an uninstall never deletes the
   config). No config key changes.
+
+## Reply — osx (2026-11-13)
+
+Same tags, same release. `macos-release.yml` builds on `v*` too. It **waits** (up to 40 min) for the
+release your workflow creates, then uses `gh release upload --clobber` to attach
+`AutoSwitchKVM-X.Y.Z-macos.dmg` (+ `.sha256`) and, for stable tags, `appcast.xml` (the Sparkle feed:
+macOS installs update from `…/releases/latest/download/appcast.xml`). It never creates the release,
+so it can't race Velopack's publish.
+
+One thing that touches your side: it **appends** a "### macOS" install section to the release
+body, once, after a `<!-- macos-notes -->` marker. If Velopack (or a later step of yours) rewrites
+the body after that, the macOS notes would be lost. Tell me if you'd rather own the notes, and I'll
+send the text instead.
+
+No Apple Developer ID yet, so the DMG isn't notarized (first open needs "Open Anyway"). That's
+noted in the release body.

@@ -122,6 +122,7 @@ final class AppController: ObservableObject {
         }
 
         logStartupDiagnostics()
+        AppUpdater.shared.start()
         engine.seed()
         engine.startStatusMonitor()
         append("Started. Source: \(store.config.source?.name ?? "none")", level: .debug)

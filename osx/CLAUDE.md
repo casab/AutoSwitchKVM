@@ -48,6 +48,29 @@ Two paths — both open the same sources:
 
 The app is menu-bar-only (`NSApp.setActivationPolicy(.accessory)` + `LSUIElement`).
 
+**Release builds** (no Apple Developer ID yet, so no notarization):
+- `tools/release.sh <version>` builds a universal Release `.app` from the XcodeGen project,
+  stamps the version (`CFBundleShortVersionString` without a `-beta` suffix; `CFBundleVersion` =
+  `BUILD_NUMBER`, default the commit count), signs it with `SIGN_IDENTITY` (default ad-hoc, `--deep`
+  so the embedded Sparkle helpers match) and writes `build/release/AutoSwitchKVM-<version>-macos.dmg`
+  + `.sha256`. Runs locally as is.
+- `.github/workflows/macos-release.yml` runs it on the same `v*` tags as the Windows release,
+  waits for the release the Windows workflow creates, and attaches the DMG (plus, for stable tags,
+  the Sparkle `appcast.xml` from `tools/make-appcast.sh`). It appends macOS install notes to the
+  release body once (`<!-- macos-notes -->` marker). The DMG is also a run artifact.
+- Secrets: `MACOS_SIGNING_P12` + `MACOS_SIGNING_P12_PASSWORD` (optional self-made code-signing
+  certificate: keeps the code identity fixed, so the Bluetooth permission and login item survive
+  updates; ad-hoc builds get a new identity each time), `SPARKLE_ED_PRIVATE_KEY` (without it no
+  appcast is published).
+- **Updates (Sparkle 2):** linked only into the XcodeGen target (`project.yml` `packages`); the
+  SwiftPM build used by tests/CI has no Sparkle, and `App/AppUpdater` compiles the updater
+  `#if canImport(Sparkle)`. Feed: `SUFeedURL` = `…/releases/latest/download/appcast.xml` (GitHub's
+  "latest" is the newest stable release, so pre-releases are never offered). Updates are verified
+  with `SUPublicEDKey` in `project.yml`; while it's empty the updater stays off. Settings ▸ General
+  ▸ Updates (version, automatic checks, Check for Updates…) and an Updates button in the panel.
+- When the Apple Developer membership exists: Developer ID signing, hardened runtime, notarization
+  and stapling go into `release.sh` + the workflow; nothing else changes.
+
 **Building requires macOS + Xcode 16+** (Swift 6 toolchain — the sources use Swift 6 compiler
 features like `@preconcurrency` conformances (SE-0423), while staying in the Swift 5 language
 mode; plus IOKit/IOBluetooth, SwiftUI `MenuBarExtra`, `SMAppService`).
@@ -74,8 +97,9 @@ swift-format (`.swift-format` config).
 
 Single executable target, organized by folder under `Sources/AutoSwitchKVM/`:
 
-- `App/` — `AutoSwitchKVMApp` (`@main`, `MenuBarExtra` + Settings `Window`), `AppController`
-  (coordinator that owns all managers and exposes actions to the UI).
+- `App/` — `AutoSwitchKVMApp` (`@main`, `MenuBarExtra` + Settings `Window`; the delegate quits a
+  second copy via `SingleInstance`), `AppController` (coordinator that owns all managers and
+  exposes actions to the UI), `AppUpdater` (Sparkle wrapper; see Build & run).
 - `Models/` — `Models.swift` (`USBSource`, `BTDevice`, `Profile`, `AppConfig`), `ConfigStore` (JSON
   persistence). `AppConfig` holds `profiles` + `activeProfileID`; `source`/`devices` are **computed
   accessors onto the active profile** (so call sites stay simple). Custom `Codable` migrates legacy
@@ -96,7 +120,9 @@ Single executable target, organized by folder under `Sources/AutoSwitchKVM/`:
   (`prepareForSleep()` / `resumeAfterWake()`). Test seams: `sleepHook` (instant delays),
   `softRetryIntervalMs`, `maxSoftRetries`, `releaseRetryDelayMs`, `postPairSettleMs`,
   `postPairHidWaitMs`.
-- `System/` — `SleepWakeMonitor`, `LoginItem` (`SMAppService`), `DockManager`, `Notifier`,
+- `System/` — `SingleInstance` (`flock` on `Application Support/AutoSwitchKVM/instance.lock`:
+  two copies would fight over the same devices), `SleepWakeMonitor`, `LoginItem` (`SMAppService`),
+  `DockManager`, `Notifier`,
   `HotKeyManager` (Carbon `RegisterEventHotKey`; user-assignable combos via `KeyShortcut`, off by
   default; `apply(enabled:pause:connectAll:disconnectAll:)` is idempotent).
 - `Support/` — `Log` (`os.Logger` wrappers: subsystem `com.enginal.AutoSwitchKVM`, categories

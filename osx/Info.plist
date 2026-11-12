@@ -28,5 +28,11 @@
 	<string>AutoSwitch KVM connects and disconnects your Bluetooth devices when your KVM switches this Mac in and out.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>AutoSwitch KVM connects and disconnects your Bluetooth devices when your KVM switches this Mac in and out.</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/casab/AutoSwitchKVM/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>POszCs7yFBHJXf6WCYTYIMhEKa/giXrTXH0a2XB+OCg=</string>
 </dict>
 </plist>

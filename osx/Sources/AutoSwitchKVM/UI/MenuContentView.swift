@@ -8,6 +8,7 @@ struct MenuContentView: View {
     @EnvironmentObject var engine: SelectionEngine
     @EnvironmentObject var controller: AppController
     @Environment(\.openWindow) private var openWindow
+    @ObservedObject private var updater = AppUpdater.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -151,6 +152,15 @@ struct MenuContentView: View {
                 NSApp.activate(ignoringOtherApps: true)
             } label: {
                 Label("Settings", systemImage: "gearshape")
+            }
+            if updater.isAvailable {
+                Button {
+                    updater.checkForUpdates()
+                } label: {
+                    Label("Updates", systemImage: "arrow.down.circle")
+                }
+                .disabled(!updater.canCheckForUpdates)
+                .help("Check for Updates… (you're on \(AppUpdater.versionDescription))")
             }
             Spacer()
             Button {

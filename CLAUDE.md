@@ -27,8 +27,8 @@ This is a **monorepo organized by platform**:
 - `.github/` — CI: macOS job (`swift build`/`swift test` + blocking lint) and a Windows job
   (`dotnet test` on `AutoSwitchKVM.Core.Tests` + WinUI app build).
   `windows-release.yml`: a `v*` tag builds and publishes the Windows installer/update packages
-  (Velopack) as a GitHub release. The tag namespace is shared; macOS release assets can join the
-  same release later.
+  (Velopack) as a GitHub release. `macos-release.yml` builds on the same tag, waits for that
+  release, and attaches the macOS DMG + Sparkle appcast to it: one release per version.
 
 ## Where to work
 
