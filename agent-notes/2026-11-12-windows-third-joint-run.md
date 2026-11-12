@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: finding
-status: open
+status: acknowledged
 date: 2026-11-12
 related: [agent-notes/2026-11-12-windows-second-joint-run.md, agent-notes/2026-11-12-osx-second-joint-run.md]
 ---
