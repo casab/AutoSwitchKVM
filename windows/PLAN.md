@@ -159,7 +159,56 @@ blocking lint jobs). Runtime Bluetooth/USB behavior is still validated on-device
    App SDK bundled), per-user installer, background updates from GitHub Releases (Settings ▸ General
    ▸ About, tray menu "Restart to update", a notification). x64 channel `win`, ARM64 channel
    `win-arm64` (built, not tested on hardware). `tools/release.ps1` + `.github/workflows/windows-release.yml`
-   on a `v*` tag. Still to do: code signing (SmartScreen warns until then).
+   on a `v*` tag. Still to do: code signing (SmartScreen warns until then). Size and startup:
+   see "Distribution: size and startup" below.
+
+## Distribution: size and startup
+
+Measured 2026-11-13 (x64, self-contained Release publish; startup = launch to visible Settings
+window in preview mode, optimized build, median of 5 warm runs, plus the first cold run):
+
+| Build | On disk | Setup.exe | Full .nupkg | Startup warm / cold |
+|---|---|---|---|---|
+| First release setup (plain Release) | 212.8 MB | 99.4 MB | 91.9 MB | 544 / 1425 ms |
+| **Current**: ReadyToRun + AI/ML/Widgets excluded | 212.4 MB | 89.9 MB | 82.7 MB | 419 / 1180 ms |
+| Exclusions only, no ReadyToRun (not shipped) | 164.7 MB | n/a | n/a | n/a |
+
+Working set with Settings open: ~160 MB. ARM64 Setup.exe: 94.2 to 83.4 MB.
+
+**What is on (csproj):**
+- `PublishReadyToRun`: precompiled IL, about 23 % faster startup for about 48 MB on disk (about
+  15 MB compressed).
+- `ExcludeAssets="all"` on `Microsoft.WindowsAppSDK.AI`, `.ML`, `Microsoft.Windows.AI.MachineLearning`,
+  `.Widgets`: the metapackage pulls them in (onnxruntime.dll + DirectML.dll + Windows AI/Widgets,
+  60 files, about 49 MB) and nothing here uses them. Keep their versions in step with the
+  metapackage when bumping it. If a future feature needs one of them, remove its exclusion.
+- Velopack delta updates: after the first install, updates download only the changed bytes.
+
+**Future options, roughly in order of value / risk:**
+1. **Drop non-English WinUI `.mui` files** (88 language folders, about 3.5 MB on disk, ~1 MB
+   compressed). `SatelliteResourceLanguages` does not touch them (native files); it needs a
+   publish target that removes `ResolvedFileToPublish` items with `.mui` outside `en-*`. Small gain.
+   Risk: the control-string fallback on a non-English Windows display language must be tested first.
+2. **Partial / composite ReadyToRun**: precompile only the assemblies on the startup path
+   (`PublishReadyToRunExclude` for big, rarely used ones such as parts of
+   `Microsoft.Windows.SDK.NET.dll`), or try `PublishReadyToRunComposite`. Measure both size and
+   startup; the gain over the current setup is uncertain.
+3. **Trimming (`PublishTrimmed`)**: the biggest size win (the 24 MB `Microsoft.Windows.SDK.NET.dll`
+   projection and most of the BCL are mostly unused). Risky: WinUI/CsWinRT interop, x:Bind's
+   generated code, CommunityToolkit and H.NotifyIcon use reflection, and trim breaks only show at
+   runtime (missing type or member). Needs `TrimMode=partial` first, all trim warnings fixed, and a
+   full on-device pass (tray, Settings, every dialog, toasts, hotkeys, Bluetooth).
+4. **Native AOT**: smallest and fastest start, lowest memory. WinUI 3 supports it (Windows App SDK
+   1.6+), but `System.Management` (WMI in `PnpUsbMonitor`) is not AOT-compatible and would have to be
+   rewritten on CfgMgr32 / `SetupDi` P/Invoke or WinRT `DeviceWatcher`. H.NotifyIcon and the
+   CommunityToolkit controls need AOT checks too. A larger project; consider it with trimming,
+   since AOT implies full trimming.
+5. **Framework-dependent install**: rely on a shared .NET 8 Desktop runtime and/or the Windows App
+   SDK runtime instead of bundling them (much smaller package). Velopack can install some
+   prerequisites at setup (`vpk pack --framework`); check whether it covers the Windows App SDK
+   runtime. Trade-off: an extra install step and a runtime the app doesn't control.
+6. **Idle memory**: a tray app sits idle most of the day. Measure the working set with no windows
+   open after a few hours. If high, release the Settings window and its pages on close.
 
 ## Milestone 0 — spike findings
 

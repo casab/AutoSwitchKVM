@@ -57,6 +57,9 @@ and polls the battery every 60 s. `tools/driver-trace.ps1` captures its WPP trac
   `dotnet build -o` gotcha below is about build output only.
 - `--ui-preview` and XAML binding tracing are compiled into Debug builds only.
 - App icon: `Assets/app.ico` / `app.png` are generated from `tray.ico` by `tools/make-app-icon.py`.
+- Publish is `PublishReadyToRun` and excludes the Windows App SDK AI/ML/Widgets components
+  (`ExcludeAssets="all"`, ~49 MB, unused). Measurements and future options (trimming, Native AOT,
+  `.mui` pruning, framework-dependent install) are in `PLAN.md` "Distribution: size and startup".
 
 ## Coordinating with the macOS agent
 
