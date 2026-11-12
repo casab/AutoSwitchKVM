@@ -7,7 +7,7 @@ import Foundation
 @MainActor
 final class MockUSBMonitor: USBMonitoring {
     var attachedDevices: [USBDeviceInfo] = []
-    let events = PassthroughSubject<(vendorID: UInt16, productID: UInt16, added: Bool), Never>()
+    let events = PassthroughSubject<USBEvent, Never>()
     func refreshAttached() {}
 }
 

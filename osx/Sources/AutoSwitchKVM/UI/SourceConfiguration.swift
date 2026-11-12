@@ -1,17 +1,19 @@
 import SwiftUI
 
-func usbKey(_ vendorID: UInt16, _ productID: UInt16) -> UInt32 { (UInt32(vendorID) << 16) | UInt32(productID) }
-func usbKey(_ d: USBDeviceInfo) -> UInt32 { usbKey(d.vendorID, d.productID) }
-
 extension USBSource {
     /// Build a source from selected USB devices, requiring exactly one vendor (the model is
     /// one vendor + product IDs). Returns nil if no devices or multiple vendors are selected.
+    /// Pins the source to the selected devices' bus locations when all of them have one, so a
+    /// permanent hub with the same IDs elsewhere (e.g. in a dock) doesn't count as the source.
     static func from(name: String, devices: [USBDeviceInfo]) -> USBSource? {
         let vendors = Set(devices.map(\.vendorID))
         guard vendors.count == 1, let vendor = vendors.first else { return nil }
         let pids = Set(devices.map(\.productID))
         guard !pids.isEmpty else { return nil }
-        return USBSource(name: name.isEmpty ? "Source" : name, vendorID: vendor, productIDs: pids)
+        let locations = devices.compactMap(\.locationID)
+        return USBSource(
+            name: name.isEmpty ? "Source" : name, vendorID: vendor, productIDs: pids,
+            locationIDs: locations.count == devices.count ? Set(locations) : nil)
     }
 }
 
@@ -20,9 +22,9 @@ extension USBSource {
 struct SourceEditorView: View {
     let candidates: [USBDeviceInfo]
     @Binding var name: String
-    @Binding var selectedKeys: Set<UInt32>
+    @Binding var selectedKeys: Set<String>
 
-    private var selectedDevices: [USBDeviceInfo] { candidates.filter { selectedKeys.contains(usbKey($0)) } }
+    private var selectedDevices: [USBDeviceInfo] { candidates.filter { selectedKeys.contains($0.id) } }
     private var vendorCount: Int { Set(selectedDevices.map(\.vendorID)).count }
 
     var body: some View {
@@ -42,7 +44,7 @@ struct SourceEditorView: View {
             } else {
                 List {
                     ForEach(candidates) { dev in
-                        let k = usbKey(dev)
+                        let k = dev.id
                         Toggle(
                             isOn: Binding(
                                 get: { selectedKeys.contains(k) },
@@ -51,8 +53,11 @@ struct SourceEditorView: View {
                         ) {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(dev.name.isEmpty ? "Unknown device" : dev.name)
-                                Text(String(format: "0x%04X:0x%04X", dev.vendorID, dev.productID))
-                                    .font(.caption).foregroundStyle(.secondary)
+                                Text(
+                                    String(format: "0x%04X:0x%04X", dev.vendorID, dev.productID)
+                                        + (dev.locationID.map { String(format: "  @ 0x%08X", $0) } ?? "")
+                                )
+                                .font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -79,9 +84,9 @@ struct ManualSourceSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var name = ""
-    @State private var selectedKeys: Set<UInt32> = []
+    @State private var selectedKeys: Set<String> = []
 
-    private var selectedDevices: [USBDeviceInfo] { candidates.filter { selectedKeys.contains(usbKey($0)) } }
+    private var selectedDevices: [USBDeviceInfo] { candidates.filter { selectedKeys.contains($0.id) } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -104,10 +109,7 @@ struct ManualSourceSheet: View {
         .onAppear {
             name = existing?.name ?? ""
             if let s = existing {
-                selectedKeys = Set(
-                    candidates
-                        .filter { $0.vendorID == s.vendorID && s.productIDs.contains($0.productID) }
-                        .map { usbKey($0) })
+                selectedKeys = Set(candidates.filter { s.matches($0) }.map(\.id))
             }
         }
     }
@@ -124,9 +126,9 @@ struct LearnSourceSheet: View {
     @State private var phase: Phase = .learning
     @State private var candidates: [USBDeviceInfo] = []
     @State private var name = ""
-    @State private var selectedKeys: Set<UInt32> = []
+    @State private var selectedKeys: Set<String> = []
 
-    private var selectedDevices: [USBDeviceInfo] { candidates.filter { selectedKeys.contains(usbKey($0)) } }
+    private var selectedDevices: [USBDeviceInfo] { candidates.filter { selectedKeys.contains($0.id) } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -159,7 +161,7 @@ struct LearnSourceSheet: View {
                 }
                 Button("Done") {
                     candidates = learner.finish()
-                    selectedKeys = Set(candidates.map { usbKey($0) })
+                    selectedKeys = Set(candidates.map(\.id))
                     phase = .confirm
                 }
                 .keyboardShortcut(.defaultAction)

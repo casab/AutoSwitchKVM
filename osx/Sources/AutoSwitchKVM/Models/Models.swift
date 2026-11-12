@@ -2,11 +2,46 @@ import Foundation
 
 /// The "switcher source": a single USB vendor plus the set of product IDs that appear when this
 /// Mac is selected on the KVM (a hub often exposes several product IDs on one vendor). Named by
-/// the user. The Mac is considered selected when ANY of these product IDs is attached.
+/// the user. The Mac is considered selected when ANY of these devices is attached.
+///
+/// `locationIDs` (macOS only, optional) pins the source to specific USB bus positions. Needed when
+/// the same vendor/product IDs also exist on a hub tier that never switches. Seen on hardware
+/// 2026-11-12: a dock keeps Genesys 0x0610 @ 0x00120000 and 0x0626 @ 0x00220000 attached
+/// permanently, while the KVM's switching hubs are 0x0610 @ 0x00124000 and 0x0626 @ 0x00224000.
+/// Matching by IDs alone made the Mac believe it was selected at startup while the KVM was on
+/// Windows. nil/empty = match by IDs only (configs from before this, and the Windows app).
 struct USBSource: Codable, Hashable, Identifiable {
     var name: String
     var vendorID: UInt16
     var productIDs: Set<UInt16>
+    var locationIDs: Set<UInt32>? = nil
+
+    /// Whether a USB device (vendor, product, bus location) is one of this source's devices.
+    func matches(vendorID: UInt16, productID: UInt16, locationID: UInt32?) -> Bool {
+        guard vendorID == self.vendorID, productIDs.contains(productID) else { return false }
+        guard let locations = locationIDs, !locations.isEmpty else { return true }
+        guard let locationID else { return false }
+        return locations.contains(locationID)
+    }
+
+    func matches(_ device: USBDeviceInfo) -> Bool {
+        matches(vendorID: device.vendorID, productID: device.productID, locationID: device.locationID)
+    }
+
+    /// Presence bookkeeping key: one per bus position when locations are pinned, otherwise one per
+    /// product ID (the original behavior).
+    func presenceKey(productID: UInt16, locationID: UInt32?) -> String {
+        if let locations = locationIDs, !locations.isEmpty, let locationID {
+            return String(format: "0x%04X@0x%08X", productID, locationID)
+        }
+        return String(format: "0x%04X", productID)
+    }
+
+    /// "@ 0x00124000, 0x00224000", or "" when not pinned.
+    var displayLocations: String {
+        guard let locations = locationIDs, !locations.isEmpty else { return "" }
+        return "@ " + locations.sorted().map { String(format: "0x%08X", $0) }.joined(separator: ", ")
+    }
 
     var id: String { "\(vendorID)-\(productIDs.sorted().map(String.init).joined(separator: ","))" }
 

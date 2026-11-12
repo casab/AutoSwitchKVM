@@ -142,6 +142,14 @@ the new profile but does not force-disconnect the previous profile's devices.
 
 - **Source model = one vendor + a set of product IDs + a user-given name** (`USBSource`). The
   source editor enforces a single vendor. Don't reintroduce a multi-vendor model.
+- **Identical hub IDs exist on this desk: match the source by bus location** (`USBSource.locationIDs`).
+  A dock permanently carries Genesys `0x0610` @ `0x00120000` and `0x0626` @ `0x00220000`. The KVM's
+  *switching* hubs have the same IDs at `0x00124000` / `0x00224000` (keyboard + receiver hang off
+  them). Matching by IDs alone made the Mac think it was selected at startup while the KVM was on
+  Windows; switching only "worked" because presence was tracked per product ID. Presence is now
+  tracked per source device, Learn/manual pick record locations, and the reconcile compares
+  individual devices. Seed logs a warning when an unpinned source matches the same IDs at several
+  locations. If the dock moves to another port, the locations change: re-learn the source.
 - **`connect` is asynchronous: `openConnection(self)` plus a cooperative wait (since 2026-11-12).**
   It used to call the synchronous `openConnection()` on purpose, because its result was the only
   reliable success signal; the async `connectionComplete:status:` callback sometimes never fired on

@@ -136,7 +136,7 @@ final class AppController: ObservableObject {
 
         let c = store.config
         Log.app.log(
-            "config: profile '\(c.activeProfileName)', source \(c.source.map { "'\($0.name)' \($0.displayVidPid)" } ?? "none"); "
+            "config: profile '\(c.activeProfileName)', source \(c.source.map { "'\($0.name)' \($0.displayVidPid) \($0.displayLocations)" } ?? "none"); "
                 + "debounce arrival \(c.arrivalDebounceMs) ms / departure \(c.debounceMs) ms; "
                 + "retries \(c.connectRetryMax) (base \(c.connectRetrySecs) s); call timeout \(c.btCallTimeoutSecs) s; "
                 + "paused \(c.paused); autoReconnectOnDrop \(c.autoReconnectOnDrop)")

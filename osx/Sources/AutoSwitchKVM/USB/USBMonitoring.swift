@@ -6,6 +6,6 @@ import Foundation
 @MainActor
 protocol USBMonitoring: AnyObject {
     var attachedDevices: [USBDeviceInfo] { get }
-    var events: PassthroughSubject<(vendorID: UInt16, productID: UInt16, added: Bool), Never> { get }
+    var events: PassthroughSubject<USBEvent, Never> { get }
     func refreshAttached()
 }

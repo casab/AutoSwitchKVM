@@ -3,16 +3,29 @@ import Foundation
 import IOKit
 import IOKit.usb
 
-/// A USB device as seen by IOKit.
+/// A USB device as seen by IOKit. `locationID` is its position on the USB bus (IORegistry
+/// "locationID"): two devices with the same IDs (e.g. a dock hub and a KVM hub using the same
+/// chip) differ only there.
 struct USBDeviceInfo: Identifiable, Hashable {
     var vendorID: UInt16
     var productID: UInt16
     var name: String
+    var locationID: UInt32? = nil
 
-    var id: String { "\(vendorID)-\(productID)-\(name)" }
+    var id: String { "\(vendorID)-\(productID)-\(locationID.map { String($0) } ?? "-")-\(name)" }
     var displayName: String {
-        String(format: "%@  (0x%04X:0x%04X)", name.isEmpty ? "Unknown USB device" : name, vendorID, productID)
+        let ids = String(format: "0x%04X:0x%04X", vendorID, productID)
+        let location = locationID.map { String(format: " @ 0x%08X", $0) } ?? ""
+        return "\(name.isEmpty ? "Unknown USB device" : name)  (\(ids)\(location))"
     }
+}
+
+/// One USB attach/detach, as delivered to the engine and the source learner.
+struct USBEvent: Sendable {
+    var vendorID: UInt16
+    var productID: UInt16
+    var locationID: UInt32?
+    var added: Bool
 }
 
 /// Watches USB attach/detach via IOKit and exposes a live snapshot of attached devices.
@@ -24,7 +37,7 @@ final class USBMonitor: ObservableObject, USBMonitoring {
     @Published private(set) var attachedDevices: [USBDeviceInfo] = []
 
     /// (vendorID, productID, added?) — added == true for attach, false for detach.
-    let events = PassthroughSubject<(vendorID: UInt16, productID: UInt16, added: Bool), Never>()
+    let events = PassthroughSubject<USBEvent, Never>()
 
     /// Legacy class name still matches USB devices on modern macOS via the compatibility layer.
     private static let usbDeviceClass = "IOUSBDevice"
@@ -124,8 +137,9 @@ final class USBMonitor: ObservableObject, USBMonitoring {
             IOObjectRelease(service)
         }
         IOObjectRelease(iter)
-        // De-dup by vid/pid/name, keep stable order by name.
-        let unique = Array(Set(result)).sorted { $0.name < $1.name }
+        // De-dup identical entries (same IDs, name and bus location); keep stable order. Devices
+        // that share IDs but sit at different locations stay separate.
+        let unique = Array(Set(result)).sorted { ($0.name, $0.locationID ?? 0) < ($1.name, $1.locationID ?? 0) }
         attachedDevices = unique
     }
 
@@ -134,7 +148,9 @@ final class USBMonitor: ObservableObject, USBMonitoring {
     private func handleIterator(_ iterator: io_iterator_t, added: Bool) {
         while case let service = IOIteratorNext(iterator), service != 0 {
             if let info = Self.deviceInfo(from: service) {
-                events.send((info.vendorID, info.productID, added))
+                events.send(
+                    USBEvent(
+                        vendorID: info.vendorID, productID: info.productID, locationID: info.locationID, added: added))
             }
             IOObjectRelease(service)
         }
@@ -147,24 +163,34 @@ final class USBMonitor: ObservableObject, USBMonitoring {
         }
     }
 
-    private static func presenceKey(_ d: USBDeviceInfo) -> UInt32 {
-        (UInt32(d.vendorID) << 16) | UInt32(d.productID)
+    /// One physical device: IDs plus bus location (the name is not part of identity).
+    private struct InstanceKey: Hashable {
+        let vendorID: UInt16
+        let productID: UInt16
+        let locationID: UInt32?
+    }
+
+    private static func instanceKey(_ d: USBDeviceInfo) -> InstanceKey {
+        InstanceKey(vendorID: d.vendorID, productID: d.productID, locationID: d.locationID)
     }
 
     /// Diff a fresh enumeration against the last snapshot and emit synthetic attach/detach
-    /// events for anything the IOKit notifications missed.
+    /// events for anything the IOKit notifications missed. Compares individual devices (IDs +
+    /// location): a hub leaving while another with the same IDs stays is a real change.
     private func reconcile() {
-        let before = Set(attachedDevices.map(Self.presenceKey))
+        let before = Set(attachedDevices.map(Self.instanceKey))
         refreshAttached()
-        let after = Set(attachedDevices.map(Self.presenceKey))
+        let after = Set(attachedDevices.map(Self.instanceKey))
         guard before != after else { return }
 
-        Log.usb.log("reconcile: presence drifted (\(before.count) → \(after.count) ids); emitting corrections")
+        Log.usb.log("reconcile: presence drifted (\(before.count) → \(after.count) devices); emitting corrections")
         for key in before.subtracting(after) {
-            events.send((vendorID: UInt16(key >> 16), productID: UInt16(key & 0xFFFF), added: false))
+            events.send(
+                USBEvent(vendorID: key.vendorID, productID: key.productID, locationID: key.locationID, added: false))
         }
         for key in after.subtracting(before) {
-            events.send((vendorID: UInt16(key >> 16), productID: UInt16(key & 0xFFFF), added: true))
+            events.send(
+                USBEvent(vendorID: key.vendorID, productID: key.productID, locationID: key.locationID, added: true))
         }
     }
 
@@ -189,6 +215,7 @@ final class USBMonitor: ObservableObject, USBMonitoring {
         return USBDeviceInfo(
             vendorID: UInt16(truncatingIfNeeded: vid),
             productID: UInt16(truncatingIfNeeded: pid),
-            name: name)
+            name: name,
+            locationID: intProp("locationID").map { UInt32(truncatingIfNeeded: $0) })
     }
 }

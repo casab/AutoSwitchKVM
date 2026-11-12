@@ -157,7 +157,8 @@ struct SourceTab: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(source.name).bold()
-                            Text(source.displayVidPid).font(.caption).foregroundStyle(.secondary)
+                            Text("\(source.displayVidPid)  \(source.displayLocations)")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Text(engine.selected ? "● active" : "○ inactive")

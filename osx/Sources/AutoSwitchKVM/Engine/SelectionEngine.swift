@@ -50,7 +50,9 @@ final class SelectionEngine: ObservableObject {
     private let bt: BluetoothController
 
     private var cancellables = Set<AnyCancellable>()
-    private var presentProductIDs = Set<UInt16>()
+    /// Source devices currently attached: one key per bus location when the source is pinned to
+    /// locations, otherwise one per product ID (`USBSource.presenceKey`).
+    private var presentKeys = Set<String>()
     /// Presence the automation last connected/disconnected for (latch, distinct from `selected`
     /// which tracks raw presence even while paused).
     private var automationActed = false
@@ -316,55 +318,72 @@ final class SelectionEngine: ObservableObject {
     /// Called at launch and on wake to establish current presence from scratch.
     func seed() {
         let source = store.config.source
-        presentProductIDs.removeAll()
+        presentKeys.removeAll()
         automationActed = false  // re-evaluate from scratch (covers profile switches and wake)
         if let source {
-            for dev in usb.attachedDevices
-            where dev.vendorID == source.vendorID && source.productIDs.contains(dev.productID) {
-                presentProductIDs.insert(dev.productID)
+            for dev in usb.attachedDevices where source.matches(dev) {
+                presentKeys.insert(source.presenceKey(productID: dev.productID, locationID: dev.locationID))
             }
         }
         lastReason = "initial scan"
         presenceChangedAt = .now
         if let source {
+            let sameIDs = usb.attachedDevices.filter {
+                $0.vendorID == source.vendorID && source.productIDs.contains($0.productID)
+            }
             Log.engine.log(
-                "seed: source '\(source.name)' \(presentProductIDs.isEmpty ? "absent" : "present") "
-                    + "(\(presentProductIDs.count)/\(source.productIDs.count) ids attached)")
+                "seed: source '\(source.name)' \(presentKeys.isEmpty ? "absent" : "present") "
+                    + "(matching: \(presentKeys.sorted().joined(separator: ", ")); devices with the source IDs: "
+                    + "\(sameIDs.map(\.displayName).joined(separator: "; ")))")
+            if source.locationIDs?.isEmpty ?? true, Set(sameIDs.map(\.productID)).count < sameIDs.count {
+                Log.engine.warn(
+                    "seed: the source IDs match \(sameIDs.count) USB devices at different bus locations, so the "
+                        + "source can't tell the KVM's switching hub from a permanent one (e.g. a dock) and may "
+                        + "count as present while the KVM is on the other host. Re-learn the source "
+                        + "(Settings ▸ Source) to pin it to the hub's location.")
+            }
         } else {
             Log.engine.log("seed: no source configured")
         }
         scheduleEvaluate()
     }
 
-    /// Internal (not private) so unit tests can simulate USB events directly.
+    /// Test convenience: an event without a bus location.
     func handleUSB(_ event: (vendorID: UInt16, productID: UInt16, added: Bool)) {
+        handleUSB(USBEvent(vendorID: event.vendorID, productID: event.productID, locationID: nil, added: event.added))
+    }
+
+    /// Internal (not private) so unit tests can simulate USB events directly.
+    func handleUSB(_ event: USBEvent) {
         guard let source = store.config.source,
-            event.vendorID == source.vendorID,
-            source.productIDs.contains(event.productID)
+            source.matches(vendorID: event.vendorID, productID: event.productID, locationID: event.locationID)
         else { return }
 
-        let wasPresent = !presentProductIDs.isEmpty
-        let id = String(format: "0x%04X:0x%04X", event.vendorID, event.productID)
+        let wasPresent = !presentKeys.isEmpty
+        let key = source.presenceKey(productID: event.productID, locationID: event.locationID)
+        let id =
+            String(format: "0x%04X:0x%04X", event.vendorID, event.productID)
+            + (event.locationID.map { String(format: " @ 0x%08X", $0) } ?? "")
         if event.added {
-            presentProductIDs.insert(event.productID)
+            presentKeys.insert(key)
             lastReason = String(format: "source arrived (0x%04X)", event.productID)
         } else {
-            presentProductIDs.remove(event.productID)
+            presentKeys.remove(key)
             lastReason = String(format: "source removed (0x%04X)", event.productID)
         }
-        let isPresent = !presentProductIDs.isEmpty
+        let isPresent = !presentKeys.isEmpty
         // The handoff timeline starts here: the Windows side measures the Mac's release from it.
         if isPresent != wasPresent {
             presenceChangedAt = .now
             Log.usb.log(
                 isPresent
                     ? "source '\(source.name)' appeared (\(id) attached); arrival debounce \(store.config.arrivalDebounceMs) ms"
-                    : "source '\(source.name)' gone (\(id) detached, no source ids left); departure debounce \(store.config.debounceMs) ms"
+                    : "source '\(source.name)' gone (\(id) detached, no source devices left); departure debounce \(store.config.debounceMs) ms"
             )
         } else {
             Log.usb.log(
-                "source id \(id) \(event.added ? "attached" : "detached") "
-                    + "(\(presentProductIDs.count)/\(source.productIDs.count) source ids present)")
+                "source device \(id) \(event.added ? "attached" : "detached") "
+                    + "(\(presentKeys.count) source device(s) present)")
         }
         scheduleEvaluate()
     }
@@ -372,7 +391,7 @@ final class SelectionEngine: ObservableObject {
     private func scheduleEvaluate() {
         debounceTimer?.invalidate()
         // Source present now → arrival debounce (snappier connect); gone → departure debounce.
-        let ms = presentProductIDs.isEmpty ? store.config.debounceMs : store.config.arrivalDebounceMs
+        let ms = presentKeys.isEmpty ? store.config.debounceMs : store.config.arrivalDebounceMs
         let interval = Double(ms) / 1000.0
         // .common mode: the handoff must fire even while the user has a menu or panel open.
         let timer = Timer(timeInterval: interval, repeats: false) { [weak self] _ in
@@ -389,7 +408,7 @@ final class SelectionEngine: ObservableObject {
     /// The transition logic, awaitable so tests can drive it deterministically without timers.
     /// Internal for testing; production reaches it via the debounce timer in `evaluate()`.
     func evaluateNow() async {
-        let present = !presentProductIDs.isEmpty
+        let present = !presentKeys.isEmpty
         selected = present  // always reflect real presence for the UI
 
         let wouldAct = present != automationActed

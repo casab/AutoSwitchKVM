@@ -36,6 +36,7 @@ selected (a hub often exposes several). Single vendor by design.
 | `name` | string | User-given (e.g. "Desk KVM") |
 | `vendorID` | UInt16 | e.g. `0x05E3` |
 | `productIDs` | Set\<UInt16\> | e.g. `{0x0626, 0x0610}` |
+| `locationIDs` | Set\<UInt32\>? | **macOS only, optional.** USB bus positions (IORegistry `locationID`) of the source devices. Needed when the same IDs also exist on a hub tier that never switches: on 2026-11-12 a dock kept Genesys `0x0610`/`0x0626` attached permanently, and the Mac counted itself as selected at startup while the KVM was on Windows. Learn / manual pick fill it in; absent = match by IDs only. Windows ignores it (its equivalent would be PnP instance paths) |
 
 ### BTDevice
 A managed Bluetooth device.

@@ -18,8 +18,8 @@ final class SourceLearnerTests: XCTestCase {
         XCTAssertTrue(learner.isLearning)
 
         // The KVM switch: one hub instance disappears, another appears; the mouse never changes.
-        usb.events.send((vendorID: 0x05E3, productID: 0x0626, added: false))
-        usb.events.send((vendorID: 0x05E3, productID: 0x0610, added: true))
+        usb.events.send(USBEvent(vendorID: 0x05E3, productID: 0x0626, locationID: nil, added: false))
+        usb.events.send(USBEvent(vendorID: 0x05E3, productID: 0x0610, locationID: nil, added: true))
         usb.attachedDevices = [steady, USBDeviceInfo(vendorID: 0x05E3, productID: 0x0610, name: "Hub B")]
 
         XCTAssertEqual(learner.changeCount, 2)
@@ -36,7 +36,7 @@ final class SourceLearnerTests: XCTestCase {
         let usb = MockUSBMonitor()
         let learner = SourceLearner(usb: usb)
         learner.start()
-        usb.events.send((vendorID: 0x05E3, productID: 0x0626, added: false))
+        usb.events.send(USBEvent(vendorID: 0x05E3, productID: 0x0626, locationID: nil, added: false))
         XCTAssertEqual(learner.changeCount, 1)
 
         learner.cancel()

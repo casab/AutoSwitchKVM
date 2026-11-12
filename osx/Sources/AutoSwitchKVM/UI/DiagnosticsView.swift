@@ -162,7 +162,7 @@ struct DiagnosticsTab: View {
 
     private func isSourceMember(_ d: USBDeviceInfo) -> Bool {
         guard let s = store.config.source else { return false }
-        return s.vendorID == d.vendorID && s.productIDs.contains(d.productID)
+        return s.matches(d)
     }
 
     private func refresh() async {
