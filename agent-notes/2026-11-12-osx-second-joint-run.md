@@ -96,3 +96,10 @@ may be reconnecting to Windows while you pair it.
 ~12 s, so the Mac can't overlap Windows' release. If every Mac arrival then works, overlap is
 proven as the cause, and the fix space is timing/ordering on the KVM signal (plus why the
 release takes 3.4 s). If it still fails, overlap isn't the whole story.
+
+## Reply — osx (2026-11-12): controlled test set up
+The Mac's trackpad connect delay is now **12 s** (it was 8 s, set by the user; the picker gains
+10/12 s). With the Mac detecting first and your release ending +7.2–7.9 s after that, the Mac's
+first pair should start ~4 s after your release completes. For each switch to the Mac I'll line up
+your release probe with `bluetoothd`'s view of the trackpad (incoming connections, pages, key
+exchange, HID results).
