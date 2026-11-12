@@ -38,6 +38,7 @@ final class AppController: ObservableObject {
         // (Only the app does this — tests never construct AppController.)
         FileLog.shared.start()
         let store = ConfigStore()
+        LogThreshold.shared.level = store.config.logLevel  // before anything else is logged
         let usb = USBMonitor()
         let bt = IOBluetoothController()
         self.store = store
@@ -63,6 +64,18 @@ final class AppController: ObservableObject {
         engine.$bluetoothPowered
             .receive(on: DispatchQueue.main)
             .sink { [weak self] value in MainActor.assumeIsolated { self?.bluetoothPowered = value } }
+            .store(in: &cancellables)
+
+        // Apply a changed log level at once (Settings ▸ Diagnostics); the change itself is always
+        // written, whatever the level.
+        store.$config
+            .map(\.logLevel)
+            .removeDuplicates()
+            .dropFirst()
+            .sink { level in
+                LogThreshold.shared.level = level
+                Log.app.always("log level set to \(level.rawValue) (\(level.title))")
+            }
             .store(in: &cancellables)
     }
 
@@ -97,7 +110,7 @@ final class AppController: ObservableObject {
         }
         engine.onUnexpectedDisconnect = { [weak self] device in
             guard let self else { return }
-            self.append("\(device.name) dropped unexpectedly")
+            self.append("\(device.name) dropped unexpectedly", level: .debug)
             if self.store.config.notifyUnexpectedDisconnect {
                 self.notifier.notify(
                     title: "Device disconnected",
@@ -111,7 +124,7 @@ final class AppController: ObservableObject {
         logStartupDiagnostics()
         engine.seed()
         engine.startStatusMonitor()
-        append("Started. Source: \(store.config.source?.name ?? "none")")
+        append("Started. Source: \(store.config.source?.name ?? "none")", level: .debug)
     }
 
     /// One block at launch with everything needed to read the log that follows: build, OS,
@@ -129,7 +142,7 @@ final class AppController: ObservableObject {
         let permission = BluetoothPermission.current
         if permission.isProblem {
             Log.app.error("Bluetooth permission: \(permission.description)")
-            append("Bluetooth permission: \(permission.description)")
+            append("Bluetooth permission: \(permission.description)", level: .debug)
         } else {
             Log.app.log("Bluetooth permission: \(permission.description)")
         }
@@ -139,7 +152,7 @@ final class AppController: ObservableObject {
             "config: profile '\(c.activeProfileName)', source \(c.source.map { "'\($0.name)' \($0.displayVidPid) \($0.displayLocations)" } ?? "none"); "
                 + "debounce arrival \(c.arrivalDebounceMs) ms / departure \(c.debounceMs) ms; "
                 + "retries \(c.connectRetryMax) (base \(c.connectRetrySecs) s); call timeout \(c.btCallTimeoutSecs) s; "
-                + "paused \(c.paused); autoReconnectOnDrop \(c.autoReconnectOnDrop)")
+                + "paused \(c.paused); autoReconnectOnDrop \(c.autoReconnectOnDrop); log level \(c.logLevel.rawValue)")
         for d in c.devices {
             Log.app.log(
                 "device '\(d.name)' \(d.normalizedAddress): enabled \(d.enabled), managePairing \(d.managePairing), "
@@ -152,13 +165,13 @@ final class AppController: ObservableObject {
     /// Goes through the engine: it halts automation first, so the release's own disconnect
     /// events can't trigger an auto-reconnect during sleep.
     private func handleWillSleep() async {
-        append("System sleep → releasing devices")
+        append("System sleep → releasing devices", level: .debug)
         await engine.prepareForSleep()
-        append("Devices released; allowing sleep")
+        append("Devices released; allowing sleep", level: .debug)
     }
 
     private func handleDidWake() {
-        append("Wake → re-seeding")
+        append("Wake → re-seeding", level: .debug)
         usb.refreshAttached()
         engine.resumeAfterWake()
     }
@@ -214,7 +227,7 @@ final class AppController: ObservableObject {
             pause: store.config.hotkeyPause,
             connectAll: store.config.hotkeyConnectAll,
             disconnectAll: store.config.hotkeyDisconnectAll)
-        for failure in failures { append("Shortcut \(failure)") }
+        for failure in failures { append("Shortcut \(failure)", level: .debug) }
     }
 
     // MARK: - Pause & quick actions (menu)
@@ -228,12 +241,12 @@ final class AppController: ObservableObject {
     }
 
     func connectAllNow() {
-        append("Manual: connect all")
+        append("Manual: connect all", level: .debug)
         engine.connectAllNow()
     }
 
     func disconnectAllNow() {
-        append("Manual: disconnect all")
+        append("Manual: disconnect all", level: .debug)
         engine.disconnectAllNow()
     }
 
@@ -297,7 +310,7 @@ final class AppController: ObservableObject {
             append("Exported debug logs to \(url.lastPathComponent)")
         } catch {
             Log.app.error("exporting debug logs to \(url.path) failed: \(error)")
-            append("Export failed: \(error.localizedDescription)")
+            append("Export failed: \(error.localizedDescription)", level: .error)
         }
     }
 
@@ -329,7 +342,7 @@ final class AppController: ObservableObject {
             try encoder.encode(store.config).write(to: url, options: .atomic)
             append("Exported settings to \(url.lastPathComponent)")
         } catch {
-            append("Export failed: \(error)")
+            append("Export failed: \(error)", level: .error)
         }
     }
 
@@ -356,7 +369,7 @@ final class AppController: ObservableObject {
             engine.reevaluate()
             append("Imported settings from \(url.lastPathComponent)")
         } catch {
-            append("Import failed: \(error)")
+            append("Import failed: \(error)", level: .error)
         }
     }
 
@@ -370,42 +383,50 @@ final class AppController: ObservableObject {
     /// Full connect flow (pair first when managePairing, retries included), ignoring selection.
     func testConnect(_ device: BTDevice) {
         Task {
-            append("connect \(device.name)…")
+            append("connect \(device.name)…", level: .debug)
             await engine.connectDeviceNow(device)
-            append("connect \(device.name): \(engine.statuses[device.id]?.label ?? "done")")
+            append("connect \(device.name): \(engine.statuses[device.id]?.label ?? "done")", level: .debug)
         }
     }
 
     func testDisconnect(_ device: BTDevice) {
         Task {
-            append("disconnect \(device.name)…")
+            append("disconnect \(device.name)…", level: .debug)
             let error = await engine.disconnectDeviceNow(device)
-            append("disconnect \(device.name): \(error ?? "ok")")
+            append("disconnect \(device.name): \(error ?? "ok")", level: .debug)
         }
     }
 
     func testPair(_ device: BTDevice) {
         Task {
-            append("pair \(device.name)…")
+            append("pair \(device.name)…", level: .debug)
             let error = await engine.pairDeviceNow(device)
-            append("pair \(device.name): \(error ?? "ok")")
+            append("pair \(device.name): \(error ?? "ok")", level: .debug)
         }
     }
 
     func testUnpair(_ device: BTDevice) {
         Task {
-            append("unpair \(device.name)…")
+            append("unpair \(device.name)…", level: .debug)
             let error = await engine.unpairDeviceNow(device)
-            append("unpair \(device.name): \(error ?? "ok")")
+            append("unpair \(device.name): \(error ?? "ok")", level: .debug)
         }
     }
 
     // MARK: - Logging
 
-    func append(_ line: String) {
+    /// Adds a line to the in-app activity list (Settings) and logs it at `level`. Lines that
+    /// repeat what the engine or a system monitor already logged pass `.debug`, so a Normal log
+    /// has one line per event.
+    func append(_ line: String, level: LogLevel = .info) {
         let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         log.insert("[\(ts)] \(line)", at: 0)
         if log.count > 200 { log.removeLast(log.count - 200) }
-        Log.app.log(line)
+        switch level {
+        case .error: Log.app.error(line)
+        case .warning: Log.app.warn(line)
+        case .info: Log.app.log(line)
+        case .debug: Log.app.debug(line)
+        }
     }
 }

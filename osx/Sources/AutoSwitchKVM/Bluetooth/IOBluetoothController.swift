@@ -103,7 +103,7 @@ final class IOBluetoothController: NSObject, BluetoothController {
         if !hidMissLogged.contains(want) {
             hidMissLogged.insert(want)
             let found = serials.isEmpty ? "none" : serials.joined(separator: ", ")
-            Log.bluetooth.log(
+            Log.bluetooth.debug(
                 "HID check for \(address): no registered HID device yet (registered Bluetooth HID serials: \(found))")
         }
         return false
@@ -128,32 +128,33 @@ final class IOBluetoothController: NSObject, BluetoothController {
         // an early hint, and the link state is the fallback when the callback never fires.
         let wasConnected = dev.isConnected()
         let note = wasConnected ? " (already connected; reopening for a clean connect)" : ""
-        Log.bluetooth.log("openConnection \(address) (async)…\(note)")
+        Log.bluetooth.debug("openConnection \(address) (async)…\(note)")
         let start = ContinuousClock.now
         connectAttempts[key] = .pending
         let rc = dev.openConnection(self)
         guard rc == kIOReturnSuccess else {
             connectAttempts[key] = nil
-            Log.bluetooth.warn("openConnection \(address) could not start: \(BTCode.describe(rc))")
+            Log.bluetooth.debug("openConnection \(address) could not start: \(BTCode.describe(rc))")
             throw BTError.connectFailed(rc)
         }
         defer { if case .done = connectAttempts[key] { connectAttempts[key] = nil } }
         while true {
             if case .done(let status) = connectAttempts[key] {
                 guard status == kIOReturnSuccess else {
-                    Log.bluetooth.warn(
+                    Log.bluetooth.debug(
                         "openConnection \(address) failed after \(Elapsed.since(start)): \(BTCode.describe(status))")
                     throw BTError.connectFailed(status)
                 }
-                Log.bluetooth.log("openConnection \(address) OK (\(Elapsed.since(start)))")
+                Log.bluetooth.debug("openConnection \(address) OK (\(Elapsed.since(start)))")
                 return
             }
             if !wasConnected, dev.isConnected() {
-                Log.bluetooth.log("openConnection \(address): link up after \(Elapsed.since(start)) (callback pending)")
+                Log.bluetooth.debug(
+                    "openConnection \(address): link up after \(Elapsed.since(start)) (callback pending)")
                 return
             }
             if start.duration(to: .now) > Self.connectWait {
-                Log.bluetooth.warn("openConnection \(address): no link after \(Elapsed.since(start)); giving up")
+                Log.bluetooth.debug("openConnection \(address): no link after \(Elapsed.since(start)); giving up")
                 throw BTError.connectFailed(Int32(bitPattern: 0xE000_02D6))  // kIOReturnTimeout
             }
             try await Task.sleep(nanoseconds: 100_000_000)  // throws when withTimeout cancels us
@@ -176,18 +177,18 @@ final class IOBluetoothController: NSObject, BluetoothController {
         var pending = false
         if case .pending = connectAttempts[key] { pending = true }
         guard dev.isConnected() || pending else {
-            Log.bluetooth.log("closeConnection \(address): not connected, nothing to close")
+            Log.bluetooth.debug("closeConnection \(address): not connected, nothing to close")
             return
         }
         connectAttempts[key] = nil
         let (rc, took) = blockingCall("closeConnection", address) { dev.closeConnection() }
         guard rc == kIOReturnSuccess || (pending && !dev.isConnected()) else {
-            Log.bluetooth.warn(
+            Log.bluetooth.debug(
                 "closeConnection \(address) failed after \(Elapsed.format(took)): \(BTCode.describe(rc))")
             throw BTError.disconnectFailed(rc)
         }
         let note = pending ? " (cancelled a pending connect)" : ""
-        Log.bluetooth.log("closeConnection \(address) OK (\(Elapsed.format(took)))\(note)")
+        Log.bluetooth.debug("closeConnection \(address) OK (\(Elapsed.format(took)))\(note)")
     }
 
     func pair(_ address: String) async throws {
@@ -196,24 +197,24 @@ final class IOBluetoothController: NSObject, BluetoothController {
         if dev.isPaired() {
             // Logged at INFO on purpose: this skip is the first clue when a stale bond causes
             // repeated connect timeouts (the engine then re-pairs from scratch on its next try).
-            Log.bluetooth.log("pair \(address): a bond already exists; skipping the pairing ceremony")
+            Log.bluetooth.debug("pair \(address): a bond already exists; skipping the pairing ceremony")
             return
         }
         if activePairings[key] != nil {
-            Log.bluetooth.warn("pair \(address): a pairing ceremony with this device is already running")
+            Log.bluetooth.debug("pair \(address): a pairing ceremony with this device is already running")
             throw BTError.classified(.operationInProgress, "a pairing with this device is already running")
         }
         let helper = PairingHelper(address: address)
         activePairings[key] = helper
         defer { if activePairings[key] === helper { activePairings[key] = nil } }
 
-        Log.bluetooth.log("pair \(address): starting pairing ceremony")
+        Log.bluetooth.debug("pair \(address): starting pairing ceremony")
         let start = ContinuousClock.now
         do {
             try await helper.pair(dev)
-            Log.bluetooth.log("pair \(address): paired (\(Elapsed.since(start)))")
+            Log.bluetooth.debug("pair \(address): paired (\(Elapsed.since(start)))")
         } catch {
-            Log.bluetooth.warn("pair \(address) failed after \(Elapsed.since(start)): \(error)")
+            Log.bluetooth.debug("pair \(address) failed after \(Elapsed.since(start)): \(error)")
             throw error
         }
     }
@@ -229,7 +230,7 @@ final class IOBluetoothController: NSObject, BluetoothController {
         }
 
         guard dev.isPaired() else {
-            Log.bluetooth.log("unpair \(address): not paired, nothing to remove")
+            Log.bluetooth.debug("unpair \(address): not paired, nothing to remove")
             return
         }
 
@@ -264,7 +265,7 @@ final class IOBluetoothController: NSObject, BluetoothController {
         if dev.isConnected() {
             Log.bluetooth.warn("unpair \(address): bond removed but the link is still up after \(Elapsed.since(start))")
         } else {
-            Log.bluetooth.log(
+            Log.bluetooth.debug(
                 "unpair \(address) OK (remove \(Elapsed.format(took)), link down after \(Elapsed.since(start)); "
                     + "the system finishes deleting the key ~1.5 s later)")
         }
@@ -357,7 +358,7 @@ final class IOBluetoothController: NSObject, BluetoothController {
         guard let addr = device.addressString?.lowercased(),
             monitoredAddresses.contains(addr)
         else { return }
-        Log.bluetooth.log("event: \(addr) connected")
+        Log.bluetooth.debug("event: \(addr) connected")
         onChange?(addr, true)
         armDisconnect(device, addr)  // disconnect notifications are one-shot; re-arm each time
     }
@@ -367,7 +368,7 @@ final class IOBluetoothController: NSObject, BluetoothController {
         disconnectObservers[addr]?.unregister()
         disconnectObservers[addr] = nil
         guard monitoredAddresses.contains(addr) else { return }
-        Log.bluetooth.log("event: \(addr) disconnected")
+        Log.bluetooth.debug("event: \(addr) disconnected")
         onChange?(addr, false)
     }
 }
@@ -451,22 +452,22 @@ private final class PairingHelper: NSObject, @preconcurrency IOBluetoothDevicePa
     // MARK: IOBluetoothDevicePairDelegate
 
     func devicePairingStarted(_ sender: Any!) {
-        Log.bluetooth.log("pair \(address): ceremony started")
+        Log.bluetooth.debug("pair \(address): ceremony started")
     }
 
     func devicePairingConnecting(_ sender: Any!) {
-        Log.bluetooth.log("pair \(address): connecting")
+        Log.bluetooth.debug("pair \(address): connecting")
     }
 
     /// Secure-simple-pairing numeric comparison — auto-accept (no UI for a background agent).
     func devicePairingUserConfirmationRequest(_ sender: Any!, numericValue: BluetoothNumericValue) {
-        Log.bluetooth.log("pair \(address): confirming numeric comparison automatically")
+        Log.bluetooth.debug("pair \(address): confirming numeric comparison automatically")
         (sender as? IOBluetoothDevicePair)?.replyUserConfirmation(true)
     }
 
     /// Passkey the *device* displays; informational, no reply needed.
     func devicePairingUserPasskeyNotification(_ sender: Any!, passkey: BluetoothPasskey) {
-        Log.bluetooth.log("pair \(address): device shows passkey \(passkey)")
+        Log.bluetooth.debug("pair \(address): device shows passkey \(passkey)")
     }
 
     /// Legacy typed-PIN request. Modern SSP HID devices (trackpad/keyboard) shouldn't reach here;
@@ -478,7 +479,7 @@ private final class PairingHelper: NSObject, @preconcurrency IOBluetoothDevicePa
     func deviceSimplePairingComplete(_ sender: Any!, status: BluetoothHCIEventStatus) {
         simplePairingStatus = status
         if status != 0 {
-            Log.bluetooth.warn("pair \(address): simple pairing completed with \(BTCode.describe(Int32(status)))")
+            Log.bluetooth.debug("pair \(address): simple pairing completed with \(BTCode.describe(Int32(status)))")
         }
     }
 

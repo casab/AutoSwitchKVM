@@ -31,6 +31,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(cfg.arrivalDebounceMs, 400)
         XCTAssertEqual(cfg.btCallTimeoutSecs, 15)
         XCTAssertEqual(cfg.postUnpairSettleMs, 2000)
+        XCTAssertEqual(cfg.logLevel, .info)
         XCTAssertEqual(cfg.profiles.count, 1)  // empty → one Default profile
         XCTAssertEqual(cfg.hotkeyPause, .defaultPause)  // absent → the default combo
 

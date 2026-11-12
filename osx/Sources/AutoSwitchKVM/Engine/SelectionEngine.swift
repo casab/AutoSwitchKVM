@@ -217,14 +217,14 @@ final class SelectionEngine: ObservableObject {
         let old = statuses[device.id]
         let new: DeviceStatus = connected ? .connected : .disconnected
         if old != new {
-            Log.engine.log(
+            Log.engine.debug(
                 old.map { "\(device.name): \($0.label) → \(new.label) (reported by \(origin))" }
                     ?? "\(device.name): initial status \(new.label) (\(origin))")
             setStatus(device.id, new)
         }
 
         if !connected, old == .connected, selected, bluetoothPowered, device.enabled, !suspended {
-            Log.engine.warn("\(device.name): dropped unexpectedly while the source is present")
+            Log.engine.log("\(device.name): dropped unexpectedly while the source is present")
             onUnexpectedDisconnect?(device)
             maybeAutoReconnect(device)
         }
@@ -236,18 +236,19 @@ final class SelectionEngine: ObservableObject {
     private func maybeAutoReconnect(_ device: BTDevice) {
         guard store.config.autoReconnectOnDrop else { return }
         if store.config.paused || suspended {
-            Log.engine.log("\(device.name): no auto-reconnect (\(suspended ? "going to sleep" : "automation paused"))")
+            Log.engine.debug(
+                "\(device.name): no auto-reconnect (\(suspended ? "going to sleep" : "automation paused"))")
             return
         }
         guard !isBusy(device.id) else { return }
         let now = Date()
         if let last = lastAutoReconnect[device.id], now.timeIntervalSince(last) < autoReconnectMinInterval {
             let ago = Int(now.timeIntervalSince(last))
-            Log.engine.log("\(device.name): auto-reconnect skipped (rate limit: last one \(ago) s ago)")
+            Log.engine.debug("\(device.name): auto-reconnect skipped (rate limit: last one \(ago) s ago)")
             return
         }
         lastAutoReconnect[device.id] = now
-        Log.engine.log("\(device.name): auto-reconnect scheduled in \(autoReconnectDelayMs) ms")
+        Log.engine.debug("\(device.name): auto-reconnect scheduled in \(autoReconnectDelayMs) ms")
 
         let run = currentRun("auto-reconnect after drop")
         Task { @MainActor [weak self] in
@@ -260,7 +261,7 @@ final class SelectionEngine: ObservableObject {
                     : self.store.config.paused
                         ? "automation paused" : self.isBusy(device.id) ? "another operation is in flight" : nil)
             if let skip {
-                Log.engine.log("\(device.name): auto-reconnect cancelled: \(skip)")
+                Log.engine.debug("\(device.name): auto-reconnect cancelled: \(skip)")
                 return
             }
             self.markBusy(device.id)
@@ -279,7 +280,7 @@ final class SelectionEngine: ObservableObject {
             Log.engine.log("Bluetooth powered on → re-evaluating")
             seed()
         } else {
-            Log.engine.warn("Bluetooth powered off: connects are skipped until it is back on")
+            Log.engine.log("Bluetooth powered off: connects are skipped until it is back on")
         }
     }
 
@@ -303,7 +304,7 @@ final class SelectionEngine: ObservableObject {
             "run #\(run.token): system sleep → automation halted; releasing \(devices.count) enabled device(s)")
         for device in devices {
             if let why = staleReason(run, respectSelection: false) {
-                Log.engine.log("run #\(run.token): sleep release stopped: \(why)")
+                Log.engine.debug("run #\(run.token): sleep release stopped: \(why)")
                 return
             }
             markBusy(device.id)
@@ -394,7 +395,7 @@ final class SelectionEngine: ObservableObject {
                     : "source '\(source.name)' gone (\(id) detached, no source devices left); departure debounce \(store.config.debounceMs) ms"
             )
         } else {
-            Log.usb.log(
+            Log.usb.debug(
                 "source device \(id) \(event.added ? "attached" : "detached") "
                     + "(\(presentKeys.count) source device(s) present)")
         }
@@ -426,11 +427,11 @@ final class SelectionEngine: ObservableObject {
 
         let wouldAct = present != automationActed || (!present && reconcileOnSeed)
         if suspended {
-            if wouldAct { Log.engine.log("evaluate: going to sleep; not acting on '\(lastReason)'") }
+            if wouldAct { Log.engine.debug("evaluate: going to sleep; not acting on '\(lastReason)'") }
             return
         }
         guard !store.config.paused else {  // automation suspended; don't act
-            if wouldAct { Log.engine.log("evaluate: automation paused; not acting on '\(lastReason)'") }
+            if wouldAct { Log.engine.debug("evaluate: automation paused; not acting on '\(lastReason)'") }
             return
         }
 
@@ -472,13 +473,13 @@ final class SelectionEngine: ObservableObject {
         let paired = Set(pairedList.map { $0.address.replacingOccurrences(of: ":", with: "-").lowercased() })
         for device in store.config.devices where device.enabled {
             if let why = staleReason(run, respectSelection: false) {
-                Log.engine.log("run #\(run.token): seed release stopped: \(why)")
+                Log.engine.debug("run #\(run.token): seed release stopped: \(why)")
                 return
             }
             let connected = await bt.isConnected(device.normalizedAddress)
             let bonded = device.managePairing && paired.contains(device.normalizedAddress)
             guard connected || bonded else {
-                Log.engine.log("\(device.name): not held by this Mac; nothing to release")
+                Log.engine.debug("\(device.name): not held by this Mac; nothing to release")
                 continue
             }
             markBusy(device.id)
@@ -497,7 +498,7 @@ final class SelectionEngine: ObservableObject {
         Log.engine.log("run #\(run.token): manual connect all (\(store.config.devices.count) device(s))")
         for device in store.config.devices {
             if let why = staleReason(run, respectSelection: false) {
-                Log.engine.log("run #\(run.token): connect all stopped: \(why)")
+                Log.engine.debug("run #\(run.token): connect all stopped: \(why)")
                 return
             }
             markBusy(device.id)
@@ -511,7 +512,7 @@ final class SelectionEngine: ObservableObject {
         Log.engine.log("run #\(run.token): manual disconnect all (\(store.config.devices.count) device(s))")
         for device in store.config.devices {
             if let why = staleReason(run, respectSelection: false) {
-                Log.engine.log("run #\(run.token): disconnect all stopped: \(why)")
+                Log.engine.debug("run #\(run.token): disconnect all stopped: \(why)")
                 return
             }
             markBusy(device.id)
@@ -556,7 +557,7 @@ final class SelectionEngine: ObservableObject {
     private func beginManual(_ device: BTDevice, _ what: String) -> Run {
         if isBusy(device.id) {
             let run = newRun(what)
-            Log.engine.log("\(device.name): \(what) supersedes the in-flight operation (run #\(run.token))")
+            Log.engine.debug("\(device.name): \(what) supersedes the in-flight operation (run #\(run.token))")
             return run
         }
         return currentRun(what)
@@ -571,7 +572,7 @@ final class SelectionEngine: ObservableObject {
         if releases { releaseRequested.insert(device.id) } else { releaseRequested.remove(device.id) }
 
         let start = ContinuousClock.now
-        Log.engine.log("\(device.name): manual \(op) started")
+        Log.engine.debug("\(device.name): manual \(op) started")
         do {
             try await withTimeout(store.config.btCallTimeoutSecs, call)
         } catch {
@@ -616,7 +617,7 @@ final class SelectionEngine: ObservableObject {
     private func connectAll(run: Run) async {
         for device in store.config.devices where device.enabled {
             if let why = staleReason(run, respectSelection: false) {
-                Log.engine.log("run #\(run.token): connect run stopped: \(why)")
+                Log.engine.debug("run #\(run.token): connect run stopped: \(why)")
                 return
             }
             markBusy(device.id)
@@ -642,7 +643,7 @@ final class SelectionEngine: ObservableObject {
         let start = ContinuousClock.now
         releaseRequested.remove(device.id)
 
-        Log.engine.log(
+        Log.engine.debug(
             "\(name): connect started (run #\(run.token), \(run.trigger); managePairing=\(device.managePairing))")
         setStatus(device.id, .connecting)
 
@@ -650,7 +651,8 @@ final class SelectionEngine: ObservableObject {
         if device.connectDelayMs > 0 {
             await sleepHook(device.connectDelayMs)
             if let why = staleReason(run, respectSelection: respectSelection) {
-                Log.engine.log("\(name): connect aborted during the \(device.connectDelayMs) ms connect delay: \(why)")
+                Log.engine.debug(
+                    "\(name): connect aborted during the \(device.connectDelayMs) ms connect delay: \(why)")
                 markAborted(device.id)
                 return
             }
@@ -665,12 +667,12 @@ final class SelectionEngine: ObservableObject {
 
         while true {
             if !bluetoothPowered {
-                Log.engine.log("\(name): connect stopped: Bluetooth is off")
+                Log.engine.debug("\(name): connect stopped: Bluetooth is off")
                 setStatus(device.id, .bluetoothOff)
                 return
             }
             if let why = staleReason(run, respectSelection: respectSelection) {
-                Log.engine.log("\(name): connect aborted before try \(tries + 1): \(why)")
+                Log.engine.debug("\(name): connect aborted before try \(tries + 1): \(why)")
                 markAborted(device.id)
                 return
             }
@@ -689,11 +691,11 @@ final class SelectionEngine: ObservableObject {
                 if device.managePairing {
                     if freshBond {
                         freshBond = false  // once per hard failure, not again on each soft retry
-                        Log.engine.log("\(name): try \(tries): removing a possibly stale bond before re-pairing")
+                        Log.engine.warn("\(name): try \(tries): removing a possibly stale bond before re-pairing")
                         await bestEffort(device, "stale-bond unpair") { try await self.unpairTracked(device.id, addr) }
                         await waitForUnpairToSettle(device)
                         if let why = staleReason(run, respectSelection: respectSelection) {
-                            Log.engine.log("\(name): connect aborted after the stale-bond unpair: \(why)")
+                            Log.engine.debug("\(name): connect aborted after the stale-bond unpair: \(why)")
                             markAborted(device.id)
                             return
                         }
@@ -703,14 +705,14 @@ final class SelectionEngine: ObservableObject {
                     // A pair started inside that window collides with the unpair.
                     await waitForUnpairToSettle(device)
                     if let why = staleReason(run, respectSelection: respectSelection) {
-                        Log.engine.log("\(name): connect aborted while an unpair was settling: \(why)")
+                        Log.engine.debug("\(name): connect aborted while an unpair was settling: \(why)")
                         markAborted(device.id)
                         return
                     }
                     step = "pair"
                     try await self.step(name, tries, "pair") { try await self.bt.pair(addr) }
                     if let why = staleReason(run, respectSelection: respectSelection) {
-                        Log.engine.log("\(name): connect aborted after pairing: \(why)")
+                        Log.engine.debug("\(name): connect aborted after pairing: \(why)")
                         await undoIfReleased(device, why: "a pair completed")
                         markAborted(device.id)
                         return
@@ -725,7 +727,7 @@ final class SelectionEngine: ObservableObject {
                         await bestEffort(device, "post-pair disconnect") { try await self.bt.disconnect(addr) }
                         await sleepHook(postPairSettleMs)
                         if let why = staleReason(run, respectSelection: respectSelection) {
-                            Log.engine.log("\(name): connect aborted after the post-pair settle: \(why)")
+                            Log.engine.debug("\(name): connect aborted after the post-pair settle: \(why)")
                             await undoIfReleased(device, why: "a pair completed")
                             markAborted(device.id)
                             return
@@ -746,7 +748,7 @@ final class SelectionEngine: ObservableObject {
                 if step == "connect", f.kind == .timeout, await bt.isConnected(addr) {
                     // openConnection can complete just after the deadline (withTimeout abandons it
                     // rather than waiting). A connection that arrived late is a success.
-                    Log.engine.log(
+                    Log.engine.warn(
                         "\(name): try \(tries): openConnection overran its timeout but the device is connected; "
                             + "keeping it")
                 } else {
@@ -768,7 +770,7 @@ final class SelectionEngine: ObservableObject {
                         Log.engine.warn("\(name): connected after the run was superseded (\(why)); releasing it again")
                         await undoIfReleased(device, why: "a connection completed")
                     } else {
-                        Log.engine.log(
+                        Log.engine.debug(
                             "\(name): connected, but the run was superseded (\(why)); leaving it to the newer run")
                     }
                     markAborted(device.id)
@@ -784,19 +786,22 @@ final class SelectionEngine: ObservableObject {
             }
 
             last = f
-            Log.engine.warn("\(name): try \(tries): \(step) failed after \(Elapsed.since(tryStart)): \(f.summary)")
+            // Expected refusals (the other host still holds it, an operation in flight) are routine
+            // on every switch: debug. Hard failures are warnings (spec §10).
+            let tryFailed = "\(name): try \(tries): \(step) failed after \(Elapsed.since(tryStart)): \(f.summary)"
+            if f.kind.isSoft { Log.engine.debug(tryFailed) } else { Log.engine.warn(tryFailed) }
             setStatus(device.id, .error(f.message))
 
             // Don't trust a link-only state; drop any partial connection so the next try is clean.
             if await bt.isConnected(addr) {
-                Log.engine.log(
+                Log.engine.debug(
                     "\(name): the device reports connected despite the failed \(step); dropping it as a partial link")
             }
             await bestEffort(device, "cleanup disconnect") { try await self.bt.disconnect(addr) }
 
             // Superseded while the try was running: stop here rather than log a misleading retry.
             if let why = staleReason(run, respectSelection: respectSelection) {
-                Log.engine.log("\(name): connect aborted after failed try \(tries): \(why)")
+                Log.engine.debug("\(name): connect aborted after failed try \(tries): \(why)")
                 await undoIfReleased(device, why: "a failed try may have left a bond")
                 markAborted(device.id)
                 return
@@ -812,7 +817,7 @@ final class SelectionEngine: ObservableObject {
             if f.kind.isSoft {
                 if softRetries < maxSoftRetries {
                     softRetries += 1
-                    Log.engine.log(
+                    Log.engine.debug(
                         "\(name): \(f.kind == .deviceBusy ? "device refused (most likely still held by the other host)" : "a previous Bluetooth operation is still running"); "
                             + "retrying in \(softRetryIntervalMs) ms (soft retry \(softRetries)/\(maxSoftRetries), "
                             + "not counted against the \(maxHard) attempts)")
@@ -826,7 +831,7 @@ final class SelectionEngine: ObservableObject {
             if hardFailures >= maxHard { break }
             freshBond = device.managePairing && f.kind.mayBeStaleBond
             let backoffMs = Int(Self.backoffNanos(base: cfg.connectRetrySecs, attempt: hardFailures) / 1_000_000)
-            Log.engine.log(
+            Log.engine.debug(
                 "\(name): attempt \(hardFailures)/\(maxHard) failed; retrying in \(backoffMs) ms"
                     + (freshBond ? " (will re-pair from scratch)" : ""))
             await sleepHook(backoffMs)
@@ -854,17 +859,17 @@ final class SelectionEngine: ObservableObject {
         for poll in 0...polls {
             guard let ready = await bt.isHIDReady(addr) else { return nil }
             if ready {
-                if poll > 0 { Log.engine.log("\(device.name): HID up after \(Elapsed.since(start))") }
+                if poll > 0 { Log.engine.debug("\(device.name): HID up after \(Elapsed.since(start))") }
                 return true
             }
             if poll == polls { break }
             if !(await bt.isConnected(addr)) {
-                Log.engine.warn("\(device.name): the link dropped before HID came up (\(Elapsed.since(start)))")
+                Log.engine.debug("\(device.name): the link dropped before HID came up (\(Elapsed.since(start)))")
                 return false
             }
             await sleepHook(hidPollIntervalMs)
         }
-        Log.engine.warn("\(device.name): link up but no HID after \(Elapsed.since(start))")
+        Log.engine.debug("\(device.name): link up but no HID after \(Elapsed.since(start))")
         return false
     }
 
@@ -877,20 +882,20 @@ final class SelectionEngine: ObservableObject {
         for poll in 0...polls {
             guard let ready = await bt.isHIDReady(addr) else { return false }
             if ready {
-                Log.engine.log("\(device.name): HID up on the pairing link after \(Elapsed.since(start))")
+                Log.engine.debug("\(device.name): HID up on the pairing link after \(Elapsed.since(start))")
                 return true
             }
             if poll == polls { break }
             if !(await bt.isConnected(addr)) {
                 if poll > 0 {
-                    Log.engine.log(
+                    Log.engine.debug(
                         "\(device.name): the pairing link closed without HID (\(Elapsed.since(start))); reconnecting")
                 }
                 return false
             }
             await sleepHook(hidPollIntervalMs)
         }
-        Log.engine.log("\(device.name): no HID on the pairing link after \(Elapsed.since(start)); reconnecting")
+        Log.engine.debug("\(device.name): no HID on the pairing link after \(Elapsed.since(start)); reconnecting")
         return false
     }
 
@@ -911,7 +916,7 @@ final class SelectionEngine: ObservableObject {
     private func waitForUnpairToSettle(_ device: BTDevice) async {
         let start = ContinuousClock.now
         if unpairsInFlight[device.id] != nil {
-            Log.engine.log("\(device.name): an unpair of this device is still running; waiting before pairing")
+            Log.engine.debug("\(device.name): an unpair of this device is still running; waiting before pairing")
             while unpairsInFlight[device.id] != nil, start.duration(to: .now) < .seconds(6) {
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
@@ -921,7 +926,7 @@ final class SelectionEngine: ObservableObject {
         let sinceMs = Int(since.components.seconds * 1000 + since.components.attoseconds / 1_000_000_000_000_000)
         let remaining = postUnpairSettleMs - sinceMs
         guard remaining > 0 else { return }
-        Log.engine.log(
+        Log.engine.debug(
             "\(device.name): unpaired \(sinceMs) ms ago; waiting \(remaining) ms for the system to finish "
                 + "removing the old bond before pairing")
         await sleepHook(remaining)
@@ -944,7 +949,7 @@ final class SelectionEngine: ObservableObject {
     private func disconnectAll(run: Run) async {
         for device in store.config.devices where device.enabled {
             if let why = staleReason(run, respectSelection: false) {  // e.g. the source came back
-                Log.engine.log("run #\(run.token): release run stopped: \(why)")
+                Log.engine.debug("run #\(run.token): release run stopped: \(why)")
                 return
             }
             markBusy(device.id)
@@ -962,7 +967,7 @@ final class SelectionEngine: ObservableObject {
         let name = device.name
         let start = ContinuousClock.now
         releaseRequested.insert(device.id)
-        Log.engine.log(
+        Log.engine.debug(
             "\(name): release started (run #\(run.token), \(run.trigger); managePairing=\(device.managePairing))")
 
         var disconnectFailure: Failure?
@@ -975,7 +980,7 @@ final class SelectionEngine: ObservableObject {
                     + (device.managePairing ? "; unpairing anyway" : ""))
         }
         if let why = staleReason(run, respectSelection: false) {
-            Log.engine.log("\(name): release abandoned after disconnect: \(why)")
+            Log.engine.debug("\(name): release abandoned after disconnect: \(why)")
             return
         }
 
@@ -997,20 +1002,20 @@ final class SelectionEngine: ObservableObject {
                     let f = Failure(error)
                     unpairFailure = f
                     if let why = staleReason(run, respectSelection: false) {
-                        Log.engine.log("\(name): release abandoned after a failed unpair (\(f.summary)): \(why)")
+                        Log.engine.debug("\(name): release abandoned after a failed unpair (\(f.summary)): \(why)")
                         return
                     }
                     guard attempt == 1, f.kind != .invalidAddress else { break }
                     Log.engine.warn("\(name): unpair failed: \(f.summary); retrying once in \(releaseRetryDelayMs) ms")
                     await sleepHook(releaseRetryDelayMs)
                     if let why = staleReason(run, respectSelection: false) {
-                        Log.engine.log("\(name): release abandoned before the unpair retry: \(why)")
+                        Log.engine.debug("\(name): release abandoned before the unpair retry: \(why)")
                         return
                     }
                 }
             }
             if let why = staleReason(run, respectSelection: false) {
-                Log.engine.log("\(name): release abandoned after unpair: \(why)")
+                Log.engine.debug("\(name): release abandoned after unpair: \(why)")
                 return
             }
             if let f = unpairFailure {
@@ -1074,7 +1079,7 @@ final class SelectionEngine: ObservableObject {
         let start = ContinuousClock.now
         try await withTimeout(store.config.btCallTimeoutSecs, op)
         let prefix = tryNumber.map { "try \($0): " } ?? ""
-        Log.engine.log("\(name): \(prefix)\(label) OK (\(Elapsed.since(start)))")
+        Log.engine.debug("\(name): \(prefix)\(label) OK (\(Elapsed.since(start)))")
     }
 
     /// Run a step whose failure must not abort the flow, but must be visible in the log.

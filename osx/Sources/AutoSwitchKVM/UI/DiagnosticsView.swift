@@ -42,6 +42,17 @@ struct DiagnosticsTab: View {
             }
             .controlSize(.small)
 
+            HStack(spacing: 8) {
+                Text("Log detail").font(.system(size: 12))
+                Picker("Log detail", selection: $store.config.logLevel) {
+                    ForEach(LogLevel.allCases.reversed(), id: \.self) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+                Text(logLevelHint).font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+
             if debug.entries.isEmpty {
                 Text("No log entries yet.").font(.system(size: 12)).foregroundStyle(.secondary)
             } else {
@@ -59,6 +70,15 @@ struct DiagnosticsTab: View {
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
                 .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary, lineWidth: 0.5))
             }
+        }
+    }
+
+    private var logLevelHint: String {
+        switch store.config.logLevel {
+        case .debug: return "Every step and raw Bluetooth call. Use while chasing a problem."
+        case .info: return "One line per handoff event and user action."
+        case .warning: return "Only problems, including ones that recovered."
+        case .error: return "Only failures that need attention."
         }
     }
 

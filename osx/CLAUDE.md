@@ -100,8 +100,18 @@ Single executable target, organized by folder under `Sources/AutoSwitchKVM/`:
   `HotKeyManager` (Carbon `RegisterEventHotKey`; user-assignable combos via `KeyShortcut`, off by
   default; `apply(enabled:pause:connectAll:disconnectAll:)` is idempotent).
 - `Support/` — `Log` (`os.Logger` wrappers: subsystem `com.enginal.AutoSwitchKVM`, categories
-  `app`/`usb`/`bluetooth`/`engine`; levels `log`/`warn`/`error`/`debug`) which also mirror into
-  `FileLog` (the persistent daily file, started by `AppController.init`, never by tests) and
+  `app`/`usb`/`bluetooth`/`engine`; levels `error`/`warn`/`log` (info)/`debug`, plus `always`),
+  gated by `LogThreshold` from `AppConfig.logLevel` (spec §10; Settings ▸ Diagnostics ▸ Log
+  detail; applied live, the change itself is always logged). Classify like Windows: `error` =
+  failed and needs attention; `warn` = recovered/worked around (hard try failures, fallbacks);
+  `log` = the handoff story and user actions, ~one line per event; `debug` = step detail, raw
+  Bluetooth calls (the whole `bluetooth` category except adapter state and real problems), waits,
+  superseded runs, and expected refusals (`deviceBusy`/`operationInProgress` tries). One fact,
+  one info line: `AppController.append(_:level:)` (the in-app activity list) passes `.debug`
+  when the engine or a system monitor already logged the same event. Budget, guarded by
+  `LogLevelTests`: a clean arrive + leave is 6 lines at info, 0 at warning. The log
+  mirrors into `FileLog` (the persistent daily file, started by `AppController.init`, never by
+  tests) and
   `DebugLog` (in-app buffer shown + exportable from Settings ▸ Diagnostics ▸ Debug logs).
   `Elapsed` formats durations for log lines. Use `Log.*` instead of `NSLog`/`print`.
 - `System/BluetoothPermission` — reads the app's Bluetooth privacy permission (logged at launch;

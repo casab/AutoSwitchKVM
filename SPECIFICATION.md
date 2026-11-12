@@ -84,7 +84,7 @@ display string convention, e.g. `⌃⌥⌘P` / on Windows `Ctrl+Alt+Cmd⇒Win` e
 | `connectRetrySecs` | int | `2` | Backoff **base** seconds |
 | `btCallTimeoutSecs` | int | `15` macOS / `45` Windows | Per Bluetooth-call timeout. Platform default differs by design: a Windows pair legitimately takes ~14 s and must absorb the other-host-release race |
 | `postUnpairSettleMs` | int | `2000` | Minimum gap between an unpair of a device returning and the next pair of it (§3 Connect flow). Only quick KVM bounces pay it. User-tunable (Settings ▸ General on both apps); the macOS reason is bluetoothd deleting the key ~1.5 s late, the Windows one WinRT's ~70 ms stale `IsPaired` |
-| `logLevel` | string | `"info"` | Minimum log level: `"error"`, `"warning"`, `"info"`, `"debug"` (§10). Missing/unknown = `"info"`. Windows: Settings ▸ Diagnostics ▸ Log detail; macOS pending |
+| `logLevel` | string | `"info"` | Minimum log level: `"error"`, `"warning"`, `"info"`, `"debug"` (§10). Missing/unknown = `"info"`. Settings ▸ Diagnostics ▸ Log detail on both apps |
 | `showNotifications` | bool | `false` | Connect/disconnect alerts |
 | `notifyUnexpectedDisconnect` | bool | `false` | Alert on passive drops |
 | `autoReconnectOnDrop` | bool | `true` | One rate-limited automatic reconnect after a passive drop (§3) |

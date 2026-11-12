@@ -133,6 +133,8 @@ struct AppConfig: Codable {
     /// Minimum gap (ms) between an unpair of a device returning and the next pair of it (spec §3).
     /// Only quick KVM bounces pay it: bluetoothd deletes the old key ~1.5 s after the link drops.
     var postUnpairSettleMs: Int
+    /// How much the app logs (spec §10). Missing or unknown in the file = `info`.
+    var logLevel: LogLevel
     var showNotifications: Bool
     /// Notify when a managed device drops while the source is still present (e.g. another host
     /// claimed it). Off by default.
@@ -161,6 +163,7 @@ struct AppConfig: Codable {
         connectRetrySecs: Int = 2,
         btCallTimeoutSecs: Int = 15,
         postUnpairSettleMs: Int = 2000,
+        logLevel: LogLevel = .info,
         showNotifications: Bool = false,
         notifyUnexpectedDisconnect: Bool = false,
         autoReconnectOnDrop: Bool = true,
@@ -183,6 +186,7 @@ struct AppConfig: Codable {
         self.connectRetrySecs = connectRetrySecs
         self.btCallTimeoutSecs = btCallTimeoutSecs
         self.postUnpairSettleMs = postUnpairSettleMs
+        self.logLevel = logLevel
         self.showNotifications = showNotifications
         self.notifyUnexpectedDisconnect = notifyUnexpectedDisconnect
         self.autoReconnectOnDrop = autoReconnectOnDrop
@@ -224,7 +228,7 @@ struct AppConfig: Codable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion, profiles, activeProfileID
         case debounceMs, arrivalDebounceMs, connectRetryMax, connectRetrySecs, btCallTimeoutSecs
-        case postUnpairSettleMs
+        case postUnpairSettleMs, logLevel
         case showNotifications, notifyUnexpectedDisconnect, autoReconnectOnDrop
         case launchAtLogin, paused, dockAutoHide
         case globalHotkeysEnabled, hotkeyPause, hotkeyConnectAll, hotkeyDisconnectAll
@@ -240,6 +244,8 @@ struct AppConfig: Codable {
         connectRetrySecs = try c.decodeIfPresent(Int.self, forKey: .connectRetrySecs) ?? 2
         btCallTimeoutSecs = try c.decodeIfPresent(Int.self, forKey: .btCallTimeoutSecs) ?? 15
         postUnpairSettleMs = try c.decodeIfPresent(Int.self, forKey: .postUnpairSettleMs) ?? 2000
+        // Decoded as a string so an unknown value falls back to `info` instead of failing the load.
+        logLevel = LogLevel(config: try? c.decodeIfPresent(String.self, forKey: .logLevel))
         showNotifications = try c.decodeIfPresent(Bool.self, forKey: .showNotifications) ?? false
         notifyUnexpectedDisconnect = try c.decodeIfPresent(Bool.self, forKey: .notifyUnexpectedDisconnect) ?? false
         autoReconnectOnDrop = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectOnDrop) ?? true
@@ -292,6 +298,7 @@ struct AppConfig: Codable {
         try c.encode(connectRetrySecs, forKey: .connectRetrySecs)
         try c.encode(btCallTimeoutSecs, forKey: .btCallTimeoutSecs)
         try c.encode(postUnpairSettleMs, forKey: .postUnpairSettleMs)
+        try c.encode(logLevel, forKey: .logLevel)
         try c.encode(showNotifications, forKey: .showNotifications)
         try c.encode(notifyUnexpectedDisconnect, forKey: .notifyUnexpectedDisconnect)
         try c.encode(autoReconnectOnDrop, forKey: .autoReconnectOnDrop)

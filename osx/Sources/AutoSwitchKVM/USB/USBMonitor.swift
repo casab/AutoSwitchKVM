@@ -183,7 +183,7 @@ final class USBMonitor: ObservableObject, USBMonitoring {
         let after = Set(attachedDevices.map(Self.instanceKey))
         guard before != after else { return }
 
-        Log.usb.log("reconcile: presence drifted (\(before.count) → \(after.count) devices); emitting corrections")
+        Log.usb.warn("reconcile: presence drifted (\(before.count) → \(after.count) devices); emitting corrections")
         for key in before.subtracting(after) {
             events.send(
                 USBEvent(vendorID: key.vendorID, productID: key.productID, locationID: key.locationID, added: false))

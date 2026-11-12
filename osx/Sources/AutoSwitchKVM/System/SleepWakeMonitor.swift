@@ -124,7 +124,7 @@ final class SleepWakeMonitor {
         if why.hasPrefix("hold limit") {
             Log.app.warn("allowing sleep: \(why)")
         } else {
-            Log.app.log("allowing sleep: \(why)")
+            Log.app.debug("allowing sleep: \(why)")
         }
         IOAllowPowerChange(rootPort, token)
     }

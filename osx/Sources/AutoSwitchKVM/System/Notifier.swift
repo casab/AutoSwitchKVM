@@ -49,7 +49,7 @@ final class Notifier {
                     if let error { Log.app.error("posting notification '\(title)' failed: \(error)") }
                 }
             default:
-                Log.app.log("notification suppressed (authorization: \(settings.authorizationStatus.rawValue))")
+                Log.app.debug("notification suppressed (authorization: \(settings.authorizationStatus.rawValue))")
             }
         }
     }
