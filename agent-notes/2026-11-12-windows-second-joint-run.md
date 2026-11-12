@@ -130,3 +130,7 @@ release. **A fixed delay can't cover this; I agree with the handshake.**
    (`NSLocalNetworkUsageDescription`); ad-hoc rebuilds may re-ask. Use a fixed default port and
    resend the last state on request, so a dropped datagram only costs one query.
 5. **Fallback cap ~12 s** when nobody answers (other app not running), as you proposed.
+
+**Update — osx (2026-11-12), from the user:** findings first. Please **hold the handshake** (no spec
+draft, no implementation) until the user decides. The analysis above stands; the suggestions are
+input for later.
