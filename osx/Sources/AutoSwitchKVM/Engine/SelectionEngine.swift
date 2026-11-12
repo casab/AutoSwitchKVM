@@ -85,6 +85,9 @@ final class SelectionEngine: ObservableObject {
     var releaseRetryDelayMs = 1000
     /// Settle time after dropping the transient post-pair connection.
     var postPairSettleMs = 800
+    /// After a pair, how long to wait for bluetoothd to bring HID up on the pairing link itself
+    /// before dropping that link and reconnecting.
+    var postPairHidWaitMs = 3000
     /// Settle between a stale-bond unpair and the re-pair: the system finishes an unpair up to
     /// ~2.6 s after `-remove` returns, and a pair started earlier failed (HCI 0x02) on hardware.
     var postUnpairSettleMs = 2000
@@ -632,6 +635,7 @@ final class SelectionEngine: ObservableObject {
             let tryStart = ContinuousClock.now
             var step = "status check"
             var failure: Failure?
+            var hidOnPairingLink = false
 
             do {
                 if !device.managePairing, await bt.isConnected(addr), await bt.isHIDReady(addr) != false {
@@ -659,23 +663,31 @@ final class SelectionEngine: ObservableObject {
                         markAborted(device.id)
                         return
                     }
-                    // The connection IOBluetooth reports right after pairing is unreliable; drop it
-                    // and reconnect cleanly.
-                    await bestEffort(device, "post-pair disconnect") { try await self.bt.disconnect(addr) }
-                    await sleepHook(postPairSettleMs)
-                    if let why = staleReason(run, respectSelection: respectSelection) {
-                        Log.engine.log("\(name): connect aborted after the post-pair settle: \(why)")
-                        await undoIfReleased(device, why: "a pair completed")
-                        markAborted(device.id)
-                        return
+                    // bluetoothd brings HID up on the pairing link by itself. Tearing that link
+                    // down right after pairing made the system re-page the trackpad at once, and
+                    // the HID it opened on that link was refused (STATUS 706) and stayed refused
+                    // (hardware, 2026-11-12). So wait for HID first, and reconnect only without it.
+                    if await hidUpAfterPair(device, addr) {
+                        hidOnPairingLink = true
+                    } else {
+                        await bestEffort(device, "post-pair disconnect") { try await self.bt.disconnect(addr) }
+                        await sleepHook(postPairSettleMs)
+                        if let why = staleReason(run, respectSelection: respectSelection) {
+                            Log.engine.log("\(name): connect aborted after the post-pair settle: \(why)")
+                            await undoIfReleased(device, why: "a pair completed")
+                            markAborted(device.id)
+                            return
+                        }
                     }
                 }
-                step = "connect"
-                try await self.step(name, tries, "openConnection") { try await self.bt.connect(addr) }
-                step = "verify"
-                // A clean connect is necessary but not sufficient: isConnected must agree.
-                if !(await bt.isConnected(addr)) {
-                    failure = Failure(.unknown, "openConnection succeeded but the device does not report connected")
+                if !hidOnPairingLink {
+                    step = "connect"
+                    try await self.step(name, tries, "openConnection") { try await self.bt.connect(addr) }
+                    step = "verify"
+                    // A clean connect is necessary but not sufficient: isConnected must agree.
+                    if !(await bt.isConnected(addr)) {
+                        failure = Failure(.unknown, "openConnection succeeded but the device does not report connected")
+                    }
                 }
             } catch {
                 let f = Failure(error)
@@ -801,6 +813,32 @@ final class SelectionEngine: ObservableObject {
             await sleepHook(hidPollIntervalMs)
         }
         Log.engine.warn("\(device.name): link up but no HID after \(Elapsed.since(start))")
+        return false
+    }
+
+    /// Right after a pair: wait (bounded by `postPairHidWaitMs`) for the HID connection bluetoothd
+    /// starts on the pairing link. False when it doesn't come, the link closes, or the backend
+    /// can't tell; the caller then drops the link and reconnects.
+    private func hidUpAfterPair(_ device: BTDevice, _ addr: String) async -> Bool {
+        let start = ContinuousClock.now
+        let polls = max(1, postPairHidWaitMs / max(1, hidPollIntervalMs))
+        for poll in 0...polls {
+            guard let ready = await bt.isHIDReady(addr) else { return false }
+            if ready {
+                Log.engine.log("\(device.name): HID up on the pairing link after \(Elapsed.since(start))")
+                return true
+            }
+            if poll == polls { break }
+            if !(await bt.isConnected(addr)) {
+                if poll > 0 {
+                    Log.engine.log(
+                        "\(device.name): the pairing link closed without HID (\(Elapsed.since(start))); reconnecting")
+                }
+                return false
+            }
+            await sleepHook(hidPollIntervalMs)
+        }
+        Log.engine.log("\(device.name): no HID on the pairing link after \(Elapsed.since(start)); reconnecting")
         return false
     }
 

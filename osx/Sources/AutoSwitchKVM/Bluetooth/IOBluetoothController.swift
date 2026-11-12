@@ -410,13 +410,35 @@ private final class PairingHelper: NSObject, @preconcurrency IOBluetoothDevicePa
         }
     }
 
+    /// Finished pairing objects, held past the connect step (see `finish`).
+    private static var lingering: [IOBluetoothDevicePair] = []
+    private static func linger(_ pairer: IOBluetoothDevicePair) {
+        lingering.append(pairer)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            lingering.removeAll { $0 === pairer }
+        }
+    }
+
     /// Stop the ceremony (e.g. a release for the same device superseded it).
     func cancel(_ reason: String) {
         finish(.failure(BTError.pairCancelled(reason)))
     }
 
     private func finish(_ result: Result<Void, Error>) {
-        pairer?.stop()
+        if case .success = result, let done = pairer {
+            // No stop() after a successful ceremony: stop() closes the link the pairing object
+            // opened, and on hardware (2026-11-12) that cut bluetoothd's own HID setup on the
+            // pairing link (result 2603). bluetoothd then re-paged the trackpad within ~150-450 ms,
+            // the trackpad opened HID on that link before the new key was usable, the Mac refused
+            // it (L2CAP policy STATUS 706), and every later HID attempt failed 706, even after a
+            // fresh re-pair, until the trackpad bonded elsewhere or was power-cycled.
+            // The finished object is kept alive a while so releasing it can't close the link either.
+            done.delegate = nil
+            Self.linger(done)
+        } else {
+            pairer?.stop()
+        }
         pairer = nil
         guard let cont = continuation else { return }
         continuation = nil

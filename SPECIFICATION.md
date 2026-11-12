@@ -136,9 +136,13 @@ controller** (the operations in §5). It owns no platform APIs directly.
 - Retry loop up to `connectRetryMax`:
   - If Bluetooth adapter is **off** → set status `bluetoothOff`, stop.
   - Abort if the run is stale (token changed) or the source is no longer present.
-  - If `managePairing`: **pair** → **drop** the transient post-pair connection → short settle
-    (~0.8 s) → **connect**. (The connection a stack reports immediately after pairing can be
-    unreliable; a clean reconnect is what actually brings the device up.)
+  - If `managePairing`: **pair**, keeping the pairing link up (don't cancel/close the pairing
+    operation after success) → wait up to ~3 s for HID on that link; if it comes up, done →
+    otherwise **drop** the post-pair connection → short settle (~0.8 s) → **connect**.
+    (macOS, 2026-11-12: closing the pairing link while the stack was still bringing HID up made
+    it re-page at once; the trackpad's HID on that link was refused with a security failure, and
+    the trackpad then refused this host's HID until it bonded elsewhere or was power-cycled.
+    Windows: whether its pairing path closes the link early is unmeasured.)
   - Else: if already connected, done; otherwise **connect**.
   - **Success requires a *clean* connect** — the connect call completing without error — **and**
     the device reporting connected. A link-only/ACL state that isn't a working connection does

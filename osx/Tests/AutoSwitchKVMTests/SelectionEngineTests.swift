@@ -384,14 +384,41 @@ final class SelectionEngineTests: XCTestCase {
         XCTAssertFalse(bt.connectedAddrs.contains(addr))
     }
 
-    /// Spec §3 connect flow: pair → drop the transient post-pair link → clean reconnect,
-    /// in exactly that order.
+    /// Spec §3 connect flow: pair → (no HID on the pairing link) drop the transient post-pair
+    /// link → clean reconnect, in exactly that order.
     func testManagedConnectDropsTransientLinkThenReconnects() async {
         let (engine, bt, _) = makeEngine(managePairing: true)
         engine.handleUSB((vendorID: vendor, productID: product, added: true))
         await engine.evaluateNow()
 
         XCTAssertEqual(bt.calls, ["pair:\(addr)", "disconnect:\(addr)", "connect:\(addr)"])
+    }
+
+    /// Hardware 2026-11-12: dropping the pairing link while bluetoothd was bringing HID up on it
+    /// wedged the trackpad (HID refused with STATUS 706 until power-cycled). When HID comes up on
+    /// the pairing link, that link is kept: no disconnect, no reconnect.
+    func testHIDOnThePairingLinkIsKept() async {
+        let (engine, bt, _) = makeEngine(managePairing: true)
+        bt.pairLeavesLinkUp = true
+        engine.handleUSB((vendorID: vendor, productID: product, added: true))
+        await engine.evaluateNow()
+
+        XCTAssertEqual(bt.calls, ["pair:\(addr)"])
+        XCTAssertTrue(bt.connectedAddrs.contains(addr))
+    }
+
+    /// A pairing link that stays up without HID is still dropped and replaced by a clean connect.
+    func testPairingLinkWithoutHIDIsReplaced() async {
+        let (engine, bt, _) = makeEngine(managePairing: true)
+        bt.pairLeavesLinkUp = true
+        bt.hidWorks = false
+        bt.beforeConnect = { bt.hidWorks = true }
+        engine.sleepHook = { _ in }  // skip the bounded HID wait on the pairing link
+        engine.handleUSB((vendorID: vendor, productID: product, added: true))
+        await engine.evaluateNow()
+
+        XCTAssertEqual(bt.calls, ["pair:\(addr)", "disconnect:\(addr)", "connect:\(addr)"])
+        XCTAssertTrue(bt.connectedAddrs.contains(addr))
     }
 
     /// Spec §3: the per-device connect delay re-checks cancellation after the wait.

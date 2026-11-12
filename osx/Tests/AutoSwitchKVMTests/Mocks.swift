@@ -54,6 +54,8 @@ final class MockBluetoothController: BluetoothController {
     /// unable to tell (nil), like a platform without an HID check.
     var hidWorks = true
     var hidUnknown = false
+    /// Like the real stack: the pairing link stays up after a pair (HID then rides on it).
+    var pairLeavesLinkUp = false
 
     func isHIDReady(_ address: String) async -> Bool? {
         if hidUnknown { return nil }
@@ -79,6 +81,7 @@ final class MockBluetoothController: BluetoothController {
         calls.append("pair:\(norm(address))")
         if let error = nextError(&pairErrors, nil) { throw error }
         pairedAddrs.insert(norm(address))
+        if pairLeavesLinkUp { connectedAddrs.insert(norm(address)) }
     }
 
     /// Like `-[IOBluetoothDevice remove]`, removing the bond also drops the link.

@@ -94,7 +94,8 @@ Single executable target, organized by folder under `Sources/AutoSwitchKVM/`:
   only after timeout/auth/unknown). Per-device manual entry points (`connectDeviceNow`,
   `disconnectDeviceNow`, `pairDeviceNow`, `unpairDeviceNow`) and sleep handling
   (`prepareForSleep()` / `resumeAfterWake()`). Test seams: `sleepHook` (instant delays),
-  `softRetryIntervalMs`, `maxSoftRetries`, `releaseRetryDelayMs`, `postPairSettleMs`.
+  `softRetryIntervalMs`, `maxSoftRetries`, `releaseRetryDelayMs`, `postPairSettleMs`,
+  `postPairHidWaitMs`.
 - `System/` — `SleepWakeMonitor`, `LoginItem` (`SMAppService`), `DockManager`, `Notifier`,
   `HotKeyManager` (Carbon `RegisterEventHotKey`; user-assignable combos via `KeyShortcut`, off by
   default; `apply(enabled:pause:connectAll:disconnectAll:)` is idempotent).
@@ -192,9 +193,20 @@ the new profile but does not force-disconnect the previous profile's devices.
   today). The trackpad accepted a Mac pairing mid-release, never started HID, and needed a power
   cycle. Until the LAN release-ack exists, the trackpad's `connectDelayMs` is 6 s (picker now
   offers 4/6/8 s).
-- **`bluetoothd` is the best evidence for a failed handoff.** `log show --predicate
-  'process == "bluetoothd"'` shows ACL up/down (with `incoming`), pairing results, and
-  `HID connection … status` for each app call; see agent-notes/2026-11-12-windows-first-joint-run.md.
+- **Leave the pairing link alone after a successful pair** (since 2026-11-12). `PairingHelper`
+  no longer calls `IOBluetoothDevicePair.stop()` on success (it closes the link the pairer opened)
+  and keeps the finished object alive for 30 s; the engine waits up to `postPairHidWaitMs` (3 s)
+  for HID on that link and drops/reconnects only without it. Cutting the link mid-HID-setup
+  (bluetoothd: HID result 2603) made bluetoothd re-page the trackpad within 150–450 ms; the
+  trackpad opened HID on that link, the Mac refused it (`Policy enforcement failed STATUS 706`,
+  `securityFailed 1`), and every later HID attempt failed 706 within ~15 ms, even after a fresh
+  re-pair, until the trackpad bonded with Windows or was power-cycled. In the app log this shows
+  as `openConnection … OK (~100 ms)` (it adopted that link) followed by "link up but no HID".
+  Verified 2026-11-12: HID on the pairing link after ~265 ms, 6/6, and fine with a 1 s connect delay.
+- **`bluetoothd` is the best evidence for a failed handoff.** `/usr/bin/log show --predicate
+  'process == "bluetoothd"'` (plain `log` is a zsh builtin) shows ACL up/down (with `incoming`),
+  pairing results, `HID connection … status`, and `Policy enforcement failed STATUS 706` for each
+  app call; see agent-notes/2026-11-12-windows-first-joint-run.md.
 - **A pair can land after a release.** If the source leaves while a stale run is mid-ceremony,
   the engine undoes a pair/connection that completes after the release, and `unpair` cancels a
   ceremony still in flight for that device. Without this the Mac holds the bond while switched away.
