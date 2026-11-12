@@ -189,6 +189,12 @@ the new profile but does not force-disconnect the previous profile's devices.
   ~1 s later, and the key is deleted ~1.5 s after that. `unpair` waits for the link to drop. The
   engine settles `postUnpairSettleMs` (2 s) before re-pairing, because a pair started straight
   after an unpair failed with HCI 0x02.
+- **A pair waits out a recent unpair of the same device** (`waitForUnpairToSettle`). A quick KVM
+  bounce starts the connect run while the superseded release is still in `-remove` (seen at
+  22:58:24, 2026-11-12), and bluetoothd deletes the old key ~1.5 s after the link drops. So the
+  engine routes every unpair through `unpairTracked`, waits for one still in flight, and keeps
+  `postUnpairSettleMs` (2 s) between an unpair returning and the next pair. With no connect delay,
+  nothing else spaces them.
 - **No connect delay is needed** (since 2026-11-12). The old "don't pair before the other host
   has released" rule (6–12 s delays) was masking the pairing-link bug below. With the link kept,
   the user ran 0 ms delay and 400/400 ms debounces on both apps, and handoffs worked. The defaults

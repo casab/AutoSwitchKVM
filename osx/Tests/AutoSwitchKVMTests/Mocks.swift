@@ -24,6 +24,7 @@ final class MockBluetoothController: BluetoothController {
     var beforeConnect: (@MainActor () async -> Void)?
     var beforeDisconnect: (@MainActor () async -> Void)?
     var beforePair: (@MainActor () async -> Void)?
+    var beforeUnpair: (@MainActor () async -> Void)?
 
     /// Persistent failures: when set, the call is recorded, then throws without changing state.
     var connectError: Error?
@@ -86,6 +87,7 @@ final class MockBluetoothController: BluetoothController {
 
     /// Like `-[IOBluetoothDevice remove]`, removing the bond also drops the link.
     func unpair(_ address: String) async throws {
+        if let hook = beforeUnpair { await hook() }
         calls.append("unpair:\(norm(address))")
         if let error = nextError(&unpairErrors, unpairError) { throw error }
         pairedAddrs.remove(norm(address))

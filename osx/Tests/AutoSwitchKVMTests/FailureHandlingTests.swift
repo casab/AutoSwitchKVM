@@ -464,6 +464,62 @@ final class FailureHandlingTests: XCTestCase {
         XCTAssertFalse(BTFailureKind.deviceBusy.mayBeStaleBond)
         XCTAssertTrue(BTFailureKind.unknown.mayBeStaleBond)
     }
+    // MARK: - Pair after a recent unpair (KVM bounce, hardware 2026-11-12)
+
+    /// The source comes back right after a release: the new pair waits until the system has had
+    /// `postUnpairSettleMs` to finish removing the old bond (it deletes the key ~1.5 s after the
+    /// link drops), instead of pairing into the unpair.
+    func testPairRightAfterAReleaseWaitsForTheUnpairToSettle() async {
+        let f = make()
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+        sourceLeaves(f)
+        await f.engine.evaluateNow()
+        XCTAssertEqual(f.bt.calls.last, "unpair:\(addr)")
+
+        var sleeps: [Int] = []
+        let before = f.bt.calls.count
+        f.engine.sleepHook = { ms in sleeps.append(ms) }
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+
+        XCTAssertEqual(f.bt.calls[before...].first, "pair:\(addr)")
+        XCTAssertTrue(f.bt.connectedAddrs.contains(addr))
+        let settle = sleeps.first ?? 0
+        XCTAssertGreaterThan(settle, f.engine.postUnpairSettleMs - 500, "waited out the unpair before pairing")
+        XCTAssertLessThanOrEqual(settle, f.engine.postUnpairSettleMs)
+    }
+
+    /// A release superseded mid-unpair keeps running; the newer connect run must not start its
+    /// pair until that unpair has returned.
+    func testPairWaitsForAnUnpairStillInFlight() async {
+        let f = make()
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+
+        var unpairing = false
+        var releaseUnpair = false
+        f.bt.beforeUnpair = {
+            unpairing = true
+            while !releaseUnpair { try? await Task.sleep(nanoseconds: 1_000_000) }
+        }
+        sourceLeaves(f)
+        let release = Task { await f.engine.evaluateNow() }
+        await spinUntil({ unpairing }, "the release reached its unpair")
+
+        sourceArrives(f)
+        let connect = Task { await f.engine.evaluateNow() }
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        XCTAssertEqual(count(f, "pair:"), 1, "no new pair while the unpair is still running")
+
+        releaseUnpair = true
+        await release.value
+        await connect.value
+        let lastUnpair = f.bt.calls.lastIndex(of: "unpair:\(addr)") ?? -1
+        let lastPair = f.bt.calls.lastIndex(of: "pair:\(addr)") ?? -1
+        XCTAssertGreaterThan(lastPair, lastUnpair, "the new pair ran after the unpair returned")
+        XCTAssertTrue(f.bt.connectedAddrs.contains(addr))
+    }
 }
 
 /// The persistent log file (`~/Library/Logs/AutoSwitchKVM/app-yyyyMMdd.log` in the app).

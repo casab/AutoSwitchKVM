@@ -136,7 +136,10 @@ controller** (the operations in §5). It owns no platform APIs directly.
 - Retry loop up to `connectRetryMax`:
   - If Bluetooth adapter is **off** → set status `bluetoothOff`, stop.
   - Abort if the run is stale (token changed) or the source is no longer present.
-  - If `managePairing`: **pair**, keeping the pairing link up (don't cancel/close the pairing
+  - If `managePairing`: before pairing, wait for any unpair of this device still in flight (a
+    superseded release) and until ~2 s have passed since the last one returned (macOS: the system
+    deletes the key ~1.5 s after the link drops; a pair inside that window collides with it). Then
+    **pair**, keeping the pairing link up (don't cancel/close the pairing
     operation after success) → wait up to ~3 s for HID on that link; if it comes up, done →
     otherwise **drop** the post-pair connection → short settle (~0.8 s) → **connect**.
     (macOS, 2026-11-12: closing the pairing link while the stack was still bringing HID up made

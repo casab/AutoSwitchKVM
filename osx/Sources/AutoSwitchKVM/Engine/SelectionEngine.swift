@@ -88,8 +88,9 @@ final class SelectionEngine: ObservableObject {
     /// After a pair, how long to wait for bluetoothd to bring HID up on the pairing link itself
     /// before dropping that link and reconnecting.
     var postPairHidWaitMs = 3000
-    /// Settle between a stale-bond unpair and the re-pair: the system finishes an unpair up to
-    /// ~2.6 s after `-remove` returns, and a pair started earlier failed (HCI 0x02) on hardware.
+    /// Minimum time between an unpair returning and the next pair of the same device (stale-bond
+    /// re-pair, or a KVM bounce right after a release): the system finishes an unpair up to ~2.6 s
+    /// after `-remove` returns, and a pair started earlier failed (HCI 0x02) on hardware.
     var postUnpairSettleMs = 2000
     /// How long a connected link may take to bring up HID before the try counts as failed (on
     /// hardware HID came up ~0.5 s after the link; a dead link never did).
@@ -104,6 +105,10 @@ final class SelectionEngine: ObservableObject {
         if ms > 0 { try? await Task.sleep(nanoseconds: UInt64(ms) * 1_000_000) }
     }
     private var lastAutoReconnect: [UUID: Date] = [:]
+    /// Unpairs in flight per device (a superseded release keeps running after a new run starts).
+    private var unpairsInFlight: [UUID: Int] = [:]
+    /// When each device's last unpair returned (its link was down; the key deletion still pending).
+    private var lastUnpairAt: [UUID: ContinuousClock.Instant] = [:]
 
     init(store: ConfigStore, usb: USBMonitoring, bt: BluetoothController) {
         self.store = store
@@ -504,7 +509,7 @@ final class SelectionEngine: ObservableObject {
     @discardableResult
     func unpairDeviceNow(_ device: BTDevice) async -> String? {
         let addr = device.normalizedAddress
-        return await rawOp(device, "unpair", releases: true) { try await self.bt.unpair(addr) }
+        return await rawOp(device, "unpair", releases: true) { try await self.unpairTracked(device.id, addr) }
     }
 
     /// A manual action on a device the engine is already working on supersedes that work (the
@@ -647,13 +652,22 @@ final class SelectionEngine: ObservableObject {
                     if freshBond {
                         freshBond = false  // once per hard failure, not again on each soft retry
                         Log.engine.log("\(name): try \(tries): removing a possibly stale bond before re-pairing")
-                        await bestEffort(device, "stale-bond unpair") { try await self.bt.unpair(addr) }
-                        await sleepHook(postUnpairSettleMs)
+                        await bestEffort(device, "stale-bond unpair") { try await self.unpairTracked(device.id, addr) }
+                        await waitForUnpairToSettle(device)
                         if let why = staleReason(run, respectSelection: respectSelection) {
                             Log.engine.log("\(name): connect aborted after the stale-bond unpair: \(why)")
                             markAborted(device.id)
                             return
                         }
+                    }
+                    // A quick KVM bounce starts this run while the superseded release is still
+                    // unpairing; bluetoothd also deletes the old key ~1.5 s after the link drops.
+                    // A pair started inside that window collides with the unpair.
+                    await waitForUnpairToSettle(device)
+                    if let why = staleReason(run, respectSelection: respectSelection) {
+                        Log.engine.log("\(name): connect aborted while an unpair was settling: \(why)")
+                        markAborted(device.id)
+                        return
                     }
                     step = "pair"
                     try await self.step(name, tries, "pair") { try await self.bt.pair(addr) }
@@ -784,7 +798,7 @@ final class SelectionEngine: ObservableObject {
         let cause =
             wedged
             ? "it paired but never started its HID connection (\(hidFailures) times); it may be stuck. "
-                + "Power-cycle it (switch it off and on), then try again"
+                + "Switch the KVM to the other computer and back, or power-cycle it (switch it off and on)"
             : (last?.message ?? "unknown error")
         let triesText = "\(tries) \(tries == 1 ? "try" : "tries")"
         Log.engine.error(
@@ -842,6 +856,39 @@ final class SelectionEngine: ObservableObject {
         return false
     }
 
+    /// Every engine unpair goes through here, so a pair can wait for it (`waitForUnpairToSettle`).
+    private func unpairTracked(_ id: UUID, _ addr: String) async throws {
+        unpairsInFlight[id, default: 0] += 1
+        defer {
+            let n = unpairsInFlight[id] ?? 1
+            unpairsInFlight[id] = n <= 1 ? nil : n - 1
+            lastUnpairAt[id] = .now
+        }
+        try await bt.unpair(addr)
+    }
+
+    /// Before pairing: wait for an unpair of this device still in flight (bounded), then until
+    /// `postUnpairSettleMs` has passed since the last unpair returned. A no-op unless a release
+    /// happened in the last ~2 s (a KVM bounce, or a release run superseded mid-unpair).
+    private func waitForUnpairToSettle(_ device: BTDevice) async {
+        let start = ContinuousClock.now
+        if unpairsInFlight[device.id] != nil {
+            Log.engine.log("\(device.name): an unpair of this device is still running; waiting before pairing")
+            while unpairsInFlight[device.id] != nil, start.duration(to: .now) < .seconds(6) {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+        guard let last = lastUnpairAt[device.id] else { return }
+        let since = last.duration(to: .now)
+        let sinceMs = Int(since.components.seconds * 1000 + since.components.attoseconds / 1_000_000_000_000_000)
+        let remaining = postUnpairSettleMs - sinceMs
+        guard remaining > 0 else { return }
+        Log.engine.log(
+            "\(device.name): unpaired \(sinceMs) ms ago; waiting \(remaining) ms for the system to finish "
+                + "removing the old bond before pairing")
+        await sleepHook(remaining)
+    }
+
     /// If a release was requested for this device (or the system is going to sleep) while a stale
     /// connect run was still working, remove whatever bond/connection that run left behind.
     private func undoIfReleased(_ device: BTDevice, why: String) async {
@@ -850,7 +897,7 @@ final class SelectionEngine: ObservableObject {
         Log.engine.warn("\(device.name): \(why) after a release was requested; releasing it again")
         await bestEffort(device, "late-release disconnect") { try await self.bt.disconnect(addr) }
         if device.managePairing {
-            await bestEffort(device, "late-release unpair") { try await self.bt.unpair(addr) }
+            await bestEffort(device, "late-release unpair") { try await self.unpairTracked(device.id, addr) }
         }
     }
 
@@ -902,7 +949,7 @@ final class SelectionEngine: ObservableObject {
             var unpairFailure: Failure?
             for attempt in 1...2 {
                 do {
-                    try await step(name, nil, "unpair") { try await self.bt.unpair(addr) }
+                    try await step(name, nil, "unpair") { try await self.unpairTracked(device.id, addr) }
                     unpairFailure = nil
                     break
                 } catch {
