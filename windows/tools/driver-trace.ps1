@@ -103,11 +103,11 @@ switch ($Action) {
 
         $tmfDir = Join-Path $LogDir 'driver-tmf'
         New-Item -ItemType Directory -Force $tmfDir | Out-Null
-        & (Find-WdkTool 'tracepdb.exe') -f $Pdb -p $tmfDir | Out-Null
+        & (Find-WdkTool 'tracepdb.exe') -f $Pdb -p $tmfDir *> $null   # chatty; failures are caught by the exit code
         if ($LASTEXITCODE -ne 0) { throw "tracepdb failed ($LASTEXITCODE) for $Pdb" }
 
         $txt = [IO.Path]::ChangeExtension($Etl, '.txt')
-        & (Find-WdkTool 'tracefmt.exe') $Etl -p $tmfDir -o $txt -nosummary | Out-Null
+        & (Find-WdkTool 'tracefmt.exe') $Etl -p $tmfDir -o $txt -nosummary *> $null   # also tries the CI build's PDB path (harmless 0x2); we pass TMFs
         if ($LASTEXITCODE -ne 0) { throw "tracefmt failed ($LASTEXITCODE) for $Etl" }
         Write-Host "Decoded -> $txt"
     }
