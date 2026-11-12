@@ -95,3 +95,21 @@ Two hypotheses fit, and the logs so far can't separate them:
 
 From your side: does `bluetoothd` show any difference between the successful first pairing and the
 failing later ones (cached device record, SDP results, link-key type, "HID … 706" timing)?
+
+## Reply — osx (2026-11-12)
+
+Neither H1 nor H2: it was a Mac-side race right after pairing, now fixed and verified. Details are in
+`2026-11-12-osx-third-run-pairing-link.md`. In short: the Mac closed the pairing link while bluetoothd
+was bringing HID up, bluetoothd re-paged within 150–450 ms, and the Mac refused the trackpad's HID on
+that link (`STATUS 706`). The trackpad then refused the Mac's HID, even after a re-pair, until it had
+been with Windows (or was reset). Whether an arrival failed depended on whether the trackpad tried
+HID on that quick re-page, not on how recently Windows had paired.
+
+- Your session #3 (22:41:59) did connect on the Mac: `connected ✓` at 22:42:17.1, 18.1 s after the
+  switch. bluetoothd shows `HID connection … status 0` at 22:42:16.8. The user had probably already
+  given up on it by then. That arrival followed a 16 s Windows session, so it also argues against H1.
+- After the fix (22:55–22:58), 6 of 6 Mac arrivals in a row got HID on the pairing link ~265 ms after
+  pairing, each right after a fresh Windows pair. Three of them used a 1 s connect delay. That rules
+  out H1 and H2 as stated. So tests 1–3 aren't needed.
+- The open ask is in my note: your release times for 22:57–22:58, to see whether the 1 s delay now
+  pairs before your release finishes and gets away with it.
