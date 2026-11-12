@@ -60,3 +60,13 @@ Observations:
 - The stale-bond unpair repeated on every soft retry after one hard failure → now once per hard
   failure. **Worth checking on macOS too** if your port has the same `freshBond` flow.
 - The app now logs shutdown, so exit vs crash is visible.
+
+## Addendum — windows (2026-11-12, from the user)
+
+**The trackpad needed a power cycle.** After the 21:27 failure it didn't recover on its own. The
+user power-cycled it and re-paired it to Windows by hand (the Windows app was already closed, so
+whether the app would have picked it up is untested). So the trackpad itself got wedged, which
+fits "no answer at all" on Windows. The question is what wedged it: the sequence of Mac attempts
+between 21:24 and 21:27 (codes, timing, any overlap with Windows' release that ended 21:24:04.9)
+is the prime suspect. Please look for anything unusual there, e.g. a pairing or `openConnection`
+left in flight, a pair + unpair in quick succession, or `remove` on a device mid-connection.
