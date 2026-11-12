@@ -87,7 +87,8 @@ public partial class App : Application
         mainInstance.Activated += (_, _) => _dispatcher?.TryEnqueue(ShowSettings);
 
         _dispatcher = DispatcherQueue.GetForCurrentThread();
-        Controller = new AppController(preview);
+        var previewConfig = preview ? cmd.FirstOrDefault(a => a.StartsWith("--config="))?["--config=".Length..] : null;
+        Controller = new AppController(preview, previewConfig, demo: cmd.Contains("--preview-demo"));
         if (!preview) Controller.Start();
         AppViewModel.Initialize(Controller);
 

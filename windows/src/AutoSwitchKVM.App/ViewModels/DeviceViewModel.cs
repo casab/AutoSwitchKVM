@@ -66,6 +66,30 @@ public sealed class DeviceViewModel : ObservableObject
 
     public string PrimaryActionText => IsConnected ? "Disconnect" : "Connect";
 
+    /// Icon guessed from the device name (Segoe Fluent Icons); Bluetooth when unknown.
+    public string Glyph
+    {
+        get
+        {
+            var n = Name.ToLowerInvariant();
+            if (n.Contains("trackpad") || n.Contains("touchpad")) return "";
+            if (n.Contains("keyboard")) return "";
+            if (n.Contains("mouse") || n.Contains("mx master") || n.Contains("mx anywhere")) return "";
+            if (n.Contains("airpods") || n.Contains("headphone") || n.Contains("buds") || n.Contains("headset")) return "";
+            if (n.Contains("speaker")) return "";
+            if (n.Contains("controller") || n.Contains("gamepad")) return "";
+            return "";
+        }
+    }
+
+    /// Tooltip for compact rows (tray panel): the error detail, else the status.
+    public string Tooltip => _status.Kind == DeviceStatusKind.Error && !string.IsNullOrEmpty(_status.Message)
+        ? $"{Name}: {_status.Message}"
+        : $"{Name}: {StatusText}";
+
+    /// Divider above every row but the first (grouped list in the tray panel).
+    public Visibility DividerVisibility => _index > 0 ? Visibility.Visible : Visibility.Collapsed;
+
     // ---------------- Settings (two-way) ----------------
 
     public bool Enabled

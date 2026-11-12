@@ -37,7 +37,7 @@
                     <DataTemplate x:DataType="vm:DeviceViewModel">
                         <toolkit:SettingsExpander Header="{x:Bind Name, Mode=OneWay}" Description="{x:Bind Detail, Mode=OneWay}">
                             <toolkit:SettingsExpander.HeaderIcon>
-                                <FontIcon Glyph="&#xEFA5;" />
+                                <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}" />
                             </toolkit:SettingsExpander.HeaderIcon>
 
                             <StackPanel Orientation="Horizontal" Spacing="12">

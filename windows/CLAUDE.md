@@ -133,7 +133,9 @@ testability):
       all. Hides on deactivate; sized from its content's laid-out height.
     - **Preview mode for design work:** `AutoSwitchKVM.App.exe --ui-preview [--settings=<page>] [--panel]`
       runs the UI against the real config with no engine/monitors and no writes, under its own
-      single-instance key, so it can run next to the real app (used for screenshots).
+      single-instance key, so it can run next to the real app (used for screenshots). Add
+      `--config=<path>` to load a sample config and `--preview-demo` to fake a mix of device states
+      (connected / connecting / problem / not connected) and "selected".
   - `RelayCommand.cs` is a minimal `ICommand` for the tray menu items.
   - `Platform/PnpUsbMonitor.cs` — **implemented (Milestone 3)** via `System.Management`: Win32_PnPEntity
     enumeration + Win32_DeviceChangeEvent wakeups (debounced) + ~2s reconcile; emits on VID/PID-set

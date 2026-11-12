@@ -14,7 +14,7 @@ namespace AutoSwitchKVM.App.Services;
 /// DispatcherQueue, so the single-threaded SelectionEngine is only ever touched on the UI thread.
 public sealed class AppController
 {
-    private readonly ConfigStore _store = new();
+    private readonly ConfigStore _store;
     private readonly PnpUsbMonitor _usb;
     private readonly WinRtBluetooth _bt;
     private readonly PowerMonitor _power = new();
@@ -34,9 +34,14 @@ public sealed class AppController
     /// real app (e.g. for screenshots) without touching the devices or the settings.
     public bool IsPreview { get; }
 
-    public AppController(bool preview = false)
+    /// Preview only: fake a mix of device states and "selected" so every style can be seen.
+    public bool IsDemo { get; }
+
+    public AppController(bool preview = false, string? configPath = null, bool demo = false)
     {
         IsPreview = preview;
+        IsDemo = preview && demo;
+        _store = new ConfigStore(preview ? configPath : null);
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _usb = new PnpUsbMonitor(_dispatcher);   // marshal callbacks onto the UI thread
         _bt = new WinRtBluetooth(_dispatcher);
@@ -242,7 +247,7 @@ public sealed class AppController
     // ---- State for the UI ----
 
     public bool Paused => Config.Paused;
-    public bool Selected => Engine.Selected;
+    public bool Selected => IsDemo || Engine.Selected;
     public bool BluetoothPowered => Engine.BluetoothPowered;
 
     public string StatusText =>
@@ -251,8 +256,21 @@ public sealed class AppController
         : Engine.Selected ? "This PC is selected"
         : "Switched away";
 
-    public DeviceStatus StatusFor(BTDevice device) =>
-        Engine.Statuses.TryGetValue(device.Id, out var s) ? s : DeviceStatus.Idle;
+    public DeviceStatus StatusFor(BTDevice device)
+    {
+        if (IsDemo)
+        {
+            var i = Config.Devices.FindIndex(d => d.Id == device.Id);
+            return (i % 4) switch
+            {
+                0 => DeviceStatus.Connected,
+                1 => DeviceStatus.Connecting,
+                2 => DeviceStatus.Error("no response within 30 s"),
+                _ => DeviceStatus.Disconnected,
+            };
+        }
+        return Engine.Statuses.TryGetValue(device.Id, out var s) ? s : DeviceStatus.Idle;
+    }
 
     /// Tray icon file for the current state (mirrors the macOS menu-bar symbol set + StatusText
     /// precedence): paused -> Bluetooth off -> this-PC-selected -> switched away.

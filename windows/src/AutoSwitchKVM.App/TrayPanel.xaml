@@ -37,49 +37,59 @@
             </Grid>
         </Border>
 
-        <!-- Devices -->
-        <ItemsRepeater ItemsSource="{x:Bind ViewModel.Devices}" Margin="0,8,0,0">
-            <ItemsRepeater.Layout>
-                <StackLayout Spacing="4" />
-            </ItemsRepeater.Layout>
-            <ItemsRepeater.ItemTemplate>
-                <DataTemplate x:DataType="vm:DeviceViewModel">
-                    <Border Style="{StaticResource SurfaceCardStyle}" Padding="14,10">
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xEFA5;" FontSize="18" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <ProgressRing Width="12" Height="12" IsActive="{x:Bind IsBusy, Mode=OneWay}"
-                                                  Visibility="{x:Bind BusyVisibility, Mode=OneWay}" />
-                                    <TextBlock Text="{x:Bind StatusText, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{x:Bind PillForeground, Mode=OneWay}" />
-                                </StackPanel>
+        <!-- Devices: one grouped card with dividers (like the Windows Bluetooth quick panel);
+             scrolls when there are many. -->
+        <Border Style="{StaticResource SurfaceCardStyle}" Padding="0" Margin="0,8,0,0"
+                Visibility="{x:Bind ViewModel.HasDevices, Mode=OneWay}">
+            <ScrollViewer MaxHeight="330" VerticalScrollBarVisibility="Auto">
+                <ItemsRepeater ItemsSource="{x:Bind ViewModel.Devices}">
+                    <ItemsRepeater.ItemTemplate>
+                        <DataTemplate x:DataType="vm:DeviceViewModel">
+                            <StackPanel ToolTipService.ToolTip="{x:Bind Tooltip, Mode=OneWay}">
+                                <Rectangle Height="1" Margin="14,0" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                           Visibility="{x:Bind DividerVisibility, Mode=OneWay}" />
+                                <Grid ColumnSpacing="12" Padding="14,9">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}" FontSize="18" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{x:Bind Name, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <ProgressRing Width="12" Height="12" IsActive="{x:Bind IsBusy, Mode=OneWay}"
+                                                          Visibility="{x:Bind BusyVisibility, Mode=OneWay}" />
+                                            <TextBlock Text="{x:Bind StatusText, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{x:Bind PillForeground, Mode=OneWay}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="2" MinWidth="0" OnContent="" OffContent="" VerticalAlignment="Center"
+                                                  IsOn="{x:Bind IsConnected, Mode=OneWay}" IsEnabled="{x:Bind IsNotBusy, Mode=OneWay}"
+                                                  Toggled="OnDeviceToggled" />
+                                </Grid>
                             </StackPanel>
-                            <ToggleSwitch Grid.Column="2" MinWidth="0" OnContent="" OffContent="" VerticalAlignment="Center"
-                                          IsOn="{x:Bind IsConnected, Mode=OneWay}" IsEnabled="{x:Bind IsNotBusy, Mode=OneWay}"
-                                          Toggled="OnDeviceToggled"
-                                          ToolTipService.ToolTip="Connect or release this device" />
-                        </Grid>
-                    </Border>
-                </DataTemplate>
-            </ItemsRepeater.ItemTemplate>
-        </ItemsRepeater>
+                        </DataTemplate>
+                    </ItemsRepeater.ItemTemplate>
+                </ItemsRepeater>
+            </ScrollViewer>
+        </Border>
 
         <TextBlock Text="No devices yet. Add one in Settings." Style="{StaticResource CaptionTextBlockStyle}"
                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="2,8,2,0"
                    Visibility="{x:Bind ViewModel.NoDevices, Mode=OneWay}" />
 
-        <!-- Profile -->
-        <ComboBox HorizontalAlignment="Stretch" Header="Profile" Margin="0,8,0,0"
-                  ItemsSource="{x:Bind ViewModel.Profiles}"
-                  SelectedItem="{x:Bind ViewModel.SelectedProfile, Mode=TwoWay}"
-                  Visibility="{x:Bind ViewModel.HasMultipleProfiles, Mode=OneWay}" />
+        <!-- Profile: label and picker on one row -->
+        <Grid Margin="2,8,0,0" ColumnSpacing="12" Visibility="{x:Bind ViewModel.HasMultipleProfiles, Mode=OneWay}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Profile" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <ComboBox Grid.Column="1" HorizontalAlignment="Stretch"
+                      ItemsSource="{x:Bind ViewModel.Profiles}"
+                      SelectedItem="{x:Bind ViewModel.SelectedProfile, Mode=TwoWay}" />
+        </Grid>
 
         <!-- Quick actions (tiles) -->
         <Grid ColumnSpacing="8" Margin="0,8,0,0">
