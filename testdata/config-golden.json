@@ -34,6 +34,7 @@
   "connectRetrySecs": 3,
   "btCallTimeoutSecs": 25,
   "postUnpairSettleMs": 1500,
+  "logLevel": "debug",
   "showNotifications": true,
   "notifyUnexpectedDisconnect": true,
   "autoReconnectOnDrop": true,

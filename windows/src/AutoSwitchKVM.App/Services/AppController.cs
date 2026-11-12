@@ -47,6 +47,7 @@ public sealed class AppController
         _bt = new WinRtBluetooth(_dispatcher);
         _store.OnSaveError = ex => Log.Error("config", "config save failed", ex);
         Config = _store.Load();
+        Log.MinLevel = LogLevels.Parse(Config.LogLevel);
         Log.Info("app", $"config loaded from {_store.Path}: profile='{Config.ActiveProfileName}', " +
             $"source={(Config.Source is null ? "(none)" : Config.Source.DisplayVidPid)}, devices={Config.Devices.Count}, paused={Config.Paused}");
 
@@ -54,7 +55,7 @@ public sealed class AppController
         Engine.Changed += () => StateChanged?.Invoke();
         Engine.OnNotice = (title, body) =>
         {
-            Log.Info("notice", $"{title}: {body}");
+            Log.Debug("notice", $"{title}: {body}");
             if (Config.ShowNotifications) _toasts.Notify(title, body);
         };
         Engine.OnUnexpectedDisconnect = d =>
@@ -77,12 +78,12 @@ public sealed class AppController
 
     public void Start()
     {
-        Log.Info("app", $"starting; log file: {Log.FilePath}");
+        Log.Info("app", $"starting; log file: {Log.FilePath}; log detail: {LogLevels.ToConfig(Log.MinLevel)}");
         _toasts.Register();
 
         _usb.Changed += OnUsbSnapshot;
         _usb.Start();
-        Log.Info("usb", "monitor started");
+        Log.Debug("usb", "monitor started");
         Engine.RefreshMonitoring();
         Fire(Engine.SeedAsync, "initial seed");
         _pollTimer = new Timer(_ => _dispatcher.TryEnqueue(() => Fire(Engine.PollStatusesAsync, "status poll")),
@@ -114,7 +115,7 @@ public sealed class AppController
         _hotkeys.OnAction = a => _dispatcher.TryEnqueue(() => HandleHotkey(a));
         _hotkeys.Start();
         ApplyHotkeys();
-        Log.Info("hotkey", $"global hotkeys {(Config.GlobalHotkeysEnabled ? "enabled" : "disabled")}");
+        Log.Debug("hotkey", $"global hotkeys {(Config.GlobalHotkeysEnabled ? "enabled" : "disabled")}");
 
         LoginItem.SetEnabled(Config.LaunchAtLogin);
 
@@ -175,7 +176,7 @@ public sealed class AppController
             {
                 await _bt.DisconnectAsync(device.Address, ct);
                 if (device.ManagePairing) await _bt.UnpairAsync(device.Address, ct);
-                Log.Info("power", $"released {device.Name} ({sw.ElapsedMilliseconds} ms)");
+                Log.Debug("power", $"released {device.Name} ({sw.ElapsedMilliseconds} ms)");
             }
             catch (OperationCanceledException)
             {
@@ -232,6 +233,14 @@ public sealed class AppController
         Save();
         ApplyHotkeys();
         StateChanged?.Invoke();
+    }
+
+    /// Settings ▸ Diagnostics ▸ Log detail. Applies immediately and persists.
+    public void SetLogLevel(LogLevel level)
+    {
+        Mutate(c => c.LogLevel = LogLevels.ToConfig(level));
+        Log.MinLevel = level;
+        Log.Always("app", $"log detail set to {LogLevels.ToConfig(level)}");
     }
 
     public void SetLaunchAtLogin(bool enabled)
@@ -407,6 +416,7 @@ public sealed class AppController
     public void ReplaceConfig(AppConfig config)
     {
         Config = config.Normalized();
+        Log.MinLevel = LogLevels.Parse(Config.LogLevel);
         Engine.Config = Config;
         if (!IsPreview) _store.Save(Config);
         Engine.RefreshMonitoring();

@@ -128,6 +128,11 @@ public sealed class AppConfig
     /// ~70 ms, so a much smaller value can work there. User-tunable in Settings ▸ General.
     public int PostUnpairSettleMs { get; set; } = 2000;
 
+    /// Minimum log level written to the log file and the Diagnostics view: "error", "warning",
+    /// "info" (default) or "debug" (see LogLevels / spec §10). Debug also enables costly
+    /// diagnostics (release probe, USB diffs).
+    public string LogLevel { get; set; } = LogLevels.Default;
+
     // Behavior
     public bool ShowNotifications { get; set; }
     public bool NotifyUnexpectedDisconnect { get; set; }

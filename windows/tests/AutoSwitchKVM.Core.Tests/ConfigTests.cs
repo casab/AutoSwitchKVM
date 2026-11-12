@@ -23,6 +23,7 @@ public class ConfigTests
         var cfg = new AppConfig();
         Assert.Equal(400, cfg.DebounceMs);
         Assert.Equal(400, cfg.ArrivalDebounceMs);
+        Assert.Equal("info", cfg.LogLevel);
         Assert.Equal(6, cfg.ConnectRetryMax);
         Assert.Equal(2, cfg.ConnectRetrySecs);
         Assert.Equal(45, cfg.BtCallTimeoutSecs); // Windows default: ~14s pair + other-host-release race headroom

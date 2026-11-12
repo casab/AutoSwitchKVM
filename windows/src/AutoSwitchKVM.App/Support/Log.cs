@@ -7,8 +7,9 @@ namespace AutoSwitchKVM.App.Support;
 ///   2. A rolling file: %LOCALAPPDATA%\AutoSwitchKVM\logs\app-yyyyMMdd.log (inspect after a run).
 ///   3. An in-memory ring buffer shown + exportable from Settings > Diagnostics (Changed fires on update).
 ///
-/// Mirrors the macOS `Log` (categories app/usb/bluetooth/engine). Use Log.Info/Warn/Error instead of
-/// Console/Debug.WriteLine so output is consistent and captured everywhere.
+/// Mirrors the macOS `Log` (categories app/usb/bluetooth/engine). Use Log.Debug/Info/Warn/Error instead
+/// of Console/Debug.WriteLine so output is consistent and captured everywhere. Level policy: see
+/// Core.LogLevel; the minimum level comes from Settings ▸ Diagnostics ▸ Log detail.
 public static class Log
 {
     private static readonly object Gate = new();
@@ -75,9 +76,39 @@ public static class Log
         }
     }
 
-    public static void Info(string category, string message) => Write("INFO", category, message);
-    public static void Warn(string category, string message) => Write("WARN", category, message);
+    /// Entries below this level are dropped (file, ring buffer, debugger output). Set from
+    /// AppConfig.LogLevel at startup and whenever the setting changes. Volatile: read from any thread.
+    public static Core.LogLevel MinLevel
+    {
+        get => (Core.LogLevel)Volatile.Read(ref _minLevel);
+        set => Volatile.Write(ref _minLevel, (int)value);
+    }
+    private static int _minLevel = (int)Core.LogLevel.Info;
 
+    /// Whether entries at this level are written. Use it to skip *work* that only feeds the log
+    /// (release probe, USB diffs), not just the line.
+    public static bool IsEnabled(Core.LogLevel level) => level >= MinLevel;
+
+    public static void Debug(string category, string message)
+    {
+        if (IsEnabled(Core.LogLevel.Debug)) Write("DEBUG", category, message);
+    }
+
+    public static void Info(string category, string message)
+    {
+        if (IsEnabled(Core.LogLevel.Info)) Write("INFO", category, message);
+    }
+
+    public static void Warn(string category, string message)
+    {
+        if (IsEnabled(Core.LogLevel.Warn)) Write("WARN", category, message);
+    }
+
+    /// Written at any level (as INFO): for the few lines that must always be in the log, like
+    /// a change of the log level itself.
+    public static void Always(string category, string message) => Write("INFO", category, message);
+
+    /// Errors are always written.
     public static void Error(string category, string message, Exception? ex = null) =>
         Write("ERROR", category, ex is null ? message : $"{message}: {ex}");
 

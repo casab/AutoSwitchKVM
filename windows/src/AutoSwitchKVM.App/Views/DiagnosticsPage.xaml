@@ -11,7 +11,19 @@
 
             <TextBlock Text="Diagnostics" Style="{StaticResource PageTitleStyle}" />
 
-            <TextBlock Text="Live state" Style="{StaticResource SectionHeaderStyle}" Margin="1,0,0,6" />
+            <TextBlock Text="Logging" Style="{StaticResource SectionHeaderStyle}" Margin="1,0,0,6" />
+            <toolkit:SettingsCard Header="Log detail"
+                                  Description="How much AutoSwitch writes to its log. Normal records each switch and your actions. Use Detailed only while troubleshooting: it records every step and runs extra diagnostics.">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE9F9;" /></toolkit:SettingsCard.HeaderIcon>
+                <ComboBox MinWidth="200" SelectedIndex="{x:Bind ViewModel.LogLevelIndex, Mode=TwoWay}">
+                    <ComboBoxItem Content="Errors only" />
+                    <ComboBoxItem Content="Warnings and errors" />
+                    <ComboBoxItem Content="Normal" />
+                    <ComboBoxItem Content="Detailed (troubleshooting)" />
+                </ComboBox>
+            </toolkit:SettingsCard>
+
+            <TextBlock Text="Live state" Style="{StaticResource SectionHeaderStyle}" />
             <toolkit:SettingsCard Header="Bluetooth" Description="The Bluetooth radio of this PC.">
                 <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE702;" /></toolkit:SettingsCard.HeaderIcon>
                 <TextBlock Text="{x:Bind ViewModel.BluetoothText, Mode=OneWay}" />

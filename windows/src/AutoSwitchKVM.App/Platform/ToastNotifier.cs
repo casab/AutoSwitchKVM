@@ -17,7 +17,7 @@ public sealed class ToastNotifier
         {
             AppNotificationManager.Default.Register();
             _registered = true;
-            Log.Info("toast", "AppNotificationManager registered");
+            Log.Debug("toast", "AppNotificationManager registered");
         }
         catch (Exception ex)
         {

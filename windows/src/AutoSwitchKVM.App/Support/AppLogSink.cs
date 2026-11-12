@@ -16,8 +16,11 @@ public sealed class AppLogSink : ILogSink
             case Core.LogLevel.Warn:
                 Log.Warn(category, exception is null ? message : $"{message}: {exception.Message}");
                 break;
-            default:
+            case Core.LogLevel.Info:
                 Log.Info(category, message);
+                break;
+            default:
+                Log.Debug(category, message);
                 break;
         }
     }

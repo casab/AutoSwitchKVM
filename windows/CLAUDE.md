@@ -18,6 +18,13 @@ and logs every step. The full milestone roadmap and per-component status live in
 proven prototype is `reference/Trackpad-AutoSwitch.ps1` (the Windows counterpart of the macOS
 Hammerspoon script).
 
+**Log levels:** `Log.Debug/Info/Warn/Error` (+ `Log.Always`), filtered by `Log.MinLevel` from
+`AppConfig.LogLevel` (Settings ▸ Diagnostics ▸ Log detail; default `info`). Policy in `Core.LogLevel`
+and spec §10: info is the handoff story, debug the step detail. Gate diagnostic *work* with
+`Log.IsEnabled(LogLevel.Debug)` (the release probe and the USB diff only run at debug). **For a
+hardware test round, ask the user to set Log detail to Detailed first**, or the timelines we've been
+reading (release probe, USB diffs, per-try steps) won't be in the log.
+
 **Logs to read when debugging a handoff:** `%LOCALAPPDATA%\AutoSwitchKVM\logs\app-yyyyMMdd.log`
 (config: `%LOCALAPPDATA%\AutoSwitchKVM\config.json`). Categories: `engine` (runs, tries, retries,
 aborts, give-ups), `bt` (WinRT/Win32 calls with timings and raw statuses), `usb`, `power`, `app`.

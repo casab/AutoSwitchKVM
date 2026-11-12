@@ -49,7 +49,7 @@ public sealed class HotKeyService : IDisposable
         if (_hwnd == IntPtr.Zero)
             Log.Error("hotkey", $"CreateWindowExW failed (Win32 error {Marshal.GetLastWin32Error()}); global hotkeys disabled");
         else
-            Log.Info("hotkey", "message-only window created");
+            Log.Debug("hotkey", "message-only window created");
     }
 
     /// Idempotent: re-register from scratch whenever the enabled flag or any shortcut changes.

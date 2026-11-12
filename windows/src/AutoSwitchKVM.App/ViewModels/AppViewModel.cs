@@ -209,6 +209,30 @@ public sealed class AppViewModel : ObservableObject
     public string SelectedText => _c.Selected ? "Yes — the KVM source is connected" : "No";
     public string ConfigPath => _c.ConfigPath;
 
+    /// Settings ▸ Diagnostics ▸ Log detail, as a ComboBox index:
+    /// 0 = errors only, 1 = warnings, 2 = normal (info, default), 3 = detailed (debug).
+    public int LogLevelIndex
+    {
+        get => LogLevels.Parse(_c.Config.LogLevel) switch
+        {
+            Core.LogLevel.Error => 0,
+            Core.LogLevel.Warn => 1,
+            Core.LogLevel.Debug => 3,
+            _ => 2,
+        };
+        set
+        {
+            if (value < 0 || value == LogLevelIndex) return;
+            _c.SetLogLevel(value switch
+            {
+                0 => Core.LogLevel.Error,
+                1 => Core.LogLevel.Warn,
+                3 => Core.LogLevel.Debug,
+                _ => Core.LogLevel.Info,
+            });
+        }
+    }
+
     /// From the monitor's cached snapshot (no WMI call on the UI thread).
     public string MatchingUsbText => DescribeMatchingUsb(_c.Config.Source, _c.LastUsbSnapshot);
 

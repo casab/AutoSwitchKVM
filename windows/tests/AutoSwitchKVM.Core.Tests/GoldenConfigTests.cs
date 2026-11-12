@@ -36,6 +36,7 @@ public class GoldenConfigTests
         Assert.Equal(3, cfg.ConnectRetrySecs);
         Assert.Equal(25, cfg.BtCallTimeoutSecs);
         Assert.Equal(1500, cfg.PostUnpairSettleMs);
+        Assert.Equal("debug", cfg.LogLevel);
         Assert.True(cfg.ShowNotifications);
         Assert.True(cfg.NotifyUnexpectedDisconnect);
         Assert.True(cfg.AutoReconnectOnDrop);

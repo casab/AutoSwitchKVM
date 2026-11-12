@@ -49,7 +49,7 @@ public partial class App : Application
         DebugSettings.IsXamlResourceReferenceTracingEnabled = true;
         DebugSettings.XamlResourceReferenceFailed += (_, e) => Log.Warn("xaml", $"resource reference failed: {e.Message}");
         DebugSettings.IsBindingTracingEnabled = true;
-        DebugSettings.BindingFailed += (_, e) => Log.Warn("xaml", $"binding failed: {e.Message}");
+        DebugSettings.BindingFailed += (_, e) => Log.Debug("xaml", $"binding failed: {e.Message}");
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
             Log.Error("app", "unobserved task exception", e.Exception);

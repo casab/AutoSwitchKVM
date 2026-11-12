@@ -124,7 +124,7 @@ public sealed class WinRtBluetooth : IBluetoothController
                 hidPeripheral = dev.ClassOfDevice.MajorClass == BluetoothMajorClass.Peripheral;
                 _isHidPeripheral[digits] = hidPeripheral;
                 if (!hidPeripheral)
-                    Log.Info("bt", $"hid {address}: not a HID peripheral ({dev.ClassOfDevice.MajorClass}); HID readiness not checked");
+                    Log.Debug("bt", $"hid {address}: not a HID peripheral ({dev.ClassOfDevice.MajorClass}); HID readiness not checked");
             }
             catch (OperationCanceledException) { throw; }
             catch (BluetoothException) { throw; }
@@ -141,7 +141,7 @@ public sealed class WinRtBluetooth : IBluetoothController
         if (!_lastHidState.TryGetValue(digits, out var previous) || previous != text)
         {
             _lastHidState[digits] = text;
-            Log.Info("bt", $"hid {address}: {(state.Ready ? "up" : "not up")} ({text})");
+            Log.Debug("bt", $"hid {address}: {(state.Ready ? "up" : "not up")} ({text})");
         }
         return state.Ready;
     }
@@ -260,7 +260,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             }
             if (orphanInfo is not null)
             {
-                Log.Info("bt", $"pair {address}: a previous pairing is still running in Windows ({orphanInfo}); not starting another");
+                Log.Debug("bt", $"pair {address}: a previous pairing is still running in Windows ({orphanInfo}); not starting another");
                 throw new BluetoothException(BluetoothFailureKind.OperationInProgress,
                     $"a previous pairing is still running in Windows ({orphanInfo})", "orphaned PairAsync");
             }
@@ -269,7 +269,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             // the radio) wins: pairing now would bond the device to this PC after the handoff.
             if (ReleaseRequestedSince(digits, mySeq))
             {
-                Log.Info("bt", $"pair {address}: skipped - a release was requested after this pair was queued");
+                Log.Debug("bt", $"pair {address}: skipped - a release was requested after this pair was queued");
                 throw new BluetoothException(BluetoothFailureKind.Unknown,
                     "pair skipped: superseded by a later release request", "superseded");
             }
@@ -302,12 +302,12 @@ public sealed class WinRtBluetooth : IBluetoothController
         try
         {
             var pairing = dev.DeviceInformation.Pairing;
-            Log.Info("bt", $"pair {address}: resolved '{dev.Name}' conn={dev.ConnectionStatus} " +
+            Log.Debug("bt", $"pair {address}: resolved '{dev.Name}' conn={dev.ConnectionStatus} " +
                 $"IsPaired={pairing.IsPaired} CanPair={pairing.CanPair} ({sw.ElapsedMilliseconds} ms)");
 
             if (pairing.IsPaired)
             {
-                Log.Info("bt", $"pair {address}: already paired");
+                Log.Debug("bt", $"pair {address}: already paired");
                 return;
             }
 
@@ -318,7 +318,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             handler = (_, e) =>
             {
                 Interlocked.Exchange(ref requested, 1);
-                Log.Info("bt", $"pair {address}: PairingRequested kind={e.PairingKind} after {sw.ElapsedMilliseconds} ms");
+                Log.Debug("bt", $"pair {address}: PairingRequested kind={e.PairingKind} after {sw.ElapsedMilliseconds} ms");
                 if (e.PairingKind == DevicePairingKinds.ProvidePin) e.Accept("0000");
                 else e.Accept();
             };
@@ -360,7 +360,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             }
 
             var status = result.Status;
-            Log.Info("bt", $"pair {address}: result={status} after {sw.ElapsedMilliseconds} ms" +
+            Log.Debug("bt", $"pair {address}: result={status} after {sw.ElapsedMilliseconds} ms" +
                 (cancelledByUs ? " (after we cancelled it)" : ""));
             if (status is DevicePairingResultStatus.Paired or DevicePairingResultStatus.AlreadyPaired)
             {
@@ -403,7 +403,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             try { status = (await task).Status; }
             catch (Exception ex) { Log.Warn("bt", $"pair {address}: background pairing faulted: {ex.Message}"); }
 
-            Log.Info("bt", $"pair {address}: background pairing finished after {sw.Elapsed.TotalSeconds:0.0} s: " +
+            Log.Debug("bt", $"pair {address}: background pairing finished after {sw.Elapsed.TotalSeconds:0.0} s: " +
                 (status?.ToString() ?? "error"));
             if (status is not (DevicePairingResultStatus.Paired or DevicePairingResultStatus.AlreadyPaired)) return;
 
@@ -420,7 +420,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             {
                 if (WantsPaired(digits))
                 {
-                    Log.Info("bt", $"pair {address}: late pairing kept (a connect is still wanted)");
+                    Log.Debug("bt", $"pair {address}: late pairing kept (a connect is still wanted)");
                     RearmMonitoring(address);
                 }
                 else
@@ -481,7 +481,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             if (known is null ||
                 (!known.DeviceInformation.Pairing.IsPaired && known.ConnectionStatus != BluetoothConnectionStatus.Connected))
             {
-                Log.Info("bt", $"unpair {address}: not paired and not connected; nothing to release ({sw.ElapsedMilliseconds} ms)");
+                Log.Debug("bt", $"unpair {address}: not paired and not connected; nothing to release ({sw.ElapsedMilliseconds} ms)");
                 return;
             }
         }
@@ -499,7 +499,8 @@ public sealed class WinRtBluetooth : IBluetoothController
         // Synchronous and slow (~3.4 s on hardware: it waits for the link teardown). Run it off
         // the calling thread — the engine calls from the UI thread, which would freeze the tray
         // and keep the engine's per-call timeout from firing.
-        StartReleaseProbe(address, addr);
+        // Diagnostic only (polls WinRT + WMI every ~150 ms for 10 s): run it at Debug level only.
+        if (Log.IsEnabled(LogLevel.Debug)) StartReleaseProbe(address, addr);
         uint? rc = null;
         try
         {
@@ -512,12 +513,12 @@ public sealed class WinRtBluetooth : IBluetoothController
 
         if (rc == 0)
         {
-            Log.Info("bt", $"unpair {address}: BluetoothRemoveDevice OK - link dropped and bond removed ({sw.ElapsedMilliseconds} ms)");
+            Log.Debug("bt", $"unpair {address}: BluetoothRemoveDevice OK - link dropped and bond removed ({sw.ElapsedMilliseconds} ms)");
             RearmMonitoring(address);
             return;
         }
         if (rc == ErrorNotFound)
-            Log.Info("bt", $"unpair {address}: not in Windows' paired list (ERROR_NOT_FOUND); confirming via WinRT");
+            Log.Debug("bt", $"unpair {address}: not in Windows' paired list (ERROR_NOT_FOUND); confirming via WinRT");
         else if (rc is not null)
             Log.Warn("bt", $"unpair {address}: BluetoothRemoveDevice failed: {Win32Name(rc.Value)}; trying WinRT unpair");
 
@@ -527,7 +528,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             if (dev?.DeviceInformation.Pairing.IsPaired == true)
             {
                 var result = await dev.DeviceInformation.Pairing.UnpairAsync().AsTask(ct);
-                Log.Info("bt", $"unpair {address}: WinRT result={result.Status} ({sw.ElapsedMilliseconds} ms)");
+                Log.Debug("bt", $"unpair {address}: WinRT result={result.Status} ({sw.ElapsedMilliseconds} ms)");
                 if (result.Status != DeviceUnpairingResultStatus.Unpaired &&
                     result.Status != DeviceUnpairingResultStatus.AlreadyUnpaired)
                 {
@@ -541,7 +542,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             }
             else
             {
-                Log.Info("bt", $"unpair {address}: already unpaired ({sw.ElapsedMilliseconds} ms)");
+                Log.Debug("bt", $"unpair {address}: already unpaired ({sw.ElapsedMilliseconds} ms)");
             }
         }
 
@@ -595,14 +596,14 @@ public sealed class WinRtBluetooth : IBluetoothController
 
                 if (state != last)
                 {
-                    Log.Info("bt", $"release probe {address} +{sw.ElapsedMilliseconds} ms: {state}");
+                    Log.Debug("bt", $"release probe {address} +{sw.ElapsedMilliseconds} ms: {state}");
                     last = state;
                 }
                 await Task.Delay(150, ct);
             }
         }
         catch (OperationCanceledException) { /* probe window over */ }
-        Log.Info("bt", $"release probe {address}: ended at +{sw.ElapsedMilliseconds} ms (last: {last})");
+        Log.Debug("bt", $"release probe {address}: ended at +{sw.ElapsedMilliseconds} ms (last: {last})");
     }
 
     /// Map a WinRT pairing result to the engine's retry policy (see BluetoothFailureKind).
@@ -725,35 +726,35 @@ public sealed class WinRtBluetooth : IBluetoothController
     private async Task DiagnoseCoreAsync(string address)
     {
         var digits = Digits(address);
-        Log.Info("diag", $"===== Diagnose {address} (match digits: {digits}) =====");
+        Log.Always("diag", $"===== Diagnose {address} (match digits: {digits}) =====");
 
         try
         {
             var radios = await Radio.GetRadiosAsync();
             var bt = radios.FirstOrDefault(r => r.Kind == RadioKind.Bluetooth);
-            Log.Info("diag", $"radio: {(bt is null ? "<none>" : bt.State.ToString())}");
+            Log.Always("diag", $"radio: {(bt is null ? "<none>" : bt.State.ToString())}");
         }
         catch (Exception ex) { Log.Error("diag", "radio query failed", ex); }
 
         lock (_gate)
         {
             if (_orphanPair is { IsCompleted: false })
-                Log.Info("diag", $"a background pairing of {_orphanAddress} is still running");
+                Log.Always("diag", $"a background pairing of {_orphanAddress} is still running");
         }
 
         try
         {
             var addr = ParseAddress(address);
-            Log.Info("diag", $"parsed address = 0x{addr:X12}");
+            Log.Always("diag", $"parsed address = 0x{addr:X12}");
             using var dev = await BluetoothDevice.FromBluetoothAddressAsync(addr);
             if (dev is null)
             {
-                Log.Info("diag", "FromBluetoothAddressAsync: returned NULL (device not known to the system by address)");
+                Log.Always("diag", "FromBluetoothAddressAsync: returned NULL (device not known to the system by address)");
             }
             else
             {
                 var p = dev.DeviceInformation.Pairing;
-                Log.Info("diag", $"FromBluetoothAddressAsync: name='{dev.Name}' conn={dev.ConnectionStatus} " +
+                Log.Always("diag", $"FromBluetoothAddressAsync: name='{dev.Name}' conn={dev.ConnectionStatus} " +
                     $"IsPaired={p.IsPaired} CanPair={p.CanPair} kind={dev.DeviceInformation.Kind} id={dev.DeviceInformation.Id}");
             }
         }
@@ -764,8 +765,8 @@ public sealed class WinRtBluetooth : IBluetoothController
         try { await DumpSelectorAsync("bt-classic-any", BluetoothDevice.GetDeviceSelector(), digits); }
         catch (Exception ex) { Log.Warn("diag", $"bt-classic-any selector failed: {ex.Message}"); }
 
-        Log.Info("diag", $"BTHENUM HID node present for MAC: {HidNodePresent(digits)}");
-        Log.Info("diag", "===== end Diagnose =====");
+        Log.Always("diag", $"BTHENUM HID node present for MAC: {HidNodePresent(digits)}");
+        Log.Always("diag", "===== end Diagnose =====");
     }
 
     private static async Task DumpSelectorAsync(string label, string selector, string digits)
@@ -773,11 +774,11 @@ public sealed class WinRtBluetooth : IBluetoothController
         try
         {
             var found = await DeviceInformation.FindAllAsync(selector);
-            Log.Info("diag", $"[{label}] {found.Count} device(s):");
+            Log.Always("diag", $"[{label}] {found.Count} device(s):");
             foreach (var d in found)
             {
                 var hit = StripSeparators(d.Id).Contains(digits, StringComparison.OrdinalIgnoreCase) ? "  <== TARGET" : "";
-                Log.Info("diag", $"  [{label}] name='{d.Name}' id={d.Id}{hit}");
+                Log.Always("diag", $"  [{label}] name='{d.Name}' id={d.Id}{hit}");
             }
         }
         catch (Exception ex) { Log.Error("diag", $"[{label}] enumerate failed", ex); }
@@ -823,7 +824,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
             if (dev is null)
             {
-                Log.Info("bt", $"monitor {address}: not known to Windows yet (unpaired); events resume after the next pair");
+                Log.Debug("bt", $"monitor {address}: not known to Windows yet (unpaired); events resume after the next pair");
                 return;
             }
 

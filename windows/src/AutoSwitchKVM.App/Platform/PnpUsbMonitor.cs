@@ -73,7 +73,7 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
                 if (started) Log.Warn("usb", $"device-change watcher stopped unexpectedly ({e.Status}); relying on the 2 s reconcile");
             };
             _watcher.Start();
-            Log.Info("usb", "device-change watcher started");
+            Log.Debug("usb", "device-change watcher started");
         }
         catch (Exception ex)
         {
@@ -114,7 +114,7 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
         if (last == 0 || ElapsedMs(last, now) >= BurstQuietMs)
         {
             Interlocked.Exchange(ref _burstStartTicks, now);
-            Log.Info("usb", "device-change burst started");
+            Log.Debug("usb", "device-change burst started");
             ThreadPool.QueueUserWorkItem(_ => Reconcile("burst start"));
         }
 
@@ -175,9 +175,9 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
         }
         var burst = Interlocked.Read(ref _burstStartTicks);
         var sinceBurst = burst == 0 ? "" : $", {ElapsedMs(burst, end)} ms after the burst started";
-        Log.Info("usb", $"snapshot changed: {snapshot.Count} USB device(s) " +
+        Log.Debug("usb", $"snapshot changed: {snapshot.Count} USB device(s) " +
             $"(via {trigger}, enumerate {ElapsedMs(start, end)} ms{sinceBurst})");
-        if (previous.Count > 0) LogDiff(previous, _lastDevices);
+        if (previous.Count > 0 && Log.IsEnabled(LogLevel.Debug)) LogDiff(previous, _lastDevices);
         Emit(snapshot);
     }
 
@@ -200,8 +200,8 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
 
         var left = before.Where(kv => !after.ContainsKey(kv.Key)).Select(kv => kv.Value).ToList();
         var arrived = after.Where(kv => !before.ContainsKey(kv.Key)).Select(kv => kv.Value).ToList();
-        if (left.Count > 0) Log.Info("usb", $"  left ({left.Count}): {Describe(left)}");
-        if (arrived.Count > 0) Log.Info("usb", $"  arrived ({arrived.Count}): {Describe(arrived)}");
+        if (left.Count > 0) Log.Debug("usb", $"  left ({left.Count}): {Describe(left)}");
+        if (arrived.Count > 0) Log.Debug("usb", $"  arrived ({arrived.Count}): {Describe(arrived)}");
     }
 
     private static long ElapsedMs(long fromTicks, long toTicks) =>

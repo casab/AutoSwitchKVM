@@ -450,7 +450,7 @@ public class FailureHandlingTests
         release.SetResult();
         await arrival;
 
-        Assert.True(log.Has(LogLevel.Info, "supersedes"), log.Dump());
+        Assert.True(log.Has(LogLevel.Debug, "supersedes"), log.Dump());
         Assert.DoesNotContain(Addr2.Replace(":", ""), bt.Connected);  // superseded run stopped
     }
 

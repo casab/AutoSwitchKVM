@@ -183,7 +183,7 @@ public class HandoffRaceTests
         await Arrive(engine);
 
         if (expectedSleep is { } ms) Assert.Contains(ms, sleeps);
-        else Assert.False(log.Has(LogLevel.Info, "settling"), log.Dump());
+        else Assert.False(log.Has(LogLevel.Debug, "settling"), log.Dump());
     }
 
     // ---- Spec §3 Evaluate step 5: reconcile on seed ----

@@ -84,6 +84,7 @@ display string convention, e.g. `⌃⌥⌘P` / on Windows `Ctrl+Alt+Cmd⇒Win` e
 | `connectRetrySecs` | int | `2` | Backoff **base** seconds |
 | `btCallTimeoutSecs` | int | `15` macOS / `45` Windows | Per Bluetooth-call timeout. Platform default differs by design: a Windows pair legitimately takes ~14 s and must absorb the other-host-release race |
 | `postUnpairSettleMs` | int | `2000` | Minimum gap between an unpair of a device returning and the next pair of it (§3 Connect flow). Only quick KVM bounces pay it. User-tunable (Settings ▸ General on both apps); the macOS reason is bluetoothd deleting the key ~1.5 s late, the Windows one WinRT's ~70 ms stale `IsPaired` |
+| `logLevel` | string | `"info"` | Minimum log level: `"error"`, `"warning"`, `"info"`, `"debug"` (§10). Missing/unknown = `"info"`. Windows: Settings ▸ Diagnostics ▸ Log detail; macOS pending |
 | `showNotifications` | bool | `false` | Connect/disconnect alerts |
 | `notifyUnexpectedDisconnect` | bool | `false` | Alert on passive drops |
 | `autoReconnectOnDrop` | bool | `true` | One rate-limited automatic reconnect after a passive drop (§3) |
@@ -408,6 +409,20 @@ against real hardware in Milestone 0 (`windows/PLAN.md` "spike findings").
 - The **handoff timeline** is logged on both sides so each host can measure the other: when the
   source appears/disappears (per source id), when the debounced run starts, and when each device is
   released/connected, with elapsed times.
+- **Log levels** (`logLevel`, user-selectable; default `info`). Both apps classify the same way:
+  - **error**: something failed and needs attention: crash/unhandled, release failed, gave up,
+    config save/import failed.
+  - **warning**: recovered or worked around: a *hard* connect failure (timeout, auth failure, not
+    found…), a fallback taken, a failed status/HID query, a late bond undone.
+  - **info**: the handoff story and user actions, about one line per event: source appeared/left,
+    run started, device connected (tries, total time) / released (time), unexpected drop, adapter
+    on/off, sleep/wake, app start/stop, user actions.
+  - **debug**: step detail and diagnostics: per-try steps and timings, HID/unpair-settle waits,
+    pairing internals, USB snapshots/diffs, HID state changes, aborted/superseded runs, and
+    **expected refusals** (`deviceBusy` / `operationInProgress` tries, routine on every switch).
+    Costly diagnostics (Windows: the release probe, the USB diff) only run at debug.
+  - Always written regardless of level: a change of the log level itself, and the output of an
+    explicit Diagnose request.
 
 ---
 

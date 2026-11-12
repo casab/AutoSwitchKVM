@@ -168,9 +168,8 @@ public sealed class SelectionEngine
         var @new = connected ? DeviceStatus.Connected : DeviceStatus.Disconnected;
         if (old != @new)
         {
-            Info(old is null
-                ? $"{device.Name}: initial status {@new.Label} ({origin})"
-                : $"{device.Name}: {old.Value.Label} -> {@new.Label} (reported by {origin})");
+            if (old is null) Debug($"{device.Name}: initial status {@new.Label} ({origin})");
+            else Info($"{device.Name}: {old.Value.Label} -> {@new.Label} (reported by {origin})");
             SetStatus(device.Id, @new);
         }
 
@@ -194,7 +193,7 @@ public sealed class SelectionEngine
         if (_lastAutoReconnect.TryGetValue(device.Id, out var last) &&
             (now - last).TotalSeconds < AutoReconnectMinIntervalSecs)
         {
-            Info($"{device.Name}: auto-reconnect skipped (rate limit: last one {(now - last).TotalSeconds:0}s ago)");
+            Debug($"{device.Name}: auto-reconnect skipped (rate limit: last one {(now - last).TotalSeconds:0}s ago)");
             return;
         }
         _lastAutoReconnect[device.Id] = now;
@@ -213,7 +212,7 @@ public sealed class SelectionEngine
                 : null);
         if (skip is not null)
         {
-            Info($"{device.Name}: auto-reconnect cancelled: {skip}");
+            Debug($"{device.Name}: auto-reconnect cancelled: {skip}");
             return;
         }
         MarkBusy(device.Id);
@@ -296,7 +295,7 @@ public sealed class SelectionEngine
                     _presentProductIDs.Add(d.ProductID);
         }
         LastReason = "initial scan";
-        Info(source is null
+        Debug(source is null
             ? "seed: no source configured"
             : $"seed: source '{source.Name}' {(_presentProductIDs.Count > 0 ? "present" : "absent")}");
         ScheduleEvaluate();
@@ -438,7 +437,7 @@ public sealed class SelectionEngine
         {
             if (StaleReason(run, respectSelection: false) is { } why)
             {
-                Info($"run #{run.Token}: connect all stopped: {why}");
+                Debug($"run #{run.Token}: connect all stopped: {why}");
                 return;
             }
             MarkBusy(device.Id);
@@ -455,7 +454,7 @@ public sealed class SelectionEngine
         {
             if (StaleReason(run, respectSelection: false) is { } why)
             {
-                Info($"run #{run.Token}: disconnect all stopped: {why}");
+                Debug($"run #{run.Token}: disconnect all stopped: {why}");
                 return;
             }
             MarkBusy(device.Id);
@@ -498,7 +497,7 @@ public sealed class SelectionEngine
         if (IsBusy(device.Id))
         {
             var run = NewRun(what);
-            Info($"{device.Name}: {what} supersedes the in-flight operation (run #{run.Token})");
+            Debug($"{device.Name}: {what} supersedes the in-flight operation (run #{run.Token})");
             return run;
         }
         return CurrentRun(what);
@@ -511,7 +510,7 @@ public sealed class SelectionEngine
         try
         {
             var sw = Stopwatch.StartNew();
-            Info($"{device.Name}: manual {op} started");
+            Debug($"{device.Name}: manual {op} started");
             try
             {
                 if (releases)
@@ -581,7 +580,7 @@ public sealed class SelectionEngine
             if (!device.Enabled) continue;
             if (StaleReason(run, respectSelection: false) is { } why)
             {
-                Info($"run #{run.Token}: connect run stopped: {why}");
+                Debug($"run #{run.Token}: connect run stopped: {why}");
                 return;
             }
             MarkBusy(device.Id);
@@ -605,7 +604,7 @@ public sealed class SelectionEngine
         var maxHard = Math.Max(1, cfg.ConnectRetryMax);
         var total = Stopwatch.StartNew();
 
-        Info($"{name}: connect started (run #{run.Token}, {run.Trigger}; managePairing={device.ManagePairing})");
+        Debug($"{name}: connect started (run #{run.Token}, {run.Trigger}; managePairing={device.ManagePairing})");
         NoteIntent(_connectRequestedToken, device.Id, run.Token);
         SetStatus(device.Id, DeviceStatus.Connecting);
 
@@ -615,7 +614,7 @@ public sealed class SelectionEngine
             await SleepHook(device.ConnectDelayMs);
             if (StaleReason(run, respectSelection) is { } why)
             {
-                Info($"{name}: connect aborted during the {device.ConnectDelayMs} ms connect delay: {why}");
+                Debug($"{name}: connect aborted during the {device.ConnectDelayMs} ms connect delay: {why}");
                 MarkAborted(device.Id);
                 return;
             }
@@ -639,7 +638,7 @@ public sealed class SelectionEngine
             }
             if (StaleReason(run, respectSelection) is { } stale)
             {
-                Info($"{name}: connect aborted before try {tries + 1}: {stale}");
+                Debug($"{name}: connect aborted before try {tries + 1}: {stale}");
                 MarkAborted(device.Id);
                 return;
             }
@@ -655,7 +654,7 @@ public sealed class SelectionEngine
                     step = label;
                     var sw = Stopwatch.StartNew();
                     await WithTimeoutAsync(op);
-                    Info($"{name}: try {tries}: {label} OK ({Ms(sw)})");
+                    Debug($"{name}: try {tries}: {label} OK ({Ms(sw)})");
                 }
 
                 if (!device.ManagePairing && await SafeIsConnectedAsync(device)
@@ -672,7 +671,7 @@ public sealed class SelectionEngine
                 {
                     if (freshBond)
                     {
-                        Info($"{name}: try {tries}: removing a possibly stale bond before re-pairing");
+                        Debug($"{name}: try {tries}: removing a possibly stale bond before re-pairing");
                         await BestEffortUnpairAsync(device, "stale-bond unpair");
                         freshBond = false;  // once per hard failure; soft retries in between don't repeat it
                     }
@@ -684,7 +683,7 @@ public sealed class SelectionEngine
                     step = "unpair gate";
                     if (await WaitForUnpairGateAsync(device, run, respectSelection) is { } gateStale)
                     {
-                        Info($"{name}: connect aborted before pairing: {gateStale}");
+                        Debug($"{name}: connect aborted before pairing: {gateStale}");
                         MarkAborted(device.Id);
                         return;
                     }
@@ -740,7 +739,7 @@ public sealed class SelectionEngine
                 if (StaleReason(run, respectSelection) is { } afterHid)
                 {
                     if (paired) await AbortAfterPairAsync(device, run, $"after the HID wait: {afterHid}");
-                    else { Info($"{name}: connect aborted after the HID wait: {afterHid}"); MarkAborted(device.Id); }
+                    else { Debug($"{name}: connect aborted after the HID wait: {afterHid}"); MarkAborted(device.Id); }
                     return;
                 }
                 if (hid == false)
@@ -761,7 +760,9 @@ public sealed class SelectionEngine
             }
 
             last = failure;
-            Warn($"{name}: try {tries}: {step} failed after {Ms(attempt)}: {failure.Summary}");
+            var tryLine = $"{name}: try {tries}: {step} failed after {Ms(attempt)}: {failure.Summary}";
+            if (failure.Kind is BluetoothFailureKind.DeviceBusy or BluetoothFailureKind.OperationInProgress) Debug(tryLine);
+            else Warn(tryLine);
             SetStatus(device.Id, DeviceStatus.Error(failure.Message));
 
             // Don't trust a link-only state; drop any partial connection so the next try is clean.
@@ -770,7 +771,7 @@ public sealed class SelectionEngine
             // Superseded while the try was running: stop here rather than log a misleading retry.
             if (StaleReason(run, respectSelection) is { } afterFailure)
             {
-                Info($"{name}: connect aborted after failed try {tries}: {afterFailure}");
+                Debug($"{name}: connect aborted after failed try {tries}: {afterFailure}");
                 MarkAborted(device.Id);
                 return;
             }
@@ -791,7 +792,7 @@ public sealed class SelectionEngine
             if (soft && softRetries < MaxSoftRetries)
             {
                 softRetries++;
-                Info($"{name}: {SoftHint(failure.Kind)}; retrying in {SoftRetryIntervalMs} ms " +
+                Debug($"{name}: {SoftHint(failure.Kind)}; retrying in {SoftRetryIntervalMs} ms " +
                      $"(soft retry {softRetries}/{MaxSoftRetries}, not counted against the {maxHard} attempts)");
                 await SleepHook(SoftRetryIntervalMs);
                 continue;
@@ -806,7 +807,7 @@ public sealed class SelectionEngine
             freshBond = device.ManagePairing && failure.Kind is BluetoothFailureKind.AuthenticationFailed
                 or BluetoothFailureKind.Timeout or BluetoothFailureKind.Unknown;
             var backoff = BackoffMillisJittered(cfg.ConnectRetrySecs, hardFailures);
-            Info($"{name}: attempt {hardFailures}/{maxHard} failed; retrying in {backoff} ms" +
+            Debug($"{name}: attempt {hardFailures}/{maxHard} failed; retrying in {backoff} ms" +
                  (freshBond ? " (will re-pair from scratch)" : ""));
             await SleepHook(backoff);
         }
@@ -831,7 +832,7 @@ public sealed class SelectionEngine
             if (!device.Enabled) continue;
             if (StaleReason(run, respectSelection: false) is { } why)
             {
-                Info($"run #{run.Token}: reconcile stopped: {why}");
+                Debug($"run #{run.Token}: reconcile stopped: {why}");
                 return;
             }
             var connected = await SafeIsConnectedAsync(device);
@@ -849,7 +850,7 @@ public sealed class SelectionEngine
             if (!device.Enabled) continue;
             if (StaleReason(run, respectSelection: false) is { } why)  // e.g. the source came back
             {
-                Info($"run #{run.Token}: release run stopped: {why}");
+                Debug($"run #{run.Token}: release run stopped: {why}");
                 return;
             }
             MarkBusy(device.Id);
@@ -869,7 +870,7 @@ public sealed class SelectionEngine
         var addr = device.Address;
         var name = device.Name;
         var total = Stopwatch.StartNew();
-        Info($"{name}: release started (run #{run.Token}, {run.Trigger}; managePairing={device.ManagePairing})");
+        Debug($"{name}: release started (run #{run.Token}, {run.Trigger}; managePairing={device.ManagePairing})");
         NoteIntent(_releaseRequestedToken, device.Id, run.Token);
 
         Failure? disconnectError = null;
@@ -882,7 +883,7 @@ public sealed class SelectionEngine
         }
         if (StaleReason(run, respectSelection: false) is { } stale)
         {
-            Info($"{name}: release abandoned after disconnect: {stale}");
+            Debug($"{name}: release abandoned after disconnect: {stale}");
             return;
         }
 
@@ -904,7 +905,7 @@ public sealed class SelectionEngine
                     unpairError = Classify(ex);
                     if (StaleReason(run, respectSelection: false) is { } why)
                     {
-                        Info($"{name}: release abandoned after failed unpair ({unpairError.Value.Summary}): {why}");
+                        Debug($"{name}: release abandoned after failed unpair ({unpairError.Value.Summary}): {why}");
                         return;
                     }
                     if (attempt == 1 && unpairError.Value.Kind != BluetoothFailureKind.InvalidAddress)
@@ -913,7 +914,7 @@ public sealed class SelectionEngine
                         await SleepHook(ReleaseRetryDelayMs);
                         if (StaleReason(run, respectSelection: false) is { } why2)
                         {
-                            Info($"{name}: release abandoned before unpair retry: {why2}");
+                            Debug($"{name}: release abandoned before unpair retry: {why2}");
                             return;
                         }
                         continue;
@@ -923,7 +924,7 @@ public sealed class SelectionEngine
             }
             if (StaleReason(run, respectSelection: false) is { } stale2)
             {
-                Info($"{name}: release abandoned after unpair: {stale2}");
+                Debug($"{name}: release abandoned after unpair: {stale2}");
                 return;
             }
             if (unpairError is { } err)
@@ -990,18 +991,18 @@ public sealed class SelectionEngine
             if (ready is null) return false;
             if (ready == true)
             {
-                Info($"{device.Name}: HID up on the pairing link after {Ms(sw)}");
+                Debug($"{device.Name}: HID up on the pairing link after {Ms(sw)}");
                 return true;
             }
             if (poll >= maxPolls || sw.ElapsedMilliseconds >= PostPairHidWaitMs) break;
             if (!await SafeIsConnectedAsync(device))
             {
-                if (poll > 0) Info($"{device.Name}: the pairing link closed without HID ({Ms(sw)}); reconnecting");
+                if (poll > 0) Debug($"{device.Name}: the pairing link closed without HID ({Ms(sw)}); reconnecting");
                 return false;
             }
             await SleepHook(HidPollIntervalMs);
         }
-        Info($"{device.Name}: no HID on the pairing link after {Ms(sw)}; dropping it and reconnecting");
+        Debug($"{device.Name}: no HID on the pairing link after {Ms(sw)}; dropping it and reconnecting");
         return false;
     }
 
@@ -1019,7 +1020,7 @@ public sealed class SelectionEngine
             if (ready is null) return null;
             if (ready == true)
             {
-                if (poll > 0) Info($"{device.Name}: HID up after {Ms(sw)}");
+                if (poll > 0) Debug($"{device.Name}: HID up after {Ms(sw)}");
                 return true;
             }
             if (poll >= maxPolls || sw.ElapsedMilliseconds >= HidReadyTimeoutMs) break;
@@ -1065,9 +1066,9 @@ public sealed class SelectionEngine
         if (_unpairInFlight.TryGetValue(device.Id, out var inFlight))
         {
             var sw = Stopwatch.StartNew();
-            Info($"{device.Name}: waiting for an unpair of this device still in flight before pairing");
+            Debug($"{device.Name}: waiting for an unpair of this device still in flight before pairing");
             try { await inFlight; } catch { /* its owner logs the failure */ }
-            Info($"{device.Name}: in-flight unpair finished after {Ms(sw)}");
+            Debug($"{device.Name}: in-flight unpair finished after {Ms(sw)}");
         }
         var settleMs = Math.Max(0, Config.PostUnpairSettleMs);
         if (settleMs > 0 && _lastUnpairReturned.TryGetValue(device.Id, out var last))
@@ -1075,7 +1076,7 @@ public sealed class SelectionEngine
             var remaining = settleMs - (int)(Clock() - last).TotalMilliseconds;
             if (remaining > 0)
             {
-                Info($"{device.Name}: last unpair returned {settleMs - remaining} ms ago; settling {remaining} ms before pairing");
+                Debug($"{device.Name}: last unpair returned {settleMs - remaining} ms ago; settling {remaining} ms before pairing");
                 await SleepHook(remaining);
             }
         }
@@ -1112,7 +1113,7 @@ public sealed class SelectionEngine
         }
         else
         {
-            Info($"{device.Name}: connect aborted {reason}");
+            Debug($"{device.Name}: connect aborted {reason}");
         }
         MarkAborted(device.Id);
     }
@@ -1221,6 +1222,7 @@ public sealed class SelectionEngine
     private void RaiseChanged() => Changed?.Invoke();
 
     private void Log(LogLevel level, string message, Exception? ex = null) => _log.Write(level, Cat, message, ex);
+    private void Debug(string message) => Log(LogLevel.Debug, message);
     private void Info(string message) => Log(LogLevel.Info, message);
     private void Warn(string message) => Log(LogLevel.Warn, message);
 
