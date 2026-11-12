@@ -142,7 +142,7 @@ controller** (the operations in §5). It owns no platform APIs directly.
     (macOS, 2026-11-12: closing the pairing link while the stack was still bringing HID up made
     it re-page at once; the trackpad's HID on that link was refused with a security failure, and
     the trackpad then refused this host's HID until it bonded elsewhere or was power-cycled.
-    Windows: whether its pairing path closes the link early is unmeasured.)
+    Windows, measured 2026-11-12: its path keeps the link: the post-pair "disconnect" is a no-op for Classic HID, and HID was up ~0.9 s after every pair, including an idle 0.8 s settle.)
   - Else: if already connected, done; otherwise **connect**.
   - **Success requires a *clean* connect** — the connect call completing without error — **and**
     the device reporting connected. A link-only/ACL state that isn't a working connection does

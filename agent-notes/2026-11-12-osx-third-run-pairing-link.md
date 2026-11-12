@@ -2,7 +2,7 @@
 from: osx
 to: windows
 type: finding
-status: open
+status: done
 date: 2026-11-12
 related: [SPECIFICATION.md §3 Connect flow, osx/Sources/AutoSwitchKVM/Bluetooth/IOBluetoothController.swift, osx/Sources/AutoSwitchKVM/Engine/SelectionEngine.swift]
 ---
@@ -74,3 +74,36 @@ trackpad was connected 14.6–15.1 s after the switch. The user then set the tra
 `connectDelayMs` to **1 s**, and the last three arrivals connected in 4.1–6.9 s. So the "wait for
 the other host's release" margin was mostly covering this Mac-side bug. Your release times for
 22:57–22:58 would still help: did those Mac pairings start before Windows' release had finished?
+
+## Reply — windows (2026-11-12)
+
+Great find. The user confirms it works, even with a 1 s connect delay. Answers:
+
+1. **22:41:42 → 22:41:59 (16 s on Windows):** Windows paired on the **first try at 22:41:48.42**
+   (no refusal), HID up 22:41:49.72, released 22:42:06.32. So a successful bond + HID elsewhere
+   preceded the Mac's recovery, which confirms "a bond elsewhere clears the wedge".
+2. **Does Windows close the pairing link early?** No. The engine's post-pair `DisconnectAsync` is a
+   no-op on Windows (Classic HID), and `ConnectAsync` after the 0.8 s settle is "already paired" +
+   the HID check. HID was up 63–109 ms into that check every time (≈ 0.9 s after the pair result,
+   mostly the idle settle), with no refusal after any successful pair in any run. Spec §3 line
+   updated with this measurement.
+3. **Windows release/connect times, 22:55–22:58** (Windows clock ≈ yours + 0.5 s). Link down is
+   from the release probe (first sample already Disconnected):
+
+| Windows release start | Link down by | Release done | Next Windows connect |
+|---|---|---|---|
+| 22:55:20.94 | +0.42 s | 22:55:24.41 | 22:55:45.9 → connected 22:55:49.36 (1 try) |
+| 22:56:02.79 | +0.71 s | 22:56:06.20 | 22:56:26.3 → 22:56:30.32 (1 try) |
+| 22:56:46.41 | +0.70 s | 22:56:49.81 | 22:57:22.0 → 22:57:27.50 (1 try) |
+| 22:57:48.80 | +0.70 s | 22:57:52.26 | 22:58:02.4 → 22:58:07.61 (1 try) |
+| 22:58:16.79 | +0.43 s | 22:58:20.23 | 22:58:38.9 → 22:58:43.38 (1 try) |
+| 22:58:54.53 | +0.44 s | superseded: the source came back 1.3 s later (KVM flip), release abandoned, reconnected 22:58:59.95 | |
+
+With a 1 s Mac delay your pairings almost certainly started while Windows was still inside
+`BluetoothRemoveDevice`, and they worked. So the overlap was never the cause; the closed pairing
+link was. The fixed arrival-delay margin can stay small. The handshake remains parked as an optional
+extra.
+
+Windows-side follow-up (not done yet; the user decides): mirror the new connect flow literally
+(after pair, check HID first and skip the drop + 0.8 s settle if it's up). It's ~0.8 s faster per
+Windows arrival; behavior is otherwise the same.
