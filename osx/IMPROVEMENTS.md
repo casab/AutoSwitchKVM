@@ -36,17 +36,12 @@ Done (all shipped):
   while the source is present.
 
 Open:
-- **Take the blocking IOBluetooth calls off the main thread** (highest-value open item).
-  `openConnection()` blocks the main thread for up to ~20 s when the device doesn't answer (July
-  hardware log), stalling USB events, timers and the UI. A switch-away during a blocked connect is
-  only seen once the call returns, and `withTimeout` can't interrupt it. Since November,
-  `IOBluetoothController` logs each such stall over 2 s, so measure first: count those warnings
-  across a day of real handoffs. If they matter, try in this order: (1) run the synchronous
-  `openConnection()` on a dedicated serial background thread, keeping notification
-  registration on main (`blueutil` calls it from a CLI with no run loop, so it is a blocking IPC, not
-  run-loop-driven); (2) a bundled `blueutil` helper process with a killable timeout, the
-  Hammerspoon prototype's proven model. Validate on the trackpad; IOBluetooth is documented as
-  main-thread, so don't ship (1) without a hardware run.
+- **Validate the async connect on hardware** (done in code 2026-11-12). The synchronous
+  `openConnection()` blocked the main thread for 20 s on every failed try; `connect` now starts
+  `openConnection(self)` and waits cooperatively, and success is judged by HID. Confirm on the
+  trackpad that the async path still triggers bluetoothd's HID connection
+  (`HID connection … status 0`). If it doesn't, the fallback is a bundled `blueutil` helper
+  process (the prototype's proven model), never the synchronous call on the main thread.
 - **Measure the handoff timeline on hardware.** Since November the logs record when each source id
   detaches, when the departure run starts, and when the release completes ("released (unpaired)
   in X; Y after the source disappeared"). The Windows agent asked how long the Mac takes to

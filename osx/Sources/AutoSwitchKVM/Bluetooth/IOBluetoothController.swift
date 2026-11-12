@@ -10,9 +10,9 @@ import IOKit
 /// in a bundled blueutil behind this same protocol.
 ///
 /// All calls hop to the main actor — IOBluetooth expects a live run loop on the main thread.
-/// The synchronous calls (`openConnection`, `closeConnection`, `remove`) therefore block the main
-/// thread while they run (openConnection: up to ~20 s when the device doesn't answer). USB events,
-/// timers and the UI stall meanwhile; `blockingCall` logs a warning when that exceeds 2 s.
+/// Connecting is asynchronous (it used to block the main thread for up to 20 s). The remaining
+/// synchronous calls (`closeConnection`, `remove`) return at once; `blockingCall` logs a warning if
+/// one ever holds the main thread for more than 2 s.
 ///
 /// Logging: every raw call logs its outcome and duration here (category `bluetooth`); the engine
 /// logs its decisions (category `engine`). Result codes are decoded by `BTCode`.
@@ -109,42 +109,85 @@ final class IOBluetoothController: NSObject, BluetoothController {
         return false
     }
 
+    /// Async connection attempts started by `connect`, by normalized address: `.pending` until
+    /// `connectionComplete:status:` reports, then `.done(status)`.
+    private enum ConnectState { case pending, done(IOReturn) }
+    private var connectAttempts: [String: ConnectState] = [:]
+    /// How long `connect` waits for the link before failing. It never blocks the main thread.
+    private static let connectWait: Duration = .seconds(12)
+
     func connect(_ address: String) async throws {
+        let key = Self.normalize(address)
         let dev = try device(address)
-        // Deliberately NO early-return on isConnected(): in the managed (post-pair) flow the
-        // engine just dropped the transient link, and a lingering isConnected() there is exactly
-        // the link-only ACL state the clean reconnect exists to replace. The engine already
-        // pre-checks isConnected for the unmanaged path, so a redundant open is not the norm.
+        // Asynchronous open, then wait cooperatively. Until 2026-11-12 this used the synchronous
+        // openConnection(), whose result was the success signal (the async callback had proved
+        // unreliable on its own). On hardware that call held the main thread for 20 s on every
+        // failed try, ten times in one session. HID had already failed after 1.5 s, but USB
+        // switch-aways and the UI stalled meanwhile, delaying this Mac's release for the other host.
+        // Success is now judged by the engine's HID check (`isHIDReady`). Here the callback is only
+        // an early hint, and the link state is the fallback when the callback never fires.
         let wasConnected = dev.isConnected()
-        Log.bluetooth.log(
-            "openConnection \(address)…" + (wasConnected ? " (already connected; reopening for a clean connect)" : ""))
-        // Synchronous open: blocks until the connection is fully established (HID up) and returns a
-        // real result code. This is the reliable success signal — the async openConnection(_:)
-        // callback proved unreliable (it sometimes never fires even when the link comes up).
-        // NOTE: this call cannot observe task cancellation. `withTimeout` therefore abandons it on
-        // deadline, and the engine re-checks isConnected after a connect timeout so a late success
-        // isn't torn down as a failure.
-        let (rc, took) = blockingCall("openConnection", address) { dev.openConnection() }
+        let note = wasConnected ? " (already connected; reopening for a clean connect)" : ""
+        Log.bluetooth.log("openConnection \(address) (async)…\(note)")
+        let start = ContinuousClock.now
+        connectAttempts[key] = .pending
+        let rc = dev.openConnection(self)
         guard rc == kIOReturnSuccess else {
-            Log.bluetooth.warn("openConnection \(address) failed after \(Elapsed.format(took)): \(BTCode.describe(rc))")
+            connectAttempts[key] = nil
+            Log.bluetooth.warn("openConnection \(address) could not start: \(BTCode.describe(rc))")
             throw BTError.connectFailed(rc)
         }
-        Log.bluetooth.log("openConnection \(address) OK (\(Elapsed.format(took)))")
+        defer { if case .done = connectAttempts[key] { connectAttempts[key] = nil } }
+        while true {
+            if case .done(let status) = connectAttempts[key] {
+                guard status == kIOReturnSuccess else {
+                    Log.bluetooth.warn(
+                        "openConnection \(address) failed after \(Elapsed.since(start)): \(BTCode.describe(status))")
+                    throw BTError.connectFailed(status)
+                }
+                Log.bluetooth.log("openConnection \(address) OK (\(Elapsed.since(start)))")
+                return
+            }
+            if !wasConnected, dev.isConnected() {
+                Log.bluetooth.log("openConnection \(address): link up after \(Elapsed.since(start)) (callback pending)")
+                return
+            }
+            if start.duration(to: .now) > Self.connectWait {
+                Log.bluetooth.warn("openConnection \(address): no link after \(Elapsed.since(start)); giving up")
+                throw BTError.connectFailed(Int32(bitPattern: 0xE000_02D6))  // kIOReturnTimeout
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)  // throws when withTimeout cancels us
+        }
+    }
+
+    /// Completion of an async `openConnection(_:)` (IOBluetooth's informal target protocol).
+    @objc(connectionComplete:status:)
+    func connectionComplete(_ device: IOBluetoothDevice?, status: IOReturn) {
+        guard let raw = device?.addressString else { return }
+        let key = Self.normalize(raw)
+        guard connectAttempts[key] != nil else { return }
+        connectAttempts[key] = .done(status)
     }
 
     func disconnect(_ address: String) async throws {
+        let key = Self.normalize(address)
         let dev = try device(address)
-        guard dev.isConnected() else {
+        // A pending async open must be cancelled too, or the link can come up after a release.
+        var pending = false
+        if case .pending = connectAttempts[key] { pending = true }
+        guard dev.isConnected() || pending else {
             Log.bluetooth.log("closeConnection \(address): not connected, nothing to close")
             return
         }
+        connectAttempts[key] = nil
         let (rc, took) = blockingCall("closeConnection", address) { dev.closeConnection() }
-        guard rc == kIOReturnSuccess else {
+        guard rc == kIOReturnSuccess || (pending && !dev.isConnected()) else {
             Log.bluetooth.warn(
                 "closeConnection \(address) failed after \(Elapsed.format(took)): \(BTCode.describe(rc))")
             throw BTError.disconnectFailed(rc)
         }
-        Log.bluetooth.log("closeConnection \(address) OK (\(Elapsed.format(took)))")
+        let note = pending ? " (cancelled a pending connect)" : ""
+        Log.bluetooth.log("closeConnection \(address) OK (\(Elapsed.format(took)))\(note)")
     }
 
     func pair(_ address: String) async throws {

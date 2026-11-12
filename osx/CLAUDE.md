@@ -142,22 +142,25 @@ the new profile but does not force-disconnect the previous profile's devices.
 
 - **Source model = one vendor + a set of product IDs + a user-given name** (`USBSource`). The
   source editor enforces a single vendor. Don't reintroduce a multi-vendor model.
-- **`connect` uses the synchronous `IOBluetoothDevice.openConnection()` on purpose.** The async
-  `openConnection(_:)` callback (`connectionComplete:status:`) proved unreliable on the Magic
-  Trackpad — it sometimes never fired even when the ACL link came up, leaving a dead HID. The
-  synchronous call blocks until the connection is truly established and returns a real result code.
-  Don't switch it back to async. The engine treats only a clean (non-throwing) connect as success.
+- **`connect` is asynchronous: `openConnection(self)` plus a cooperative wait (since 2026-11-12).**
+  It used to call the synchronous `openConnection()` on purpose, because its result was the only
+  reliable success signal; the async `connectionComplete:status:` callback sometimes never fired on
+  the Magic Trackpad. On hardware, though, the sync call held the main thread for 20 s on every
+  failed try (10 times in one session, with HID already known to have failed after 1.5 s). That froze
+  the UI and delayed USB switch-away detection, so this Mac released the trackpad late. Success is
+  now the HID check (`isHIDReady`). The callback is only an early hint, the link state is the
+  fallback when it never fires, and `connect` gives up after 12 s. `disconnect` cancels a pending
+  async open. Don't go back to the synchronous call. Not yet validated on hardware: if connects
+  regress, compare `openConnection … (async)` lines with `bluetoothd`'s `HID connection` results.
 - **Native unpair uses the private `-[IOBluetoothDevice remove]` selector** (same as `blueutil`)
   via an IMP cast in `IOBluetoothController` — there is no public unpair API. Its return value is
   unreliable, so success is judged by re-checking `isPaired()`. Validated on a Magic Trackpad; if it
   ever breaks, the fallback is to bundle `blueutil` behind the `BluetoothController` protocol.
-- **The synchronous IOBluetooth calls block the main thread.** `openConnection()` took 20 s in a
-  July hardware log when the device didn't answer. Meanwhile USB events, debounce timers, the
-  status poll, and the UI all stall, so a switch-away during a blocked connect is only seen after
-  it returns. `withTimeout` cannot interrupt it either; the timeout is only observed when the call
-  returns. `IOBluetoothController` logs a warning whenever a call holds the main thread for over 2 s.
-  Moving these calls off the main thread is an open item in `IMPROVEMENTS.md`; it needs a hardware
-  run to validate, since IOBluetooth is documented as main-thread.
+- **Nothing may block the main thread for long.** IOBluetooth runs on the main actor, so a blocking
+  call stalls USB events, debounce timers, the poll and the UI. A switch-away is then only seen when
+  the call returns (seen on hardware: the departure was logged at the exact millisecond a 20 s
+  `openConnection` returned). `closeConnection` and `remove` return at once; `blockingCall` warns
+  above 2 s.
 - **Failure classification uses IOBluetooth result codes** (`BTCode` in `BluetoothErrors.swift`).
   IOBluetooth returns IOKit `IOReturn` values (`0xE00002xx`) or raw HCI error codes (small numbers,
   e.g. 4 = page timeout). On this Mac, the stale-bond case appears as `kIOReturnTimeout` from

@@ -55,11 +55,10 @@ private final class RaceOnce: @unchecked Sendable {
 /// completion is logged and discarded (the engine re-checks `isConnected` after a connect timeout,
 /// and the status poll reconciles any state a late call changed).
 ///
-/// LIMITATION (macOS): `IOBluetoothController` runs the synchronous calls (`openConnection`,
-/// `closeConnection`, `remove`) on the main actor, so while one blocks, the engine's continuation
-/// cannot run either: the timeout is only *observed* when the blocked call returns. Async calls
-/// (pairing) are genuinely bounded. `IOBluetoothController` logs a warning whenever a synchronous
-/// call held the main thread for more than 2 s, so this is visible in the log.
+/// On macOS every Bluetooth call is now cooperative or returns at once (connecting became
+/// asynchronous on 2026-11-12; it used to block the main thread for up to 20 s, which this
+/// timeout could not interrupt). `IOBluetoothController` still logs any synchronous call that holds
+/// the main thread for more than 2 s.
 func withTimeout<T: Sendable>(_ seconds: Int, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
     let once = RaceOnce()
     return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
