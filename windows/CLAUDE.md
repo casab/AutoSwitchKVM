@@ -115,12 +115,26 @@ testability):
     Per-device actions route through the engine. Fire-and-forget calls go through `Fire` (logs
     faults). Wires the engine's log to `Support/AppLogSink.cs`.
   - `Support/DebugLog.cs` — in-memory categorized log buffer (Diagnostics tab).
-  - `App.xaml(.cs)` — tray-only app via **H.NotifyIcon** with a **dynamic context menu** rebuilt from
-    AppController state on open (status, profiles, device rows, quick actions, Settings, Exit). The
-    rich-flyout-window approach was deliberately skipped (finicky/untestable blind); the menu covers
-    the same surface reliably.
-  - `SettingsWindow.xaml(.cs)` — profile bar + 5 tabs built in **code-behind** (avoids x:Bind compile surprises):
-    Source / Devices / General / Extras / Diagnostics. `RelayCommand.cs` is a minimal `ICommand`.
+  - `App.xaml(.cs)` — tray-only app via **H.NotifyIcon**. **Left-click** toggles the quick panel
+    (`TrayPanel`), **double-click** opens Settings, **right-click** shows the native popup menu
+    rebuilt from AppController state (status, profiles, devices, quick actions, Settings, Exit).
+    App.xaml holds the shared styles (page padding, section headers, pills, surface cards).
+  - **UI (Fluent / Windows 11 style, XAML + MVVM, CommunityToolkit.Mvvm + CommunityToolkit.WinUI
+    SettingsControls):**
+    - `ViewModels/AppViewModel.cs` (singleton: status, devices, profiles, every setting two-way into
+      the config via `AppController.Mutate`; `Refresh()` on `StateChanged` re-reads everything) and
+      `ViewModels/DeviceViewModel.cs` (status pill, actions, per-device settings).
+    - `SettingsWindow.xaml(.cs)` — Mica backdrop, custom title bar, `NavigationView` → `Views/`
+      `OverviewPage`, `DevicesPage`, `SourcePage`, `GeneralPage`, `DiagnosticsPage` (SettingsCard /
+      SettingsExpander rows, x:Bind). Dialogs (learn/pick/edit source, add device, shortcuts,
+      import/export, profiles) are in `Views/Dialogs.cs`.
+    - `TrayPanel.xaml(.cs)` — borderless, always-on-top acrylic window at the bottom-right of the work
+      area (quick-settings style): status, device toggles, profile, Pause / Connect all / Release
+      all. Hides on deactivate; sized from its content's laid-out height.
+    - **Preview mode for design work:** `AutoSwitchKVM.App.exe --ui-preview [--settings=<page>] [--panel]`
+      runs the UI against the real config with no engine/monitors and no writes, under its own
+      single-instance key, so it can run next to the real app (used for screenshots).
+  - `RelayCommand.cs` is a minimal `ICommand` for the tray menu items.
   - `Platform/PnpUsbMonitor.cs` — **implemented (Milestone 3)** via `System.Management`: Win32_PnPEntity
     enumeration + Win32_DeviceChangeEvent wakeups (debounced) + ~2s reconcile; emits on VID/PID-set
     change, marshaled to the captured SynchronizationContext.
@@ -218,6 +232,19 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   `MenuFlyout.Opening` never fires (rebuild the menu from `RightClickCommand` instead) and item
   selection executes the item's `ICommand` — `Click` handlers are never raised.
 - **Size the Settings window** via `AppWindow.Resize` - a WinUI `Window` opens very large by default.
+- **Run the app from its normal `bin\<platform>\<config>` output, not a `dotnet build -o <dir>` copy.**
+  From an `-o` folder every XAML window failed at `InitializeComponent` with a bare "XAML parsing
+  failed" (the resource index didn't resolve the compiled XAML). The Release folder is locked while
+  the tray app runs; build Debug for experiments.
+- **XAML diagnostics go to the app log** (`[xaml]`): App enables
+  `DebugSettings.XamlResourceReferenceFailed` / `BindingFailed` tracing.
+- **Don't call `Measure` on a window's root element**: it throws COMException 0x800F1000 ("No installed
+  components were detected"). TrayPanel puts its content one level below the root and sizes the
+  window from `SizeChanged`.
+- **An exception inside a `DispatcherQueue.TryEnqueue` callback bypasses `Application.UnhandledException`**
+  and kills the process (stowed exception in CoreMessagingXP/Microsoft.UI.Xaml). Wrap such callbacks.
+- **In a two-parameter lambda, a lone `_` is a real parameter, not a discard**:
+  `(_, e) => TryParse(x, out _)` tried to write into the sender. Name the parameters.
 - **WinRT pairing ignores cancellation.** Cancelling `Custom.PairAsync` (incl. via `AsTask(ct)`)
   does not stop the ceremony; it runs inside Windows until its own ~45-60 s timeout. Releasing the
   op lock on our timeout made every retry fail instantly with `OperationAlreadyInProgress` (64 in

@@ -24,6 +24,8 @@
          NOTE: H.NotifyIcon.WinUI 2.1.0 predates Windows App SDK 2.x — the pairing builds, but
          validate tray behavior on-device after any WindowsAppSDK bump, and bump the two together
          when a matching H.NotifyIcon release exists. -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
     <PackageReference Include="H.NotifyIcon.WinUI" Version="2.1.0" />
     <!-- WMI: Win32_PnPEntity enumeration + Win32_DeviceChangeEvent watch (PnpUsbMonitor). -->

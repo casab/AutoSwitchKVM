@@ -1,5 +1,6 @@
 using AutoSwitchKVM.App.Services;
 using AutoSwitchKVM.App.Support;
+using AutoSwitchKVM.App.ViewModels;
 using AutoSwitchKVM.Core;
 using H.NotifyIcon;
 using Microsoft.UI;
@@ -43,6 +44,12 @@ public partial class App : Application
             Log.Error("app", "unhandled exception", e.Exception);
             e.Handled = true;
         };
+        // XAML diagnostics into the app log: a missing resource key or a failed binding otherwise
+        // only shows as a generic "XAML parsing failed" or silently empty UI.
+        DebugSettings.IsXamlResourceReferenceTracingEnabled = true;
+        DebugSettings.XamlResourceReferenceFailed += (_, e) => Log.Warn("xaml", $"resource reference failed: {e.Message}");
+        DebugSettings.IsBindingTracingEnabled = true;
+        DebugSettings.BindingFailed += (_, e) => Log.Warn("xaml", $"binding failed: {e.Message}");
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
             Log.Error("app", "unobserved task exception", e.Exception);
@@ -55,7 +62,13 @@ public partial class App : Application
         // Single instance: two engines would fight over the radio, the devices, and the config
         // file. Redirect this activation to the existing instance (which reacts by showing
         // Settings) and bail out.
-        var mainInstance = AppInstance.FindOrRegisterForKey(InstanceKey);
+        // Developer preview (--ui-preview [--settings[=page]] [--panel]): the UI against the real
+        // config, but no engine/monitors and no writes, under its own instance key so it can run
+        // next to the real app (screenshots, design work).
+        var cmd = Environment.GetCommandLineArgs();
+        var preview = cmd.Contains("--ui-preview");
+
+        var mainInstance = AppInstance.FindOrRegisterForKey(preview ? InstanceKey + "-preview" : InstanceKey);
         if (!mainInstance.IsCurrent)
         {
             Log.Info("app", "another instance is already running; redirecting activation and exiting");
@@ -74,8 +87,18 @@ public partial class App : Application
         mainInstance.Activated += (_, _) => _dispatcher?.TryEnqueue(ShowSettings);
 
         _dispatcher = DispatcherQueue.GetForCurrentThread();
-        Controller = new AppController();
-        Controller.Start();
+        Controller = new AppController(preview);
+        if (!preview) Controller.Start();
+        AppViewModel.Initialize(Controller);
+
+        if (preview)
+        {
+            Log.Info("app", "UI preview mode: engine not started, nothing is saved");
+            var page = cmd.FirstOrDefault(a => a.StartsWith("--settings"))?.Split('=').ElementAtOrDefault(1);
+            if (cmd.Any(a => a.StartsWith("--settings"))) ShowSettings(page ?? "overview");
+            if (cmd.Contains("--panel")) Panel.ShowPanel();
+            return;
+        }
 
         _currentIconAsset = Controller.TrayIconAsset;
         _trayIcon = new TaskbarIcon
@@ -93,7 +116,8 @@ public partial class App : Application
         // case the context-menu mode ever changes.
         menu.Opening += (_, _) => BuildTrayMenu(menu);
         _trayIcon.ContextFlyout = menu;
-        _trayIcon.LeftClickCommand = new RelayCommand(ShowSettings);
+        // Left-click: the quick panel; double-click: Settings. (Right-click keeps the native menu.)
+        _trayIcon.LeftClickCommand = new RelayCommand(() => Panel.Toggle());
         _trayIcon.DoubleClickCommand = new RelayCommand(ShowSettings);
         _trayIcon.RightClickCommand = new RelayCommand(() => BuildTrayMenu(menu));
         BuildTrayMenu(menu);   // populate up front so the popup has items on first open
@@ -203,15 +227,33 @@ public partial class App : Application
         return image;
     }
 
-    private void ShowSettings()
+    private void ShowSettings() => ShowSettings(null);
+
+    private void ShowSettings(string? page)
     {
         if (_settingsWindow is null)
         {
             _settingsWindow = new SettingsWindow();
             _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         }
+        if (page is not null) _settingsWindow.Navigate(page);
         _settingsWindow.Activate();
     }
+
+    /// The tray quick panel, created on first use and then shown/hidden.
+    private TrayPanel Panel
+    {
+        get
+        {
+            if (_panel is null)
+            {
+                _panel = new TrayPanel();
+                _panel.SettingsRequested += ShowSettings;
+            }
+            return _panel;
+        }
+    }
+    private TrayPanel? _panel;
 
     private void ExitApp()
     {

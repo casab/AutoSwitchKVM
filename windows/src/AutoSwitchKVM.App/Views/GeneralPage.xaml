@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="AutoSwitchKVM.App.Views.GeneralPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <ScrollViewer>
+        <StackPanel MaxWidth="{StaticResource PageMaxWidth}" Padding="{StaticResource PagePadding}"
+                    Spacing="{StaticResource SettingsCardSpacing}">
+
+            <TextBlock Text="General" Style="{StaticResource PageTitleStyle}" />
+
+            <!-- Behavior -->
+            <TextBlock Text="Behavior" Style="{StaticResource SectionHeaderStyle}" Margin="1,0,0,6" />
+            <toolkit:SettingsCard Header="Start with Windows" Description="Run AutoSwitch in the notification area when you sign in.">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE7E8;" /></toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch IsOn="{x:Bind ViewModel.LaunchAtLogin, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+            <toolkit:SettingsCard Header="Pause automation" Description="Ignore KVM switches until you resume.">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE769;" /></toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch IsOn="{x:Bind ViewModel.IsPaused, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+            <toolkit:SettingsCard Header="Reconnect after a drop"
+                                  Description="If a device disconnects on its own while the KVM is on this PC, try once to bring it back.">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE72C;" /></toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch IsOn="{x:Bind ViewModel.AutoReconnectOnDrop, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+            <toolkit:SettingsExpander Header="Notifications" Description="Show a notification when devices connect, disconnect or fail.">
+                <toolkit:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xEA8F;" /></toolkit:SettingsExpander.HeaderIcon>
+                <ToggleSwitch IsOn="{x:Bind ViewModel.ShowNotifications, Mode=TwoWay}" />
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard Header="Unexpected disconnects" Description="Also notify when a device drops while the KVM is on this PC.">
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.NotifyUnexpectedDisconnect, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <!-- Profiles -->
+            <TextBlock Text="Profiles" Style="{StaticResource SectionHeaderStyle}" />
+            <toolkit:SettingsCard Header="Active profile" Description="Each profile has its own KVM source and devices. Timing and other options are shared.">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE77B;" /></toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ComboBox MinWidth="200" ItemsSource="{x:Bind ViewModel.Profiles}"
+                              SelectedItem="{x:Bind ViewModel.SelectedProfile, Mode=TwoWay}" />
+                    <Button ToolTipService.ToolTip="Profile actions">
+                        <FontIcon Glyph="&#xE712;" FontSize="14" />
+                        <Button.Flyout>
+                            <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                <MenuFlyoutItem Text="New profile" Click="OnAddProfile">
+                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE710;" /></MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutItem Text="Rename…" Click="OnRenameProfile">
+                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8AC;" /></MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="Delete…" Click="OnDeleteProfile" IsEnabled="{x:Bind ViewModel.CanDeleteProfile, Mode=OneWay}">
+                                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE74D;" /></MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                            </MenuFlyout>
+                        </Button.Flyout>
+                    </Button>
+                </StackPanel>
+            </toolkit:SettingsCard>
+
+            <!-- Shortcuts -->
+            <TextBlock Text="Keyboard shortcuts" Style="{StaticResource SectionHeaderStyle}" />
+            <toolkit:SettingsExpander Header="Global shortcuts" Description="Control AutoSwitch from any app.">
+                <toolkit:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE765;" /></toolkit:SettingsExpander.HeaderIcon>
+                <ToggleSwitch IsOn="{x:Bind ViewModel.GlobalHotkeysEnabled, Mode=TwoWay}" />
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard Header="Pause or resume">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Style="{StaticResource PillBorderStyle}" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                                <TextBlock Text="{x:Bind ViewModel.PauseShortcut, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </Border>
+                            <Button Content="Change" Click="OnRecordPause" />
+                            <Button Content="Clear" Click="OnClearPause" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard Header="Connect all">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Style="{StaticResource PillBorderStyle}" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                                <TextBlock Text="{x:Bind ViewModel.ConnectAllShortcut, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </Border>
+                            <Button Content="Change" Click="OnRecordConnect" />
+                            <Button Content="Clear" Click="OnClearConnect" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard Header="Release all">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Style="{StaticResource PillBorderStyle}" Background="{ThemeResource ControlFillColorSecondaryBrush}">
+                                <TextBlock Text="{x:Bind ViewModel.DisconnectAllShortcut, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </Border>
+                            <Button Content="Change" Click="OnRecordDisconnect" />
+                            <Button Content="Clear" Click="OnClearDisconnect" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard Header="Restore defaults" Description="Ctrl+Alt+P, Ctrl+Alt+C, Ctrl+Alt+D">
+                        <Button Content="Restore" Click="OnRestoreShortcuts" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <!-- Advanced -->
+            <TextBlock Text="Advanced" Style="{StaticResource SectionHeaderStyle}" />
+            <toolkit:SettingsExpander Header="Timing" Description="How long to wait for the KVM to settle, and between handoffs.">
+                <toolkit:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE916;" /></toolkit:SettingsExpander.HeaderIcon>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard Header="Wait after switching to this PC" Description="Milliseconds before connecting.">
+                        <NumberBox Value="{x:Bind ViewModel.ArrivalDebounceMs, Mode=TwoWay}" Minimum="0" Maximum="10000"
+                                   SmallChange="100" LargeChange="500" MinWidth="140" SpinButtonPlacementMode="Compact" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard Header="Wait after switching away" Description="Milliseconds before releasing. Guards against brief USB blips.">
+                        <NumberBox Value="{x:Bind ViewModel.DebounceMs, Mode=TwoWay}" Minimum="0" Maximum="10000"
+                                   SmallChange="100" LargeChange="500" MinWidth="140" SpinButtonPlacementMode="Compact" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard Header="Pause after unpair before re-pairing"
+                                          Description="Milliseconds. Only applies when you switch back within a few seconds. Lower is faster; 0 turns it off.">
+                        <NumberBox Value="{x:Bind ViewModel.PostUnpairSettleMs, Mode=TwoWay}" Minimum="0" Maximum="5000"
+                                   SmallChange="100" LargeChange="500" MinWidth="140" SpinButtonPlacementMode="Compact" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+            <toolkit:SettingsExpander Header="Retries" Description="How hard to try when a device doesn't connect.">
+                <toolkit:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE895;" /></toolkit:SettingsExpander.HeaderIcon>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard Header="Attempts" Description="Failed attempts before giving up.">
+                        <NumberBox Value="{x:Bind ViewModel.ConnectRetryMax, Mode=TwoWay}" Minimum="1" Maximum="20"
+                                   SmallChange="1" MinWidth="140" SpinButtonPlacementMode="Compact" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard Header="First retry after" Description="Seconds; doubles after each failure, up to 30 s.">
+                        <NumberBox Value="{x:Bind ViewModel.ConnectRetrySecs, Mode=TwoWay}" Minimum="1" Maximum="30"
+                                   SmallChange="1" MinWidth="140" SpinButtonPlacementMode="Compact" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard Header="Bluetooth call timeout" Description="Seconds before a single Bluetooth operation counts as failed.">
+                        <NumberBox Value="{x:Bind ViewModel.BtCallTimeoutSecs, Mode=TwoWay}" Minimum="5" Maximum="120"
+                                   SmallChange="5" MinWidth="140" SpinButtonPlacementMode="Compact" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <!-- Configuration -->
+            <TextBlock Text="Configuration" Style="{StaticResource SectionHeaderStyle}" />
+            <toolkit:SettingsCard Header="Back up or restore settings" Description="{x:Bind ViewModel.ConfigPath}">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE8B7;" /></toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Export…" Click="OnExport" />
+                    <Button Content="Import…" Click="OnImport" />
+                </StackPanel>
+            </toolkit:SettingsCard>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

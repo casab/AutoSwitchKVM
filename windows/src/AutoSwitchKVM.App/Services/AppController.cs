@@ -29,8 +29,14 @@ public sealed class AppController
     /// Raised (on the UI thread) whenever state the UI shows may have changed.
     public event Action? StateChanged;
 
-    public AppController()
+    /// Preview mode (developer: `--ui-preview`): the UI runs against the real config, but nothing is
+    /// started (no USB/Bluetooth/power/hotkeys) and nothing is written, so it can run next to the
+    /// real app (e.g. for screenshots) without touching the devices or the settings.
+    public bool IsPreview { get; }
+
+    public AppController(bool preview = false)
     {
+        IsPreview = preview;
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _usb = new PnpUsbMonitor(_dispatcher);   // marshal callbacks onto the UI thread
         _bt = new WinRtBluetooth(_dispatcher);
@@ -120,7 +126,7 @@ public sealed class AppController
         _toasts.Unregister();
         _usb.Stop();
         _bt.StopMonitoring();
-        _store.Save(Config);
+        if (!IsPreview) _store.Save(Config);
     }
 
     // ---- System integration ----
@@ -227,7 +233,7 @@ public sealed class AppController
     {
         Config.LaunchAtLogin = enabled;
         Save();
-        LoginItem.SetEnabled(enabled);
+        if (!IsPreview) LoginItem.SetEnabled(enabled);
         StateChanged?.Invoke();
     }
 
@@ -384,7 +390,7 @@ public sealed class AppController
     {
         Config = config.Normalized();
         Engine.Config = Config;
-        _store.Save(Config);
+        if (!IsPreview) _store.Save(Config);
         Engine.RefreshMonitoring();
         ApplyHotkeys();
         LoginItem.SetEnabled(Config.LaunchAtLogin);
@@ -392,7 +398,10 @@ public sealed class AppController
         StateChanged?.Invoke();
     }
 
-    public void Save() => _store.SaveDebounced(Config);
+    public void Save()
+    {
+        if (!IsPreview) _store.SaveDebounced(Config);
+    }
 
     public string ConfigPath => _store.Path;
 }

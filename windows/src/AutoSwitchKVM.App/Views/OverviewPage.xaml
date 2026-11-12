@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="AutoSwitchKVM.App.Views.OverviewPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
+    xmlns:vm="using:AutoSwitchKVM.App.ViewModels">
+
+    <ScrollViewer>
+        <StackPanel MaxWidth="{StaticResource PageMaxWidth}" Padding="{StaticResource PagePadding}"
+                    Spacing="{StaticResource SettingsCardSpacing}">
+
+            <TextBlock Text="Overview" Style="{StaticResource PageTitleStyle}" />
+
+            <!-- Hero status -->
+            <Border Style="{StaticResource SurfaceCardStyle}" Padding="24">
+                <Grid ColumnSpacing="20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Width="64" Height="64" CornerRadius="32" VerticalAlignment="Center"
+                            Background="{x:Bind ViewModel.StatusBackground, Mode=OneWay}">
+                        <FontIcon Glyph="{x:Bind ViewModel.StatusGlyph, Mode=OneWay}" FontSize="28"
+                                  Foreground="{x:Bind ViewModel.StatusForeground, Mode=OneWay}" />
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                        <TextBlock Text="{x:Bind ViewModel.StatusTitle, Mode=OneWay}" Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock Text="{x:Bind ViewModel.StatusDetail, Mode=OneWay}" Style="{StaticResource SecondaryTextStyle}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                        <Button Click="{x:Bind ViewModel.ConnectAll}" Style="{StaticResource AccentButtonStyle}"
+                                ToolTipService.ToolTip="Connect every device now, whichever computer the KVM is on">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE71B;" FontSize="14" />
+                                <TextBlock Text="Connect all" />
+                            </StackPanel>
+                        </Button>
+                        <Button Click="{x:Bind ViewModel.DisconnectAll}"
+                                ToolTipService.ToolTip="Release every device so the other computer can take it">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE8CD;" FontSize="14" />
+                                <TextBlock Text="Release all" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- First-run guidance -->
+            <InfoBar Margin="0,8,0,0" Severity="Informational" IsClosable="False" IsOpen="True"
+                     Visibility="{x:Bind ViewModel.NoSource, Mode=OneWay}"
+                     Title="Set up your KVM"
+                     Message="Teach AutoSwitch which USB device appears when the KVM switches to this PC.">
+                <InfoBar.ActionButton>
+                    <Button Content="Set up source" Click="OnOpenSource" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+            <InfoBar Margin="0,8,0,0" Severity="Informational" IsClosable="False" IsOpen="True"
+                     Visibility="{x:Bind ViewModel.NoDevices, Mode=OneWay}"
+                     Title="Add a device"
+                     Message="Add the Bluetooth trackpad or keyboard you want to follow the KVM.">
+                <InfoBar.ActionButton>
+                    <Button Content="Add device" Click="OnOpenDevices" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+
+            <!-- Devices -->
+            <TextBlock Text="Devices" Style="{StaticResource SectionHeaderStyle}"
+                       Visibility="{x:Bind ViewModel.HasDevices, Mode=OneWay}" />
+            <ItemsRepeater ItemsSource="{x:Bind ViewModel.Devices}">
+                <ItemsRepeater.Layout>
+                    <StackLayout Spacing="{StaticResource SettingsCardSpacing}" />
+                </ItemsRepeater.Layout>
+                <ItemsRepeater.ItemTemplate>
+                    <DataTemplate x:DataType="vm:DeviceViewModel">
+                        <toolkit:SettingsCard Header="{x:Bind Name, Mode=OneWay}" Description="{x:Bind Detail, Mode=OneWay}">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xEFA5;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                <ProgressRing Width="16" Height="16" IsActive="{x:Bind IsBusy, Mode=OneWay}"
+                                              Visibility="{x:Bind BusyVisibility, Mode=OneWay}" />
+                                <Border Style="{StaticResource PillBorderStyle}" Background="{x:Bind PillBackground, Mode=OneWay}">
+                                    <TextBlock Text="{x:Bind StatusText, Mode=OneWay}" Foreground="{x:Bind PillForeground, Mode=OneWay}"
+                                               Style="{StaticResource CaptionTextBlockStyle}" FontWeight="SemiBold" />
+                                </Border>
+                                <Button Content="{x:Bind PrimaryActionText, Mode=OneWay}" Click="{x:Bind PrimaryAction}"
+                                        IsEnabled="{x:Bind IsNotBusy, Mode=OneWay}" MinWidth="108" />
+                            </StackPanel>
+                        </toolkit:SettingsCard>
+                    </DataTemplate>
+                </ItemsRepeater.ItemTemplate>
+            </ItemsRepeater>
+
+            <!-- Automation -->
+            <TextBlock Text="Automation" Style="{StaticResource SectionHeaderStyle}" />
+            <toolkit:SettingsCard Header="Pause automation"
+                                  Description="Ignore KVM switches until you resume. Connect and release buttons still work.">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE769;" /></toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch IsOn="{x:Bind ViewModel.IsPaused, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+            <toolkit:SettingsCard Header="KVM source" Description="{x:Bind ViewModel.SourceIds, Mode=OneWay}"
+                                  IsClickEnabled="True" Click="OnOpenSource">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE88E;" /></toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Spacing="2" HorizontalAlignment="Right">
+                    <TextBlock Text="{x:Bind ViewModel.SourceName, Mode=OneWay}" HorizontalAlignment="Right" />
+                    <TextBlock Text="{x:Bind ViewModel.SourcePresence, Mode=OneWay}" HorizontalAlignment="Right"
+                               Style="{StaticResource CaptionTextBlockStyle}" Foreground="{x:Bind ViewModel.SourcePresenceBrush, Mode=OneWay}" />
+                </StackPanel>
+            </toolkit:SettingsCard>
+            <toolkit:SettingsCard Header="Profile" Description="A profile is a KVM source plus the devices that follow it."
+                                  Visibility="{x:Bind ViewModel.HasMultipleProfiles, Mode=OneWay}">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE77B;" /></toolkit:SettingsCard.HeaderIcon>
+                <ComboBox MinWidth="200" ItemsSource="{x:Bind ViewModel.Profiles}"
+                          SelectedItem="{x:Bind ViewModel.SelectedProfile, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

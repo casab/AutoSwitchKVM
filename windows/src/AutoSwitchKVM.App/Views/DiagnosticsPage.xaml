@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="AutoSwitchKVM.App.Views.DiagnosticsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <ScrollViewer>
+        <StackPanel MaxWidth="{StaticResource PageMaxWidth}" Padding="{StaticResource PagePadding}"
+                    Spacing="{StaticResource SettingsCardSpacing}">
+
+            <TextBlock Text="Diagnostics" Style="{StaticResource PageTitleStyle}" />
+
+            <TextBlock Text="Live state" Style="{StaticResource SectionHeaderStyle}" Margin="1,0,0,6" />
+            <toolkit:SettingsCard Header="Bluetooth" Description="The Bluetooth radio of this PC.">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE702;" /></toolkit:SettingsCard.HeaderIcon>
+                <TextBlock Text="{x:Bind ViewModel.BluetoothText, Mode=OneWay}" />
+            </toolkit:SettingsCard>
+            <toolkit:SettingsCard Header="KVM on this PC" Description="Whether the KVM source is connected right now.">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE7F4;" /></toolkit:SettingsCard.HeaderIcon>
+                <TextBlock Text="{x:Bind ViewModel.SelectedText, Mode=OneWay}" />
+            </toolkit:SettingsCard>
+            <toolkit:SettingsExpander Header="Matching USB devices" Description="Connected devices that match the KVM source.">
+                <toolkit:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE88E;" /></toolkit:SettingsExpander.HeaderIcon>
+                <Button Content="Refresh" Click="OnRefreshUsb" />
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard ContentAlignment="Left">
+                        <TextBlock x:Name="UsbText" Text="{x:Bind ViewModel.MatchingUsbText, Mode=OneWay}"
+                                   FontFamily="Cascadia Mono, Consolas" IsTextSelectionEnabled="True" TextWrapping="Wrap" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <Grid Margin="1,28,0,6">
+                <TextBlock Text="Activity log" Style="{StaticResource BodyStrongTextBlockStyle}" VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                    <Button Click="OnCopyLog" ToolTipService.ToolTip="Copy the log">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE8C8;" FontSize="14" />
+                            <TextBlock Text="Copy" />
+                        </StackPanel>
+                    </Button>
+                    <Button Click="OnOpenLogFolder" ToolTipService.ToolTip="Open the folder with the daily log files">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE838;" FontSize="14" />
+                            <TextBlock Text="Open folder" />
+                        </StackPanel>
+                    </Button>
+                    <Button Click="OnClearLog" ToolTipService.ToolTip="Clear this view (the log files are kept)">
+                        <FontIcon Glyph="&#xE74D;" FontSize="14" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+            <Border Style="{StaticResource SurfaceCardStyle}" Padding="0">
+                <TextBox x:Name="LogBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap"
+                         FontFamily="Cascadia Mono, Consolas" FontSize="12" Height="380" BorderThickness="0"
+                         Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto" />
+            </Border>
+            <TextBlock Style="{StaticResource SecondaryTextStyle}" Margin="1,8,0,0" FontSize="12"
+                       Text="{x:Bind LogHint}" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>
