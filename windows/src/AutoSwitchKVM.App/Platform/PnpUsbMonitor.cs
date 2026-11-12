@@ -158,16 +158,44 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
         var end = Stopwatch.GetTimestamp();
 
         var signature = new HashSet<uint>(snapshot.Select(d => ((uint)d.VendorID << 16) | d.ProductID));
+        Dictionary<string, UsbDeviceInfo> previous;
         lock (_gate)
         {
             if (signature.SetEquals(_lastSignature)) return;
             _lastSignature = signature;
+            previous = _lastDevices;
+            _lastDevices = snapshot.Where(d => d.InstanceId is not null)
+                .GroupBy(d => d.InstanceId!).ToDictionary(g => g.Key, g => g.First());
         }
         var burst = Interlocked.Read(ref _burstStartTicks);
         var sinceBurst = burst == 0 ? "" : $", {ElapsedMs(burst, end)} ms after the burst started";
         Log.Info("usb", $"snapshot changed: {snapshot.Count} USB device(s) " +
             $"(via {trigger}, enumerate {ElapsedMs(start, end)} ms{sinceBurst})");
+        if (previous.Count > 0) LogDiff(previous, _lastDevices);
         Emit(snapshot);
+    }
+
+    // Which devices left/arrived in each change: shows the order in which the KVM drops and adds
+    // devices, i.e. whether something leaves earlier than the configured source (a candidate for a
+    // faster departure signal). Logged per VID:PID with a count, so the line stays short.
+    private Dictionary<string, UsbDeviceInfo> _lastDevices = new();
+
+    private static void LogDiff(Dictionary<string, UsbDeviceInfo> before, Dictionary<string, UsbDeviceInfo> after)
+    {
+        static string Describe(IEnumerable<UsbDeviceInfo> devices) => string.Join(", ",
+            devices.GroupBy(d => (d.VendorID, d.ProductID))
+                .OrderBy(g => g.Key.VendorID).ThenBy(g => g.Key.ProductID)
+                .Select(g =>
+                {
+                    var name = g.Select(d => d.Name).FirstOrDefault(n => !string.IsNullOrEmpty(n)) ?? "?";
+                    var count = g.Count() > 1 ? $" x{g.Count()}" : "";
+                    return $"{g.Key.VendorID:X4}:{g.Key.ProductID:X4} '{name}'{count}";
+                }));
+
+        var left = before.Where(kv => !after.ContainsKey(kv.Key)).Select(kv => kv.Value).ToList();
+        var arrived = after.Where(kv => !before.ContainsKey(kv.Key)).Select(kv => kv.Value).ToList();
+        if (left.Count > 0) Log.Info("usb", $"  left ({left.Count}): {Describe(left)}");
+        if (arrived.Count > 0) Log.Info("usb", $"  arrived ({arrived.Count}): {Describe(arrived)}");
     }
 
     private static long ElapsedMs(long fromTicks, long toTicks) =>

@@ -472,6 +472,7 @@ public sealed class WinRtBluetooth : IBluetoothController
         // Synchronous and slow (~3.4 s on hardware: it waits for the link teardown). Run it off
         // the calling thread — the engine calls from the UI thread, which would freeze the tray
         // and keep the engine's per-call timeout from firing.
+        StartReleaseProbe(address, addr);
         uint? rc = null;
         try
         {
@@ -519,6 +520,62 @@ public sealed class WinRtBluetooth : IBluetoothController
 
         // The unpair destroyed the device record; drop (and later re-create) its subscription.
         RearmMonitoring(address);
+    }
+
+    // ---- Release probe (diagnostic) ----
+    //
+    // 2026-11-12, second joint run: every time the Mac paired the trackpad *during* Windows' ~3.4 s
+    // BluetoothRemoveDevice (even 0.2 s before it returned), the trackpad then refused the Mac's
+    // HID connection until reset. What the trackpad sees during those 3.4 s is unknown: when does
+    // the link actually drop, does it reconnect to Windows (it retries its last host after a
+    // release), when do the HID nodes go? The probe samples Windows' view every ~150 ms for 10 s
+    // from the start of a release and logs each change with its offset, to line up against the
+    // Mac's bluetoothd log. Read-only; no effect on behavior.
+
+    private CancellationTokenSource? _probeCts;
+    private const int ReleaseProbeMs = 10_000;
+
+    private void StartReleaseProbe(string address, ulong addr)
+    {
+        var cts = new CancellationTokenSource(ReleaseProbeMs);
+        Interlocked.Exchange(ref _probeCts, cts)?.Cancel();
+        _ = ReleaseProbeAsync(address, addr, Digits(address), cts.Token);
+    }
+
+    private static async Task ReleaseProbeAsync(string address, ulong addr, string digits, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        string? last = null;
+        HidState hid = default;
+        var iteration = 0;
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                string state;
+                try
+                {
+                    if (iteration++ % 3 == 0)   // WMI is slower; sample HID every third tick
+                        hid = await Task.Run(() => QueryHidState(digits), ct);
+                    using var dev = await BluetoothDevice.FromBluetoothAddressAsync(addr).AsTask(ct);
+                    var link = dev is null ? "no-record" : dev.ConnectionStatus.ToString();
+                    var paired = dev is null ? "-" : dev.DeviceInformation.Pairing.IsPaired.ToString();
+                    var hidText = !hid.ServicePresent ? "gone" : hid.Ready ? "up" : $"partial({hid})";
+                    state = $"link={link} paired={paired} hid={hidText}";
+                }
+                catch (OperationCanceledException) { break; }
+                catch (Exception ex) { state = $"query failed: {ex.Message}"; }
+
+                if (state != last)
+                {
+                    Log.Info("bt", $"release probe {address} +{sw.ElapsedMilliseconds} ms: {state}");
+                    last = state;
+                }
+                await Task.Delay(150, ct);
+            }
+        }
+        catch (OperationCanceledException) { /* probe window over */ }
+        Log.Info("bt", $"release probe {address}: ended at +{sw.ElapsedMilliseconds} ms (last: {last})");
     }
 
     /// Map a WinRT pairing result to the engine's retry policy (see BluetoothFailureKind).
