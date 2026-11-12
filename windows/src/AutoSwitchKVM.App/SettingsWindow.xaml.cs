@@ -35,7 +35,7 @@ public sealed partial class SettingsWindow : Window
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        try { AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "tray.ico")); }
+        try { AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico")); }
         catch { /* icon is cosmetic */ }
 
         try

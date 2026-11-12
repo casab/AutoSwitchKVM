@@ -44,12 +44,14 @@ public partial class App : Application
             Log.Error("app", "unhandled exception", e.Exception);
             e.Handled = true;
         };
-        // XAML diagnostics into the app log: a missing resource key or a failed binding otherwise
-        // only shows as a generic "XAML parsing failed" or silently empty UI.
+#if DEBUG
+        // XAML diagnostics into the app log (debug builds): a missing resource key or a failed
+        // binding otherwise only shows as a generic "XAML parsing failed" or silently empty UI.
         DebugSettings.IsXamlResourceReferenceTracingEnabled = true;
         DebugSettings.XamlResourceReferenceFailed += (_, e) => Log.Warn("xaml", $"resource reference failed: {e.Message}");
         DebugSettings.IsBindingTracingEnabled = true;
         DebugSettings.BindingFailed += (_, e) => Log.Debug("xaml", $"binding failed: {e.Message}");
+#endif
         TaskScheduler.UnobservedTaskException += (_, e) =>
         {
             Log.Error("app", "unobserved task exception", e.Exception);
@@ -66,7 +68,11 @@ public partial class App : Application
         // config, but no engine/monitors and no writes, under its own instance key so it can run
         // next to the real app (screenshots, design work).
         var cmd = Environment.GetCommandLineArgs();
+#if DEBUG
         var preview = cmd.Contains("--ui-preview");
+#else
+        var preview = false;   // developer preview is debug-build-only (not const: CS0162)
+#endif
 
         var mainInstance = AppInstance.FindOrRegisterForKey(preview ? InstanceKey + "-preview" : InstanceKey);
         if (!mainInstance.IsCurrent)
@@ -101,6 +107,19 @@ public partial class App : Application
             return;
         }
 
+        Updates = new UpdateService();
+        Updates.Changed += () => _dispatcher?.TryEnqueue(() =>
+        {
+            UpdateTrayIcon();
+            AppViewModel.Instance.Refresh();   // About & updates in Settings
+        });
+        Updates.UpdateReady += version =>
+        {
+            if (Controller.Config.ShowNotifications)
+                Controller.Notify("Update ready", $"AutoSwitch KVM {version} is downloaded. Restart it from the tray menu or Settings.");
+        };
+        Updates.Start();
+
         _currentIconAsset = Controller.TrayIconAsset;
         _trayIcon = new TaskbarIcon
         {
@@ -126,6 +145,23 @@ public partial class App : Application
 
         // Swap the tray icon (and tooltip) to match state changes (active / inactive / paused / off).
         Controller.StateChanged += () => _dispatcher?.TryEnqueue(UpdateTrayIcon);
+
+        // First launch after installing: open Settings so setup (source, devices) is right there.
+        if (Program.IsFirstRun) ShowSettings("overview");
+    }
+
+    /// Automatic updates (Velopack). Null in preview mode.
+    public static UpdateService? Updates { get; private set; }
+
+    /// Save, stop, and restart into the downloaded update.
+    public void RestartForUpdate()
+    {
+        if (Updates is not { State: UpdateState.ReadyToRestart }) return;
+        Updates.Stop();
+        Controller.Shutdown("restarting to update");
+        _trayIcon?.Dispose();
+        _trayIcon = null;
+        Updates.ApplyAndRestart();   // exits the process
     }
 
     private void UpdateTrayIcon()
@@ -200,6 +236,14 @@ public partial class App : Application
 
         menu.Items.Add(new MenuFlyoutSeparator());
 
+        if (Updates is { State: UpdateState.ReadyToRestart } u)
+        {
+            menu.Items.Add(new MenuFlyoutItem
+            {
+                Text = $"Restart to update to {u.AvailableVersion}",
+                Command = new RelayCommand(RestartForUpdate),
+            });
+        }
         menu.Items.Add(new MenuFlyoutItem
         {
             Text = "Settings...",
@@ -258,6 +302,7 @@ public partial class App : Application
 
     private void ExitApp()
     {
+        Updates?.Stop();
         Controller.Shutdown();
         _trayIcon?.Dispose();
         _trayIcon = null;

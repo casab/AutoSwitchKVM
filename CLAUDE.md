@@ -26,6 +26,9 @@ This is a **monorepo organized by platform**:
 - `agent-notes/` — **cross-agent handoff** (see below).
 - `.github/` — CI: macOS job (`swift build`/`swift test` + blocking lint) and a Windows job
   (`dotnet test` on `AutoSwitchKVM.Core.Tests` + WinUI app build).
+  `windows-release.yml`: a `v*` tag builds and publishes the Windows installer/update packages
+  (Velopack) as a GitHub release. The tag namespace is shared; macOS release assets can join the
+  same release later.
 
 ## Where to work
 

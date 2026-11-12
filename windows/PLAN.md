@@ -11,7 +11,7 @@ in `../osx/` is the reference engine implementation.
 | Language / UI | **C# / .NET 8 + WinUI 3** |
 | Bluetooth pairing | **Native WinRT** (`Windows.Devices.Enumeration` `DeviceInformation.Pairing`) |
 | Min OS | **Windows 10 1809+ and 11** (use Win11-only APIs only if nothing equivalent on 10) |
-| Distribution | **Unpackaged `.exe`** + run-at-login |
+| Distribution | **Unpackaged, self-contained**, installed and auto-updated by **Velopack** from GitHub Releases + run-at-login |
 
 ## Solution structure
 
@@ -155,8 +155,11 @@ blocking lint jobs). Runtime Bluetooth/USB behavior is still validated on-device
    verification (and will not show for elevated/admin runs).
 7. **Diagnostics + logging. [DONE]** `DebugLog` buffer + the Diagnostics tab (live USB/BT state,
    per-device status, debug log with copy/clear) landed with Milestone 5.
-8. **Distribution (later).** Code-sign the unpackaged `.exe`; optional MSIX; CI now builds the
-   WinUI app, but release packaging/signing is still future work.
+8. **Distribution. [DONE, unsigned]** Velopack (2026-11-13): self-contained publish (.NET + Windows
+   App SDK bundled), per-user installer, background updates from GitHub Releases (Settings ▸ General
+   ▸ About, tray menu "Restart to update", a notification). x64 channel `win`, ARM64 channel
+   `win-arm64` (built, not tested on hardware). `tools/release.ps1` + `.github/workflows/windows-release.yml`
+   on a `v*` tag. Still to do: code signing (SmartScreen warns until then).
 
 ## Milestone 0 — spike findings
 

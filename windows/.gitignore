@@ -25,3 +25,6 @@ project.lock.json
 # Publish output
 [Pp]ublish/
 *.pubxml.user
+
+# Velopack release output (tools/release.ps1)
+/releases/

@@ -122,10 +122,14 @@ public sealed class AppController
         Log.Info("app", "started");
     }
 
-    public void Shutdown()
+    /// Show a notification (callers check Config.ShowNotifications where it applies).
+    public void Notify(string title, string body) => _toasts.Notify(title, body);
+
+    /// Stop monitors and save. Does not release devices (an update restart keeps the bond).
+    public void Shutdown(string reason = "user exit")
     {
         // Logged so an exit is distinguishable from a crash when reading the log afterwards.
-        Log.Info("app", "shutting down (user exit)");
+        Log.Info("app", $"shutting down ({reason})");
         _pollTimer?.Dispose();
         _hotkeys.Dispose();
         _power.Dispose();

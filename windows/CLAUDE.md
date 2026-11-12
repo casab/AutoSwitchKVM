@@ -37,6 +37,27 @@ and polls the battery every 60 s. `tools/driver-trace.ps1` captures its WPP trac
 (`start`/`stop` need an admin shell) and decodes them with the PDB to
 `logs/driver-<timestamp>.txt`, with local timestamps that line up with the app log.
 
+## Releases and updates (Velopack)
+
+- `Program.cs` is the entry point (`DISABLE_XAML_GENERATED_MAIN`): `VelopackApp.Build().Run()`
+  must run before WinUI starts (it handles install/update/uninstall hooks and may exit). The
+  uninstall hook removes the Run key and the notification registration.
+- `Services/UpdateService.cs` checks GitHub Releases 60 s after launch and every 6 h, downloads in
+  the background, then offers "Restart to update" (Settings ▸ General ▸ About, tray menu, a
+  notification). A dev build (not installed by Velopack) reports `NotInstalled` and never checks.
+  Stable releases only (`prerelease: false`).
+- **packId is `AutoSwitchKVM.App`, never `AutoSwitchKVM`.** Velopack installs to
+  `%LOCALAPPDATA%\<packId>` and deletes it on uninstall; config + logs live in
+  `%LOCALAPPDATA%\AutoSwitchKVM` and must survive.
+- `tools/release.ps1 -Version X [-Arch x64|arm64] [-Download]`: self-contained publish
+  (`WindowsAppSDKSelfContained`) + `vpk pack` (local tool, `dotnet-tools.json`). Channels: `win`
+  (x64), `win-arm64`. CI: `.github/workflows/windows-release.yml` on a `v*` tag builds both, then
+  uploads with `vpk upload github` (x64 creates the release, arm64 merges). Unsigned for now.
+- The published layout loads XAML fine (verified by screenshot from a published folder); the
+  `dotnet build -o` gotcha below is about build output only.
+- `--ui-preview` and XAML binding tracing are compiled into Debug builds only.
+- App icon: `Assets/app.ico` / `app.png` are generated from `tray.ico` by `tools/make-app-icon.py`.
+
 ## Coordinating with the macOS agent
 
 Another agent usually works on `osx/` in parallel, on a Mac. Use `agent-notes/` at the repo root

@@ -27,6 +27,9 @@ public sealed partial class GeneralPage : Page
     private void OnClearDisconnect(object sender, RoutedEventArgs e) => ViewModel.SetShortcut(HotKeyAction.DisconnectAll, null);
     private void OnRestoreShortcuts(object sender, RoutedEventArgs e) => ViewModel.RestoreDefaultShortcuts();
 
+    private async void OnOpenProject(object sender, RoutedEventArgs e) =>
+        await Windows.System.Launcher.LaunchUriAsync(new Uri("https://github.com/casab/AutoSwitchKVM"));
+
     private async void OnExport(object sender, RoutedEventArgs e)
     {
         if (SettingsWindow.Current is { } w) await Dialogs.ExportAsync(w);

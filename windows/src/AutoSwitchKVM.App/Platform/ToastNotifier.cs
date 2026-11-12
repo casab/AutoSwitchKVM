@@ -15,7 +15,13 @@ public sealed class ToastNotifier
     {
         try
         {
-            AppNotificationManager.Default.Register();
+            // Unpackaged: there is no package manifest to take the name and icon from, so pass them
+            // (otherwise toasts show the exe name and a generic icon).
+            var icon = Path.Combine(AppContext.BaseDirectory, "Assets", "app.png");
+            if (File.Exists(icon))
+                AppNotificationManager.Default.Register("AutoSwitch KVM", new Uri(icon));
+            else
+                AppNotificationManager.Default.Register();
             _registered = true;
             Log.Debug("toast", "AppNotificationManager registered");
         }

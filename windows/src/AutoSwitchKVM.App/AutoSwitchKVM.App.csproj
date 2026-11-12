@@ -16,6 +16,16 @@
     <!-- Unpackaged (no MSIX identity): the Windows App SDK bootstrapper auto-initializer is
          injected automatically when WindowsPackageType=None. See windows/PLAN.md (distribution). -->
     <WindowsPackageType>None</WindowsPackageType>
+
+    <!-- Program.cs: Velopack must run before WinUI starts, so we supply Main. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+
+    <!-- Release metadata. Version is overridden by the release build (tools/release.ps1 / CI passes
+         -p:Version from the v* tag); the default marks local builds. -->
+    <Version>0.0.0-dev</Version>
+    <Product>AutoSwitch KVM</Product>
+    <AssemblyTitle>AutoSwitch KVM</AssemblyTitle>
+    <ApplicationIcon>Assets/app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -34,6 +44,7 @@
          WindowsDesktop.App ref) doesn't ship these in-box, so reference them explicitly. -->
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
     <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.9" />
+    <PackageReference Include="Velopack" Version="1.2.161" />
   </ItemGroup>
 
   <ItemGroup>
@@ -44,8 +55,8 @@
     <!-- Tray icons (monitor glyph matching the macOS menu-bar symbol) + state variants
          (active/inactive/paused/off). Content so ms-appx:/// resolves them; Remove from the default
          None glob first to avoid a duplicate-item error. -->
-    <None Remove="Assets\*.ico" />
-    <Content Include="Assets\*.ico">
+    <None Remove="Assets\*.ico;Assets\*.png" />
+    <Content Include="Assets\*.ico;Assets\*.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

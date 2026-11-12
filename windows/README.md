@@ -71,6 +71,29 @@ spikes/                      PowerShell hardware validations (Spike1 read-state,
 
 See **`PLAN.md`** ("Milestones") for the per-component status and design notes.
 
+## Install
+
+Download `AutoSwitchKVM.App-win-Setup.exe` (or `-win-arm64-Setup.exe`) from the
+[GitHub releases](https://github.com/casab/AutoSwitchKVM/releases) and run it. It installs per user
+(no admin) to `%LOCALAPPDATA%\AutoSwitchKVM.App`, adds a Start menu shortcut, starts the app and
+opens Settings. The app updates itself from new releases (Settings ▸ General ▸ About). Builds are
+not code-signed yet, so SmartScreen warns on the installer: **More info → Run anyway**.
+Uninstall from Windows Settings ▸ Apps; your settings and logs in `%LOCALAPPDATA%\AutoSwitchKVM`
+are kept.
+
+## Releasing
+
+Push a SemVer tag and the `Windows release` workflow builds both architectures, packs them with
+Velopack and publishes the GitHub release:
+
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+A pre-release tag (`v0.2.0-beta.1`) becomes a GitHub pre-release, which installed apps ignore.
+To build an installer locally: `pwsh tools/release.ps1 -Version 0.2.0 [-Arch arm64]` (output in
+`releases/<arch>/`).
+
 ## Build & run
 
 Requires **Visual Studio 2022** with the **.NET Desktop** workload and the **Windows App SDK C#

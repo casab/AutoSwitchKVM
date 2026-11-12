@@ -149,6 +149,25 @@
                     <Button Content="Import…" Click="OnImport" />
                 </StackPanel>
             </toolkit:SettingsCard>
+
+            <!-- About -->
+            <TextBlock Text="About" Style="{StaticResource SectionHeaderStyle}" />
+            <toolkit:SettingsCard Header="AutoSwitch KVM" Description="{x:Bind ViewModel.VersionText, Mode=OneWay}">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <BitmapIcon UriSource="ms-appx:///Assets/app.png" ShowAsMonochrome="False" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <TextBlock Text="{x:Bind ViewModel.UpdateStatusText, Mode=OneWay}" VerticalAlignment="Center"
+                               Style="{StaticResource SecondaryTextStyle}" MaxWidth="320" />
+                    <Button Content="{x:Bind ViewModel.UpdateButtonText, Mode=OneWay}" Click="{x:Bind ViewModel.UpdateAction}"
+                            IsEnabled="{x:Bind ViewModel.UpdateButtonEnabled, Mode=OneWay}" MinWidth="140" />
+                </StackPanel>
+            </toolkit:SettingsCard>
+            <toolkit:SettingsCard Header="Project page" Description="Source code, releases and issues on GitHub."
+                                  IsClickEnabled="True" Click="OnOpenProject">
+                <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE774;" /></toolkit:SettingsCard.HeaderIcon>
+                <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
+            </toolkit:SettingsCard>
         </StackPanel>
     </ScrollViewer>
 </Page>

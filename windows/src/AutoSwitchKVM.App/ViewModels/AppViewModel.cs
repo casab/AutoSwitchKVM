@@ -248,6 +248,36 @@ public sealed class AppViewModel : ObservableObject
     }
     public string LogPath => Support.Log.FilePath;
 
+    // ---------------- About & updates ----------------
+
+    private static UpdateService? Updates => App.Updates;
+
+    public string VersionText => $"Version {Updates?.CurrentVersion ?? typeof(AppViewModel).Assembly.GetName().Version?.ToString(3) ?? "dev"}";
+
+    public string UpdateStatusText => Updates?.State switch
+    {
+        UpdateState.NotInstalled => "Development build: automatic updates are off.",
+        UpdateState.Checking => "Checking for updates…",
+        UpdateState.UpToDate => "You're up to date.",
+        UpdateState.Downloading => $"Downloading {Updates.AvailableVersion}… {Updates.DownloadPercent}%",
+        UpdateState.ReadyToRestart => $"Version {Updates.AvailableVersion} is ready. Restart to update.",
+        UpdateState.Failed => $"Couldn't check for updates: {Updates.LastError}",
+        UpdateState.Idle => "Updates are checked automatically.",
+        _ => "",
+    };
+
+    public string UpdateButtonText => Updates?.State == UpdateState.ReadyToRestart ? "Restart to update" : "Check for updates";
+
+    public bool UpdateButtonEnabled => Updates is { IsInstalled: true } u
+        && u.State is not (UpdateState.Checking or UpdateState.Downloading);
+
+    public void UpdateAction()
+    {
+        if (Updates is null) return;
+        if (Updates.State == UpdateState.ReadyToRestart) (Microsoft.UI.Xaml.Application.Current as App)?.RestartForUpdate();
+        else _ = Updates.CheckAsync(userInitiated: true);
+    }
+
     // ---------------- Actions ----------------
 
     public void ConnectAll() => _c.ConnectAll();
