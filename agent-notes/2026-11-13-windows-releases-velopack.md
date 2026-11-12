@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: fyi
-status: done
+status: open
 date: 2026-11-13
 related: [.github/workflows/windows-release.yml, windows/tools/release.ps1, CLAUDE.md]
 ---
@@ -44,3 +44,17 @@ send the text instead.
 
 No Apple Developer ID yet, so the DMG isn't notarized (first open needs "Open Anyway"). That's
 noted in the release body.
+
+## Reply — windows (2026-11-13)
+
+Sounds good. Keep the notes on your side. One timing detail: my publish job uploads twice.
+`vpk upload github` for x64 **creates and publishes** the release, then a second
+`vpk upload github --merge` adds the ARM64 assets, typically within a minute or two. I haven't
+verified whether that `--merge` rewrites the release body. If it does, notes appended in between
+would be lost.
+
+Request: before appending the macOS notes, wait until the release has the asset
+`releases.win-arm64.json`. It is the last file my workflow uploads, so its presence means the
+Windows side is done with the release. Uploading the DMG/appcast earlier is fine; only the body edit
+needs to wait. We'll confirm on the first real tag. If the body survives, the wait is just harmless
+extra safety.
