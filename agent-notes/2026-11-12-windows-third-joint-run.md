@@ -57,3 +57,41 @@ the trackpad, the Mac connected, and its later release was clean.
       22:42:34), and when did its release finish? Windows was refused until 22:39:32 / 22:42:56.
       Was the Mac connecting/holding the trackpad until about then?
 - [ ] Long sessions: did the Mac connect only after a trackpad reset?
+
+## Addendum — windows (2026-11-12, from the user + a cross-round pattern)
+
+**User:** Mac session #1 (22:38:48) **worked properly**. In the short session #3 they gave up after
+~30 s. In the long sessions (#2, #4) they **reset the trackpad** to get the Mac working. So, with
+no overlap (12 s delay), Mac arrivals 2–4 still failed.
+
+**Pattern across all three runs: only the first Mac arrival of each run worked.**
+
+| Run | Mac arrival | Result | Preceding Windows session |
+|---|---|---|---|
+| 1 | 21:22:53 (first) | ok | bond pre-existed (app started on an already-paired trackpad) |
+| 1 | 21:24:00 | fail (+ overlap) | Windows **freshly paired** 21:23:40, held ~20 s |
+| 2 | 22:00:08 (first) | ok (your manual connect at +17 s) | bond from the user's hand pairing ~21:30 |
+| 2 | 4 more | fail (+ overlap) | each a fresh Windows pair, held 10–20 s |
+| 3 | 22:38:48 (first) | ok | bond from Windows' pair at 22:07:32 (31 min old) |
+| 3 | #2, #3, #4 | fail (**no overlap**) | each a fresh Windows pair, held 14–25 s |
+
+Two hypotheses fit, and the logs so far can't separate them:
+- **H1, recency on the Windows side:** something in the first minute(s) after Windows pairs the
+  trackpad (trackpad-side key storage? Windows' post-pairing service discovery? Windows logs PnP
+  bursts at about +2.5 s and +5.5 s after each connect, plus one unhandled `0x9b` report in run 3)
+  leaves the trackpad unable to do HID with the next host. Every failing Mac arrival followed a
+  Windows session < 30 s after a fresh pair.
+- **H2, Mac-side state across handoffs:** the first Mac pairing after the Mac app (or bluetoothd)
+  starts works; re-pairing a device that this Mac session already paired and `-remove`d fails HID
+  until the trackpad resets (cached record in bluetoothd/IOBluetooth? the async connect path?).
+
+**Tests that separate them** (pending the user, no code changes needed):
+1. **Windows-free:** on the Mac only, pair → use → release → re-pair via the Mac app's buttons,
+   twice. If the 2nd/3rd Mac pairing fails HID → H2 (or a trackpad re-pair issue) without Windows.
+2. **Long Windows session:** stay on Windows ≥ 2–3 min after it pairs, then switch to the Mac. If
+   that works while short sessions fail → H1.
+3. **Restart the Mac app** just before a Mac arrival that would otherwise fail. If it then works → H2
+   (app state); if not, check bluetoothd.
+
+From your side: does `bluetoothd` show any difference between the successful first pairing and the
+failing later ones (cached device record, SDP results, link-key type, "HID … 706" timing)?
