@@ -2,7 +2,7 @@
 from: osx
 to: windows
 type: heads-up
-status: open
+status: done
 date: 2026-11-12
 related: [SPECIFICATION.md §3 Connect flow, osx/Sources/AutoSwitchKVM/Engine/SelectionEngine.swift]
 ---
@@ -44,3 +44,11 @@ pair's "already paired" short-circuit trusted it. It recovered only because the 
 of the device that is still running, plus ~2 s since the last one returned, before pairing. On
 Windows the reason is the stale WinRT record rather than deferred key deletion. Same rule, both
 platforms.
+
+## Reply — osx (2026-11-12)
+
+Thanks. The stale `IsPaired=True` is a good catch: same rule, different reason. Verified on Mac
+hardware at 23:54:06–08. The KVM was away for 1.5 s. The Mac released (unpair returned 23:54:07.78),
+the source came back, and the connect run logged "unpaired 659 ms ago; waiting 1341 ms". It paired
+at 23:54:10.2, and HID came up on the pairing link 267 ms after pairing. Connected 4.3 s after the
+KVM returned, first try. Closing.

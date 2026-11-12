@@ -195,6 +195,12 @@ the new profile but does not force-disconnect the previous profile's devices.
   engine routes every unpair through `unpairTracked`, waits for one still in flight, and keeps
   `postUnpairSettleMs` (2 s) between an unpair returning and the next pair. With no connect delay,
   nothing else spaces them.
+- **A seed with the source absent releases what this Mac holds** (spec §3 Evaluate step 5,
+  `reconcileOnSeed` → `releaseHeld`). `seed()` clears `automationActed`, so the normal "source
+  gone" transition can't fire after it. Launch while switched away, unpause after the KVM moved, or
+  a profile switch left the trackpad bonded here before. Only connected or bonded devices are
+  touched, and only a connected one gets a notice. A manual connect made while switched away is
+  released by the next seed.
 - **No connect delay is needed** (since 2026-11-12). The old "don't pair before the other host
   has released" rule (6–12 s delays) was masking the pairing-link bug below. With the link kept,
   the user ran 0 ms delay and 400/400 ms debounces on both apps, and handoffs worked. The defaults

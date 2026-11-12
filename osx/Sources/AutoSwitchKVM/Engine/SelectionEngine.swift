@@ -59,6 +59,10 @@ final class SelectionEngine: ObservableObject {
     private var debounceTimer: Timer?
     /// Bumps on every new run so in-flight work can detect it was superseded.
     private var runToken = 0
+    /// Set by `seed()`: the next evaluation that finds the source absent releases whatever this Mac
+    /// may still hold (spec §3 Evaluate step 5). Seeding clears `automationActed`, so the normal
+    /// "source gone" transition can't fire after a seed.
+    private var reconcileOnSeed = false
     /// When the source presence last flipped (present ↔ absent): the start of the handoff timeline.
     private var presenceChangedAt: ContinuousClock.Instant?
 
@@ -328,6 +332,7 @@ final class SelectionEngine: ObservableObject {
         let source = store.config.source
         presentKeys.removeAll()
         automationActed = false  // re-evaluate from scratch (covers profile switches and wake)
+        reconcileOnSeed = true
         if let source {
             for dev in usb.attachedDevices where source.matches(dev) {
                 presentKeys.insert(source.presenceKey(productID: dev.productID, locationID: dev.locationID))
@@ -419,7 +424,7 @@ final class SelectionEngine: ObservableObject {
         let present = !presentKeys.isEmpty
         selected = present  // always reflect real presence for the UI
 
-        let wouldAct = present != automationActed
+        let wouldAct = present != automationActed || (!present && reconcileOnSeed)
         if suspended {
             if wouldAct { Log.engine.log("evaluate: going to sleep; not acting on '\(lastReason)'") }
             return
@@ -433,6 +438,7 @@ final class SelectionEngine: ObservableObject {
         // pause reconciles to the current state.
         let since = presenceChangedAt.map { " \(Elapsed.since($0)) ago" } ?? ""
         let enabled = store.config.devices.filter(\.enabled).count
+        if present { reconcileOnSeed = false }  // the connect transition covers it
         if present && !automationActed {
             automationActed = true
             var run = newRun("auto: \(lastReason)")
@@ -442,10 +448,42 @@ final class SelectionEngine: ObservableObject {
             await connectAll(run: run)
         } else if !present && automationActed {
             automationActed = false
+            reconcileOnSeed = false
             var run = newRun("auto: \(lastReason)")
             run.since = presenceChangedAt
             Log.engine.log("run #\(run.token): source gone (\(lastReason)\(since)) → releasing \(enabled) device(s)")
             await disconnectAll(run: run)
+        } else if !present && reconcileOnSeed {
+            reconcileOnSeed = false
+            let run = newRun("seed: source absent")
+            Log.engine.log(
+                "run #\(run.token): source absent after a seed (\(lastReason)) → "
+                    + "releasing anything this Mac still holds")
+            await releaseHeld(run: run)
+        }
+    }
+
+    /// Spec §3 Evaluate step 5: after a seed with the source absent (launch while switched away,
+    /// unpause or wake after the KVM moved, profile switch), release enabled devices this Mac still
+    /// holds: disconnect connected ones, unpair bonded managePairing ones. Devices not held are
+    /// skipped; a notice is posted only for a device that was actually connected.
+    private func releaseHeld(run: Run) async {
+        let pairedList = await bt.pairedDevices()
+        let paired = Set(pairedList.map { $0.address.replacingOccurrences(of: ":", with: "-").lowercased() })
+        for device in store.config.devices where device.enabled {
+            if let why = staleReason(run, respectSelection: false) {
+                Log.engine.log("run #\(run.token): seed release stopped: \(why)")
+                return
+            }
+            let connected = await bt.isConnected(device.normalizedAddress)
+            let bonded = device.managePairing && paired.contains(device.normalizedAddress)
+            guard connected || bonded else {
+                Log.engine.log("\(device.name): not held by this Mac; nothing to release")
+                continue
+            }
+            markBusy(device.id)
+            defer { clearBusy(device.id) }
+            await disconnectOne(device, run: run, notify: connected)
         }
     }
 
@@ -919,7 +957,7 @@ final class SelectionEngine: ObservableObject {
     /// after every await — a newer run owns the devices once it starts, and a stale release must
     /// not undo the connect/pair the new run just performed. A failed unpair is retried once: the
     /// bond is what blocks the other host, so a silent release failure strands the device.
-    private func disconnectOne(_ device: BTDevice, run: Run) async {
+    private func disconnectOne(_ device: BTDevice, run: Run, notify: Bool = true) async {
         let addr = device.normalizedAddress
         let name = device.name
         let start = ContinuousClock.now
@@ -941,7 +979,10 @@ final class SelectionEngine: ObservableObject {
             return
         }
 
-        let timeline = run.since.map { "; \(Elapsed.since($0)) after the source disappeared" } ?? ""
+        // Evaluated when logged: the release ends after the unpair, not after the disconnect.
+        func timeline() -> String {
+            run.since.map { "; \(Elapsed.since($0)) after the source disappeared" } ?? ""
+        }
 
         // Release the bond even if the disconnect call failed — the bond is what blocks the
         // other host (Magic Trackpad), and unpair tears the link down anyway.
@@ -980,9 +1021,9 @@ final class SelectionEngine: ObservableObject {
                 onNotice?("Release failed", "\(name): \(f.message)")
                 return
             }
-            Log.engine.log("\(name): released (unpaired) in \(Elapsed.since(start))\(timeline)")
+            Log.engine.log("\(name): released (unpaired) in \(Elapsed.since(start))\(timeline())")
             setStatus(device.id, .disconnected)
-            onNotice?("Disconnected", name)
+            if notify { onNotice?("Disconnected", name) }
             return
         }
 
@@ -991,9 +1032,9 @@ final class SelectionEngine: ObservableObject {
             setStatus(device.id, .error(f.message))
             onNotice?("Release failed", "\(name): \(f.message)")
         } else {
-            Log.engine.log("\(name): disconnected in \(Elapsed.since(start))\(timeline)")
+            Log.engine.log("\(name): disconnected in \(Elapsed.since(start))\(timeline())")
             setStatus(device.id, .disconnected)
-            onNotice?("Disconnected", name)
+            if notify { onNotice?("Disconnected", name) }
         }
     }
 

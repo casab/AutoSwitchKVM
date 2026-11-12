@@ -464,6 +464,66 @@ final class FailureHandlingTests: XCTestCase {
         XCTAssertFalse(BTFailureKind.deviceBusy.mayBeStaleBond)
         XCTAssertTrue(BTFailureKind.unknown.mayBeStaleBond)
     }
+    // MARK: - Reconcile on seed (spec §3 Evaluate step 5)
+
+    /// The app starts (or wakes) while switched away, with the trackpad still bonded and connected
+    /// here: the seed must release it, or the other host stays locked out.
+    func testSeedWithTheSourceAbsentReleasesADeviceStillHeld() async {
+        let f = make()
+        await f.engine.connectAllNowImpl()  // held here while the source is absent
+        XCTAssertTrue(f.bt.pairedAddrs.contains(addr))
+        notices = []
+
+        f.engine.seed()
+        await f.engine.evaluateNow()
+
+        XCTAssertEqual(Array(f.bt.calls.suffix(2)), ["disconnect:\(addr)", "unpair:\(addr)"])
+        XCTAssertFalse(f.bt.pairedAddrs.contains(addr))
+        XCTAssertFalse(f.bt.connectedAddrs.contains(addr))
+        XCTAssertEqual(notices.map(\.title), ["Disconnected"], "it was connected, so the user hears about it")
+    }
+
+    /// Nothing held: the seed release touches nothing and says nothing.
+    func testSeedWithTheSourceAbsentSkipsDevicesNotHeld() async {
+        let f = make()
+        f.engine.seed()
+        await f.engine.evaluateNow()
+
+        XCTAssertEqual(f.bt.calls, [])
+        XCTAssertTrue(notices.isEmpty)
+    }
+
+    /// Pause while connected here, the KVM moves away, unpause: the reseed releases the device.
+    func testUnpauseAfterTheSourceLeftReleasesTheDevice() async {
+        let f = make()
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+        XCTAssertTrue(f.bt.connectedAddrs.contains(addr))
+
+        f.store.config.paused = true
+        sourceLeaves(f)
+        await f.engine.evaluateNow()
+        XCTAssertEqual(count(f, "unpair:"), 0, "paused: no release")
+
+        f.store.config.paused = false
+        f.engine.reevaluate()
+        await f.engine.evaluateNow()
+        XCTAssertEqual(count(f, "unpair:"), 1)
+        XCTAssertFalse(f.bt.pairedAddrs.contains(addr))
+    }
+
+    /// A seed with the source present connects as before and releases nothing.
+    func testSeedWithTheSourcePresentDoesNotRelease() async {
+        let f = make()
+        f.usb.attachedDevices = [USBDeviceInfo(vendorID: vendor, productID: product, name: "Hub")]
+        f.engine.seed()
+        await f.engine.evaluateNow()
+        await f.engine.evaluateNow()  // a later evaluation still doesn't release
+
+        XCTAssertEqual(count(f, "unpair:"), 0)
+        XCTAssertTrue(f.bt.connectedAddrs.contains(addr))
+    }
+
     // MARK: - Pair after a recent unpair (KVM bounce, hardware 2026-11-12)
 
     /// The source comes back right after a release: the new pair waits until the system has had

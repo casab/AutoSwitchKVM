@@ -130,7 +130,7 @@ controller** (the operations in §5). It owns no platform APIs directly.
 2. If **paused**, stop here (no connect/disconnect; presence still reflected).
 3. If `present && !automationActed` → mark acted, connect all enabled devices.
 4. If `!present && automationActed` → clear acted, disconnect all enabled devices.
-5. **Reconcile on seed** (Windows implemented 2026-11-12; macOS pending). A seed (launch, wake,
+5. **Reconcile on seed** (Windows and macOS implemented 2026-11-12). A seed (launch, wake,
    unpause, adapter on, profile switch, config change) clears the latch, so step 4 can never fire
    after it. Therefore, if the first evaluation after a seed finds the source **absent** (and not
    paused/suspended), release the enabled devices this host may still hold: disconnect the

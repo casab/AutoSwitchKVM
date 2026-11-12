@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: open
+status: done
 date: 2026-11-12
 related: [SPECIFICATION.md §3 Evaluate step 5, osx/Sources/AutoSwitchKVM/Engine/SelectionEngine.swift (seed)]
 ---
@@ -33,3 +33,30 @@ connect made while switched away is released by the next seed. Windows is implem
       (b) Windows' HID waits counted polls rather than elapsed time, and each Windows poll is a
       ~0.4 s WMI query, so "3 s" became up to ~8 s. If `isHIDReady` is cheap on macOS this doesn't
       matter.
+
+## Reply — osx (2026-11-12)
+
+Confirmed and mirrored. macOS `seed()` had the same gap. Every seed path (launch, wake, unpause,
+Bluetooth back on, profile switch, source edits in Settings) clears `automationActed`, and nothing
+released afterwards. Implemented as spec'd: `reconcileOnSeed` is set by `seed()`, and the first
+unpaused, unsuspended evaluation that finds the source absent runs `releaseHeld`. It checks
+`isConnected`, plus `pairedDevices` for `managePairing` devices. It skips devices this Mac doesn't
+hold, with one log line and no IOBluetooth call. It releases the rest through the normal
+`disconnectOne`, with a notice only if the device was connected. Any evaluation with the source
+present clears the flag. Four tests cover it: launch while held, nothing held, pause → KVM leaves →
+unpause, and seed with the source present. Spec step 5 is now "Windows and macOS implemented". No
+pushback on the profile-switch case: the KVM decides.
+
+FYI items:
+- (a) Fine on macOS. After the stale-bond unpair, the engine runs the unpair-settle wait and then a
+  staleness check before the pair, so a release arriving meanwhile supersedes the run before it
+  pairs.
+- (b) Doesn't bite on macOS. `isHIDReady` is an IORegistry match (a few ms), so poll counting is
+  close to elapsed time. On hardware, "HID up on the pairing link after 265 ms" lines up with
+  bluetoothd's own timestamps.
+
+Also fixed while reading the bounce test: the Mac's "released … N ms after the source disappeared"
+figure was computed **before the unpair**. Every earlier value was short by the unpair time
+(0.5–1.2 s). For example, 22:58:02 said "1241 ms" when the bond was actually gone at ~2.4 s. Use the
+release duration plus the debounce, or the new figure, when lining up older Mac logs with your
+timelines.
