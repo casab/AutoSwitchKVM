@@ -10,7 +10,11 @@ public sealed class FakeUsbMonitor : IUsbMonitor
 
     public event Action<IReadOnlyList<UsbDeviceInfo>>? Changed;
 
-    public IReadOnlyList<UsbDeviceInfo> Snapshot() => _devices.ToList();
+    /// When set, Snapshot() throws it (models a WMI failure, e.g. right after wake).
+    public Exception? SnapshotError { get; set; }
+
+    public IReadOnlyList<UsbDeviceInfo> Snapshot() =>
+        SnapshotError is not null ? throw SnapshotError : _devices.ToList();
 
     public void Start() { }
     public void Stop() { }

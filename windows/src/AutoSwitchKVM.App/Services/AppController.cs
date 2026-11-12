@@ -83,25 +83,17 @@ public sealed class AppController
         // the engine so it can't re-pair (e.g. an auto-reconnect after the "drop" our own release
         // causes). The release talks to the Bluetooth controller directly (the engine is
         // UI-thread-only); resume re-enables and re-seeds the engine so statuses reconcile.
-        _power.OnSuspend = () =>
-        {
-            Engine.NotifySuspending();
-            Log.Info("power", "suspend -> releasing enabled devices (bounded to 1.5 s)");
-            try
-            {
-                // Task.Run keeps continuations off this thread's SynchronizationContext so the
-                // bounded Wait cannot deadlock.
-                var released = Task.Run(ReleaseEnabledDevicesAsync).Wait(TimeSpan.FromMilliseconds(1500));
-                Log.Info("power", released ? "suspend release complete" : "suspend release still running at sleep");
-            }
-            catch (Exception ex)
-            {
-                Log.Warn("power", $"suspend release failed: {ex.Message}");
-            }
-        };
+        _power.OnSuspend = () => ReleaseBeforeGoingAway("suspend");
+        // Log-off/shutdown: same release, so the device isn't left bonded here while this PC is off
+        // (the next launch also reconciles: spec §3 Evaluate step 5).
+        _power.OnSessionEnding = reason => ReleaseBeforeGoingAway(reason);
         _power.OnResume = () => _dispatcher.TryEnqueue(() =>
         {
             Log.Info("power", "resume -> re-evaluate");
+            // A release that couldn't even start before sleep (e.g. queued behind a pair holding
+            // the radio lock) must not fire now, possibly after the other host paired: drop it and
+            // let the re-seed decide (release if the source is absent, connect if present).
+            Interlocked.Exchange(ref _awayReleaseCts, null)?.Cancel();
             Engine.NotifyResumed();
             Fire(Engine.ReevaluateAsync, "resume re-evaluate");
         });
@@ -133,10 +125,36 @@ public sealed class AppController
 
     // ---- System integration ----
 
-    /// Release every *enabled* device (disconnect + unpair where managed) — the pre-sleep path.
-    /// Mirrors the macOS manualDisconnectAll: talks to the Bluetooth controller directly so it
-    /// can run off the UI thread; the engine reconciles statuses on resume.
-    private async Task ReleaseEnabledDevicesAsync()
+    private CancellationTokenSource? _awayReleaseCts;
+
+    /// Runs on the SystemEvents thread for suspend / log-off / shutdown. Halts the engine first
+    /// (thread-safe) so nothing re-pairs, then releases, blocking at most 1.5 s. Windows' grace is
+    /// ~2 s; the release probe shows the link itself drops ~0.4–0.8 s into BluetoothRemoveDevice,
+    /// so the part that frees the device for the other host fits even though the full call takes
+    /// ~3.4 s.
+    private void ReleaseBeforeGoingAway(string reason)
+    {
+        Engine.NotifySuspending();
+        var cts = new CancellationTokenSource();
+        Interlocked.Exchange(ref _awayReleaseCts, cts)?.Cancel();
+        Log.Info("power", $"{reason} -> releasing enabled devices (bounded to 1.5 s)");
+        try
+        {
+            // Task.Run keeps continuations off this thread's SynchronizationContext so the
+            // bounded Wait cannot deadlock.
+            var released = Task.Run(() => ReleaseEnabledDevicesAsync(cts.Token)).Wait(TimeSpan.FromMilliseconds(1500));
+            Log.Info("power", released ? $"{reason} release complete" : $"{reason} release still running");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("power", $"{reason} release failed: {ex.Message}");
+        }
+    }
+
+    /// Release every *enabled* device (disconnect + unpair where managed) — the going-away path.
+    /// Talks to the Bluetooth controller directly so it can run off the UI thread; the engine
+    /// reconciles statuses on resume. Cancelled on resume if it never got to run.
+    private async Task ReleaseEnabledDevicesAsync(CancellationToken ct)
     {
         var devices = Config.Devices.Where(d => d.Enabled).ToList();
         foreach (var device in devices)
@@ -144,9 +162,13 @@ public sealed class AppController
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                await _bt.DisconnectAsync(device.Address);
-                if (device.ManagePairing) await _bt.UnpairAsync(device.Address);
+                await _bt.DisconnectAsync(device.Address, ct);
+                if (device.ManagePairing) await _bt.UnpairAsync(device.Address, ct);
                 Log.Info("power", $"released {device.Name} ({sw.ElapsedMilliseconds} ms)");
+            }
+            catch (OperationCanceledException)
+            {
+                Log.Info("power", $"release {device.Name} cancelled after {sw.ElapsedMilliseconds} ms (resumed before it ran)");
             }
             catch (Exception ex)
             {
@@ -336,7 +358,11 @@ public sealed class AppController
     }
 
     public Task<IReadOnlyList<PairedDeviceInfo>> PairedDevicesAsync() => _bt.PairedDevicesAsync();
-    public IReadOnlyList<UsbDeviceInfo> UsbSnapshot() => _usb.Snapshot();
+    /// Last reconciled USB snapshot (no WMI call): for UI refreshes that run on every state change.
+    public IReadOnlyList<UsbDeviceInfo> LastUsbSnapshot => _usb.LastSnapshot;
+
+    /// A fresh enumeration off the UI thread (WMI takes ~0.3–0.6 s).
+    public Task<IReadOnlyList<UsbDeviceInfo>> UsbSnapshotAsync() => Task.Run(() => _usb.Snapshot());
 
     public SourceLearner CreateLearner() => new(_usb);
 

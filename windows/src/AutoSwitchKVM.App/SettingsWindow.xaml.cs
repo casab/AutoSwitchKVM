@@ -30,6 +30,20 @@ public sealed partial class SettingsWindow : Window
 
     // Devices tab
     private StackPanel _devicesPanel = null!;
+    // The cards are rebuilt only when the device list itself changes (ids/names/addresses/order);
+    // otherwise just the status lines update. Rebuilding on every status change (frequent during a
+    // handoff) threw away whatever the user was typing in a card.
+    private string? _devicesSignature;
+    private readonly Dictionary<Guid, TextBlock> _deviceStatusLabels = new();
+
+    // General tab controls, kept so outside changes (tray pause, import) show up here.
+    private bool _refreshingGeneral;
+    private NumberBox? _arrivalBox, _departureBox, _retriesBox, _retryBaseBox, _timeoutBox;
+    private ToggleSwitch? _pausedToggle, _notifyToggle, _notifyDropToggle, _autoReconnectToggle, _loginToggle, _hotkeysToggle;
+
+    // Log box refresh is throttled: re-rendering the whole buffer on every log line made the window
+    // sluggish during handoffs (dozens of lines in a few seconds).
+    private int _logRefreshQueued;
 
     // Diagnostics tab
     private TextBlock _diagText = null!;
@@ -93,14 +107,26 @@ public sealed partial class SettingsWindow : Window
         RefreshProfiles();
         RefreshSource();
         RefreshDevices();
+        RefreshGeneral();
         RefreshShortcutLabels();
         RefreshDiagnostics();
     });
 
-    private void OnLogChanged() => DispatcherQueue.TryEnqueue(() =>
+    // Called from any thread (Log.Changed). At most one refresh queued; it renders ~0.5 s later.
+    private void OnLogChanged()
     {
-        if (_logBox != null) _logBox.Text = Log.PlainText();
-    });
+        if (Interlocked.Exchange(ref _logRefreshQueued, 1) == 1) return;
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                await Task.Delay(500);
+                Interlocked.Exchange(ref _logRefreshQueued, 0);
+                if (_logBox != null) _logBox.Text = Log.PlainText();
+            }
+            catch (Exception ex) { Log.Warn("ui", $"log view refresh failed: {ex.Message}"); }
+        });
+    }
 
     // ===================== Profiles =====================
 
@@ -274,7 +300,7 @@ public sealed partial class SettingsWindow : Window
     /// Spec §6 manual path: pick the source from the currently-attached USB devices.
     private async Task PickSourceManuallyAsync()
     {
-        var attached = C.UsbSnapshot()
+        var attached = (await C.UsbSnapshotAsync())
             .GroupBy(d => ((uint)d.VendorID << 16) | d.ProductID)
             .Select(g => g.First())
             .ToList();
@@ -300,8 +326,13 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
+        // Ties are common (one changed VID:PID per vendor, e.g. the KVM hub vs a receiver behind it):
+        // prefer the vendor that has a hub among its devices, since a KVM switches a hub.
         var majorityVendor = candidates
-            .GroupBy(c => c.VendorID).OrderByDescending(g => g.Count()).First().Key;
+            .GroupBy(c => c.VendorID)
+            .OrderByDescending(g => g.Count())
+            .ThenByDescending(g => g.Any(d => (d.Name ?? "").Contains("hub", StringComparison.OrdinalIgnoreCase)))
+            .First().Key;
 
         var checks = new List<(CheckBox Box, UsbDeviceInfo Device)>();
         var list = new StackPanel { Spacing = 4 };
@@ -376,9 +407,20 @@ public sealed partial class SettingsWindow : Window
     private void RefreshDevices()
     {
         if (_devicesPanel is null) return;
-        _devicesPanel.Children.Clear();
 
         var devices = C.Config.Devices;
+        var signature = string.Join("|", devices.Select(d => $"{d.Id}:{d.Name}:{d.Address}"));
+        if (signature == _devicesSignature)
+        {
+            foreach (var d in devices)
+                if (_deviceStatusLabels.TryGetValue(d.Id, out var label))
+                    label.Text = "Status: " + C.StatusFor(d).Label;
+            return;
+        }
+        _devicesSignature = signature;
+        _deviceStatusLabels.Clear();
+        _devicesPanel.Children.Clear();
+
         if (devices.Count == 0)
         {
             _devicesPanel.Children.Add(new TextBlock { Text = "No devices yet. Click \"Add device...\"." });
@@ -396,7 +438,9 @@ public sealed partial class SettingsWindow : Window
                 Text = $"{device.Name}   ({device.Address})",
                 FontWeight = FontWeights.SemiBold,
             });
-            card.Children.Add(new TextBlock { Text = "Status: " + C.StatusFor(device).Label });
+            var status = new TextBlock { Text = "Status: " + C.StatusFor(device).Label };
+            _deviceStatusLabels[device.Id] = status;
+            card.Children.Add(status);
 
             var enabled = new ToggleSwitch { Header = "Enabled", IsOn = device.Enabled };
             enabled.Toggled += (_, _) => C.Mutate(_ => device.Enabled = enabled.IsOn, reevaluate: true);
@@ -518,21 +562,21 @@ public sealed partial class SettingsWindow : Window
         var panel = new StackPanel { Spacing = 10, Margin = new Thickness(16) };
 
         panel.Children.Add(Header("Timing"));
-        panel.Children.Add(NumberRow("Arrival debounce (ms)", C.Config.ArrivalDebounceMs, 0, 10000, v => C.Mutate(c => c.ArrivalDebounceMs = v)));
-        panel.Children.Add(NumberRow("Departure debounce (ms)", C.Config.DebounceMs, 0, 10000, v => C.Mutate(c => c.DebounceMs = v)));
-        panel.Children.Add(NumberRow("Connect retries", C.Config.ConnectRetryMax, 1, 20, v => C.Mutate(c => c.ConnectRetryMax = v)));
-        panel.Children.Add(NumberRow("Retry base interval (s)", C.Config.ConnectRetrySecs, 1, 30, v => C.Mutate(c => c.ConnectRetrySecs = v)));
-        panel.Children.Add(NumberRow("Per-call timeout (s)", C.Config.BtCallTimeoutSecs, 5, 120, v => C.Mutate(c => c.BtCallTimeoutSecs = v)));
+        panel.Children.Add(NumberRow("Arrival debounce (ms)", C.Config.ArrivalDebounceMs, 0, 10000, v => C.Mutate(c => c.ArrivalDebounceMs = v), out _arrivalBox));
+        panel.Children.Add(NumberRow("Departure debounce (ms)", C.Config.DebounceMs, 0, 10000, v => C.Mutate(c => c.DebounceMs = v), out _departureBox));
+        panel.Children.Add(NumberRow("Connect retries", C.Config.ConnectRetryMax, 1, 20, v => C.Mutate(c => c.ConnectRetryMax = v), out _retriesBox));
+        panel.Children.Add(NumberRow("Retry base interval (s)", C.Config.ConnectRetrySecs, 1, 30, v => C.Mutate(c => c.ConnectRetrySecs = v), out _retryBaseBox));
+        panel.Children.Add(NumberRow("Per-call timeout (s)", C.Config.BtCallTimeoutSecs, 5, 120, v => C.Mutate(c => c.BtCallTimeoutSecs = v), out _timeoutBox));
 
         panel.Children.Add(Header("Behavior"));
-        panel.Children.Add(ToggleRow("Pause automation", C.Config.Paused, on => C.Mutate(c => c.Paused = on, reevaluate: true)));
-        panel.Children.Add(ToggleRow("Show notifications", C.Config.ShowNotifications, on => C.Mutate(c => c.ShowNotifications = on)));
-        panel.Children.Add(ToggleRow("Notify on unexpected disconnect", C.Config.NotifyUnexpectedDisconnect, on => C.Mutate(c => c.NotifyUnexpectedDisconnect = on)));
-        panel.Children.Add(ToggleRow("Auto-reconnect on unexpected disconnect", C.Config.AutoReconnectOnDrop, on => C.Mutate(c => c.AutoReconnectOnDrop = on)));
-        panel.Children.Add(ToggleRow("Launch at login", C.Config.LaunchAtLogin, on => C.SetLaunchAtLogin(on)));
+        panel.Children.Add(ToggleRow("Pause automation", C.Config.Paused, on => C.Mutate(c => c.Paused = on, reevaluate: true), out _pausedToggle));
+        panel.Children.Add(ToggleRow("Show notifications", C.Config.ShowNotifications, on => C.Mutate(c => c.ShowNotifications = on), out _notifyToggle));
+        panel.Children.Add(ToggleRow("Notify on unexpected disconnect", C.Config.NotifyUnexpectedDisconnect, on => C.Mutate(c => c.NotifyUnexpectedDisconnect = on), out _notifyDropToggle));
+        panel.Children.Add(ToggleRow("Auto-reconnect on unexpected disconnect", C.Config.AutoReconnectOnDrop, on => C.Mutate(c => c.AutoReconnectOnDrop = on), out _autoReconnectToggle));
+        panel.Children.Add(ToggleRow("Launch at login", C.Config.LaunchAtLogin, on => C.SetLaunchAtLogin(on), out _loginToggle));
 
         panel.Children.Add(Header("Global shortcuts"));
-        panel.Children.Add(ToggleRow("Enable global shortcuts", C.Config.GlobalHotkeysEnabled, on => C.SetGlobalHotkeysEnabled(on)));
+        panel.Children.Add(ToggleRow("Enable global shortcuts", C.Config.GlobalHotkeysEnabled, on => C.SetGlobalHotkeysEnabled(on), out _hotkeysToggle));
         panel.Children.Add(ShortcutRow("Pause", HotKeyAction.TogglePause, C.Config.HotkeyPause));
         panel.Children.Add(ShortcutRow("Connect all", HotKeyAction.ConnectAll, C.Config.HotkeyConnectAll));
         panel.Children.Add(ShortcutRow("Disconnect all", HotKeyAction.DisconnectAll, C.Config.HotkeyDisconnectAll));
@@ -553,6 +597,40 @@ public sealed partial class SettingsWindow : Window
         panel.Children.Add(new TextBlock { Text = "Config file: " + C.ConfigPath, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
 
         return new ScrollViewer { Content = panel };
+    }
+
+    /// Reflect outside changes (tray/hotkey pause, import) in the General tab. Guarded so setting a
+    /// control doesn't echo back as a user edit.
+    private void RefreshGeneral()
+    {
+        if (_arrivalBox is null) return;
+        _refreshingGeneral = true;
+        try
+        {
+            var c = C.Config;
+            SetNumber(_arrivalBox, c.ArrivalDebounceMs);
+            SetNumber(_departureBox, c.DebounceMs);
+            SetNumber(_retriesBox, c.ConnectRetryMax);
+            SetNumber(_retryBaseBox, c.ConnectRetrySecs);
+            SetNumber(_timeoutBox, c.BtCallTimeoutSecs);
+            SetToggle(_pausedToggle, c.Paused);
+            SetToggle(_notifyToggle, c.ShowNotifications);
+            SetToggle(_notifyDropToggle, c.NotifyUnexpectedDisconnect);
+            SetToggle(_autoReconnectToggle, c.AutoReconnectOnDrop);
+            SetToggle(_loginToggle, c.LaunchAtLogin);
+            SetToggle(_hotkeysToggle, c.GlobalHotkeysEnabled);
+        }
+        finally { _refreshingGeneral = false; }
+
+        static void SetNumber(NumberBox? box, int value)
+        {
+            // Don't fight an edit in progress: only update a box that doesn't have focus.
+            if (box is not null && box.FocusState == FocusState.Unfocused && (int)box.Value != value) box.Value = value;
+        }
+        static void SetToggle(ToggleSwitch? toggle, bool value)
+        {
+            if (toggle is not null && toggle.IsOn != value) toggle.IsOn = value;
+        }
     }
 
     private async Task ExportAsync()
@@ -597,6 +675,7 @@ public sealed partial class SettingsWindow : Window
         C.ReplaceConfig(imported);
         RefreshDevices();
         RefreshSource();
+        RefreshGeneral();
     }
 
     // ===================== Extras =====================
@@ -624,7 +703,7 @@ public sealed partial class SettingsWindow : Window
         panel.Children.Add(_diagText);
 
         var refresh = new Button { Content = "Refresh USB snapshot" };
-        refresh.Click += (_, _) => RefreshDiagnostics();
+        refresh.Click += async (_, _) => RefreshDiagnostics(await C.UsbSnapshotAsync());
         panel.Children.Add(refresh);
 
         panel.Children.Add(Header("Debug log"));
@@ -655,7 +734,9 @@ public sealed partial class SettingsWindow : Window
         return new ScrollViewer { Content = panel };
     }
 
-    private void RefreshDiagnostics()
+    /// Uses the monitor's last reconciled snapshot by default: this runs on every state change, and
+    /// a fresh WMI enumeration here froze the UI ~0.3–0.6 s each time during handoffs.
+    private void RefreshDiagnostics(IReadOnlyList<UsbDeviceInfo>? usb = null)
     {
         if (_diagText is null) return;
         var lines = new List<string>
@@ -672,7 +753,7 @@ public sealed partial class SettingsWindow : Window
         lines.Add("");
         lines.Add("Matching USB devices:");
         var source = C.Config.Source;
-        foreach (var u in C.UsbSnapshot())
+        foreach (var u in usb ?? C.LastUsbSnapshot)
             if (source != null && u.VendorID == source.VendorID && source.ProductIDs.Contains(u.ProductID))
                 lines.Add($"  0x{u.VendorID:X4}:0x{u.ProductID:X4}  {u.Name}");
 
@@ -700,7 +781,7 @@ public sealed partial class SettingsWindow : Window
         Child = content,
     };
 
-    private static StackPanel NumberRow(string label, int value, int min, int max, Action<int> onChange)
+    private StackPanel NumberRow(string label, int value, int min, int max, Action<int> onChange, out NumberBox control)
     {
         var box = new NumberBox
         {
@@ -712,16 +793,18 @@ public sealed partial class SettingsWindow : Window
             SmallChange = 1,
             LargeChange = 10,
         };
-        box.ValueChanged += (_, e) => { if (!double.IsNaN(e.NewValue)) onChange((int)e.NewValue); };
+        box.ValueChanged += (_, e) => { if (!_refreshingGeneral && !double.IsNaN(e.NewValue)) onChange((int)e.NewValue); };
+        control = box;
         var wrap = new StackPanel();
         wrap.Children.Add(box);
         return wrap;
     }
 
-    private static StackPanel ToggleRow(string label, bool isOn, Action<bool> onChange)
+    private StackPanel ToggleRow(string label, bool isOn, Action<bool> onChange, out ToggleSwitch control)
     {
         var toggle = new ToggleSwitch { Header = label, IsOn = isOn };
-        toggle.Toggled += (_, _) => onChange(toggle.IsOn);
+        toggle.Toggled += (_, _) => { if (!_refreshingGeneral) onChange(toggle.IsOn); };
+        control = toggle;
         var wrap = new StackPanel();
         wrap.Children.Add(toggle);
         return wrap;

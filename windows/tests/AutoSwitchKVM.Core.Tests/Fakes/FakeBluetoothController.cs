@@ -16,6 +16,7 @@ public sealed class FakeBluetoothController : IBluetoothController
     public Func<Task>? BeforeConnect { get; set; }
     public Func<Task>? BeforeDisconnect { get; set; }
     public Func<Task>? BeforePair { get; set; }
+    public Func<Task>? BeforeUnpair { get; set; }
     /// When set, connect/disconnect record the call, then throw without changing state.
     public Exception? ConnectError { get; set; }
     public Exception? DisconnectError { get; set; }
@@ -82,13 +83,14 @@ public sealed class FakeBluetoothController : IBluetoothController
     /// (e.g. clear ConnectError to simulate a dead link key being replaced).
     public Action? AfterUnpair { get; set; }
 
-    public Task UnpairAsync(string address, CancellationToken ct = default)
+    public async Task UnpairAsync(string address, CancellationToken ct = default)
     {
+        if (BeforeUnpair is not null) await BeforeUnpair();
         Calls.Add($"unpair:{Norm(address)}");
         if (UnpairErrors.Count > 0 && UnpairErrors.Dequeue() is { } scripted) throw scripted;
         Paired.Remove(Norm(address));
+        Connected.Remove(Norm(address));   // unpair also drops the link (Classic HID)
         AfterUnpair?.Invoke();
-        return Task.CompletedTask;
     }
 
     public Task<IReadOnlyList<PairedDeviceInfo>> PairedDevicesAsync(CancellationToken ct = default)

@@ -15,18 +15,32 @@ public static class Log
     private static readonly LinkedList<string> Buffer = new();
     private const int MaxBuffer = 2000;
     private static string? _filePath;
+    private static DateTime _fileDate;
+    private const int KeepDays = 14;   // same retention as the macOS file log
 
     public static event Action? Changed;
 
+    /// Today's log file. Re-evaluated on every write so a tray app running past midnight starts
+    /// the new day's file (it used to keep writing to the day it started).
     public static string FilePath
     {
         get
         {
-            lock (Gate) { return _filePath ??= InitFilePath(); }
+            lock (Gate)
+            {
+                var today = DateTime.Now.Date;
+                if (_filePath is null || today != _fileDate)
+                {
+                    _fileDate = today;
+                    _filePath = InitFilePath(today);
+                    CleanupOldLogs(Path.GetDirectoryName(_filePath));
+                }
+                return _filePath;
+            }
         }
     }
 
-    private static string InitFilePath()
+    private static string InitFilePath(DateTime day)
     {
         try
         {
@@ -34,11 +48,30 @@ public static class Log
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "AutoSwitchKVM", "logs");
             Directory.CreateDirectory(dir);
-            return Path.Combine(dir, $"app-{DateTime.Now:yyyyMMdd}.log");
+            return Path.Combine(dir, $"app-{day:yyyyMMdd}.log");
         }
         catch
         {
             return Path.Combine(Path.GetTempPath(), "autoswitchkvm.log");
+        }
+    }
+
+    /// Delete app logs and captured driver traces older than KeepDays (the folder grew forever).
+    private static void CleanupOldLogs(string? dir)
+    {
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+        var cutoff = DateTime.Now.AddDays(-KeepDays);
+        foreach (var pattern in new[] { "app-*.log", "driver-*.etl", "driver-*.txt" })
+        {
+            try
+            {
+                foreach (var f in Directory.EnumerateFiles(dir, pattern))
+                {
+                    try { if (File.GetLastWriteTime(f) < cutoff) File.Delete(f); }
+                    catch { /* in use or no access: try again tomorrow */ }
+                }
+            }
+            catch { /* best-effort */ }
         }
     }
 

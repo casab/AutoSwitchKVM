@@ -36,6 +36,18 @@ public sealed class SelectionEngine
     private readonly Dictionary<Guid, DeviceStatus> _statuses = new();
     private volatile bool _suspended;
 
+    /// Set by a seed; the first unpaused evaluation after it reconciles (spec §3 Evaluate step 5).
+    private bool _seedReconcilePending;
+    /// Latest run that requested a release / a connect of each device. A pair that completes after a
+    /// newer release (and no newer connect) is undone (spec §3). _globalReleaseToken is the suspend
+    /// release (written from the power-event thread).
+    private readonly Dictionary<Guid, int> _releaseRequestedToken = new();
+    private readonly Dictionary<Guid, int> _connectRequestedToken = new();
+    private int _globalReleaseToken;
+    /// Engine unpairs in flight / last returned, per device: a pair waits for them (spec §3).
+    private readonly Dictionary<Guid, Task> _unpairInFlight = new();
+    private readonly Dictionary<Guid, DateTime> _lastUnpairReturned = new();
+
     private CancellationTokenSource? _debounceCts;
 
     /// The live configuration. The app may swap this on a profile switch (then call RefreshMonitoring
@@ -81,6 +93,10 @@ public sealed class SelectionEngine
     internal int PostPairHidWaitMs = 3000;
     internal int HidReadyTimeoutMs = 5000;
     internal int HidPollIntervalMs = 250;
+    /// Minimum gap between an engine unpair returning and the next pair of that device (spec §3,
+    /// value matches macOS postUnpairSettleMs).
+    internal int PostUnpairSettleMs = 2000;
+    internal Func<DateTime> Clock = () => DateTime.UtcNow;
 
     public SelectionEngine(AppConfig config, IUsbMonitor usb, IBluetoothController bt, ILogSink? log = null)
     {
@@ -234,6 +250,8 @@ public sealed class SelectionEngine
     {
         _suspended = true;
         var token = Interlocked.Increment(ref _runToken);
+        // The app releases the devices next; a pair still in flight must be undone when it lands.
+        Volatile.Write(ref _globalReleaseToken, token);
         Info($"system suspending: automation halted, in-flight work superseded (run #{token})");
     }
 
@@ -249,14 +267,34 @@ public sealed class SelectionEngine
     /// Establish presence from scratch (launch, wake, profile switch) and schedule a debounced
     /// evaluation — the macOS seed() behavior, so a KVM re-enumeration storm at seed time gets
     /// the same debounce as any other USB activity. Tests drive EvaluateNowAsync directly.
-    public Task SeedAsync()
+    ///
+    /// The USB snapshot is taken off the calling (UI) thread: on Windows it is a synchronous WMI
+    /// enumeration (~0.3–0.6 s). If it fails (e.g. WMI not ready right after wake), the previous
+    /// presence is kept and the evaluation still runs, instead of leaving the engine with cleared
+    /// state and nothing scheduled.
+    public async Task SeedAsync()
     {
-        _presentProductIDs.Clear();
-        _automationActed = false;
         var source = Config.Source;
+        IReadOnlyList<UsbDeviceInfo>? snapshot = null;
         if (source is not null)
         {
-            foreach (var d in _usb.Snapshot())
+            try { snapshot = await Task.Run(() => _usb.Snapshot()); }
+            catch (Exception ex)
+            {
+                Warn($"seed: USB snapshot failed ({Classify(ex).Message}); keeping the previous presence");
+            }
+        }
+
+        _automationActed = false;
+        _seedReconcilePending = true;
+        if (source is null)
+        {
+            _presentProductIDs.Clear();
+        }
+        else if (snapshot is not null)
+        {
+            _presentProductIDs.Clear();
+            foreach (var d in snapshot)
                 if (d.VendorID == source.VendorID && source.ProductIDs.Contains(d.ProductID))
                     _presentProductIDs.Add(d.ProductID);
         }
@@ -265,7 +303,6 @@ public sealed class SelectionEngine
             ? "seed: no source configured"
             : $"seed: source '{source.Name}' {(_presentProductIDs.Count > 0 ? "present" : "absent")}");
         ScheduleEvaluate();
-        return Task.CompletedTask;
     }
 
     public Task ReevaluateAsync() => SeedAsync();
@@ -354,7 +391,7 @@ public sealed class SelectionEngine
         Selected = present;                 // always reflect real presence for the UI
         RaiseChanged();
 
-        var wouldAct = present != _automationActed;
+        var wouldAct = present != _automationActed || (!present && _seedReconcilePending);
         if (_suspended)
         {
             if (wouldAct) Info($"evaluate: system suspending, not acting on '{LastReason}'");
@@ -363,6 +400,18 @@ public sealed class SelectionEngine
         if (Config.Paused)                  // automation suspended; don't act
         {
             if (wouldAct) Info($"evaluate: automation paused, not acting on '{LastReason}'");
+            return;
+        }
+
+        // Only the first unpaused evaluation after a seed reconciles (spec §3 Evaluate step 5).
+        var reconcile = _seedReconcilePending;
+        _seedReconcilePending = false;
+
+        if (!present && !_automationActed && reconcile)
+        {
+            var run = NewRun("reconcile: source absent after seed");
+            Info($"run #{run.Token}: source absent after a seed -> releasing anything this PC may still hold");
+            await ReleaseHeldAsync(run);
             return;
         }
 
@@ -460,7 +509,7 @@ public sealed class SelectionEngine
 
     private async Task RawOpAsync(BTDevice device, string op, Func<CancellationToken, Task> call, bool releases)
     {
-        BeginManual(device, $"manual {op}");
+        var run = BeginManual(device, $"manual {op}");
         MarkBusy(device.Id);
         try
         {
@@ -468,7 +517,17 @@ public sealed class SelectionEngine
             Info($"{device.Name}: manual {op} started");
             try
             {
-                await WithTimeoutAsync(call);
+                if (releases)
+                {
+                    NoteIntent(_releaseRequestedToken, device.Id, run.Token);
+                    await UnpairTrackedAsync(device);
+                }
+                else
+                {
+                    NoteIntent(_connectRequestedToken, device.Id, run.Token);
+                    await WaitForUnpairGateAsync(device, run, respectSelection: false);
+                    await WithTimeoutAsync(call);
+                }
             }
             catch (Exception ex)
             {
@@ -550,6 +609,7 @@ public sealed class SelectionEngine
         var total = Stopwatch.StartNew();
 
         Info($"{name}: connect started (run #{run.Token}, {run.Trigger}; managePairing={device.ManagePairing})");
+        NoteIntent(_connectRequestedToken, device.Id, run.Token);
         SetStatus(device.Id, DeviceStatus.Connecting);
 
         // Optional per-device stagger before connecting.
@@ -601,8 +661,8 @@ public sealed class SelectionEngine
                     Info($"{name}: try {tries}: {label} OK ({Ms(sw)})");
                 }
 
-                if (!device.ManagePairing && await _bt.IsConnectedAsync(addr)
-                    && await _bt.IsHidReadyAsync(addr) != false)
+                if (!device.ManagePairing && await SafeIsConnectedAsync(device)
+                    && await SafeHidReadyAsync(device) != false)
                 {
                     Info($"{name}: already connected");
                     SetStatus(device.Id, DeviceStatus.Connected);
@@ -610,22 +670,36 @@ public sealed class SelectionEngine
                 }
 
                 var hidOnPairingLink = false;
+                var paired = false;   // this try created/confirmed a bond (undo it if a release overtakes us)
                 if (device.ManagePairing)
                 {
                     if (freshBond)
                     {
                         Info($"{name}: try {tries}: removing a possibly stale bond before re-pairing");
-                        await BestEffortAsync(device, "stale-bond unpair", ct => _bt.UnpairAsync(addr, ct));
+                        await BestEffortUnpairAsync(device, "stale-bond unpair");
                         freshBond = false;  // once per hard failure; soft retries in between don't repeat it
                     }
-                    await Step("pair", ct => _bt.PairAsync(addr, ct));
 
-                    // A release may have been requested while we paired; don't go on to
-                    // connect (on Windows: pair again) a device the newer run is releasing.
+                    // Spec §3: never pair while an unpair of this device is in flight (a superseded
+                    // release, e.g. a KVM bounce) or within ~2 s of one returning. On Windows,
+                    // WinRT still reported IsPaired=True 17 ms after BluetoothRemoveDevice returned
+                    // (2026-11-12 22:58:57), so the pair "succeeded" without pairing.
+                    step = "unpair gate";
+                    if (await WaitForUnpairGateAsync(device, run, respectSelection) is { } gateStale)
+                    {
+                        Info($"{name}: connect aborted before pairing: {gateStale}");
+                        MarkAborted(device.Id);
+                        return;
+                    }
+
+                    await Step("pair", ct => _bt.PairAsync(addr, ct));
+                    paired = true;
+
+                    // A release may have been requested while we paired; don't go on to connect
+                    // (on Windows: pair again), and undo the bond if a release overtook us.
                     if (StaleReason(run, respectSelection) is { } afterPair)
                     {
-                        Info($"{name}: connect aborted after pairing: {afterPair}");
-                        MarkAborted(device.Id);
+                        await AbortAfterPairAsync(device, run, $"after pairing: {afterPair}");
                         return;
                     }
 
@@ -635,7 +709,7 @@ public sealed class SelectionEngine
                     // post-pair disconnect is a no-op — but skipping the drop + settle when HID is
                     // already up saves ~0.8 s per arrival.)
                     step = "post-pair HID";
-                    if (await HidUpAfterPairAsync(device, addr))
+                    if (await HidUpAfterPairAsync(device, addr, run, respectSelection))
                     {
                         hidOnPairingLink = true;
                     }
@@ -643,29 +717,36 @@ public sealed class SelectionEngine
                     {
                         await BestEffortAsync(device, "post-pair disconnect", ct => _bt.DisconnectAsync(addr, ct));
                         await SleepHook(PostPairSettleMs);
-                        if (StaleReason(run, respectSelection) is { } afterSettle)
-                        {
-                            Info($"{name}: connect aborted after the post-pair settle: {afterSettle}");
-                            MarkAborted(device.Id);
-                            return;
-                        }
+                    }
+                    if (StaleReason(run, respectSelection) is { } afterSettle)
+                    {
+                        await AbortAfterPairAsync(device, run, $"after the post-pair HID wait: {afterSettle}");
+                        return;
                     }
                 }
 
                 if (!hidOnPairingLink)
                 {
                     await Step("connect", ct => _bt.ConnectAsync(addr, ct));
+                    paired |= device.ManagePairing;
 
                     // A clean connect is necessary but not sufficient: IsConnected must agree.
                     step = "verify";
-                    if (!await _bt.IsConnectedAsync(addr))
+                    if (!await SafeIsConnectedAsync(device))
                         throw new BluetoothException("connect completed but the device does not report connected");
                 }
 
                 // A link alone is not success: the device's HID input must be up (null = the
                 // backend can't tell, e.g. not a HID peripheral; then the link counts).
                 step = "HID";
-                if (await WaitForHidAsync(device, addr) == false)
+                var hid = await WaitForHidAsync(device, addr, run, respectSelection);
+                if (StaleReason(run, respectSelection) is { } afterHid)
+                {
+                    if (paired) await AbortAfterPairAsync(device, run, $"after the HID wait: {afterHid}");
+                    else { Info($"{name}: connect aborted after the HID wait: {afterHid}"); MarkAborted(device.Id); }
+                    return;
+                }
+                if (hid == false)
                 {
                     throw new BluetoothException(BluetoothFailureKind.HidNotReady,
                         $"link is up but the HID input never started within {HidReadyTimeoutMs / 1000.0:0.#} s");
@@ -743,6 +824,27 @@ public sealed class SelectionEngine
         OnNotice?.Invoke("Connection failed", $"{name}: gave up after {Plural(tries, "try", "tries")} - {cause}");
     }
 
+    /// Spec §3 Evaluate step 5: after a seed with the source absent, release what this host may
+    /// still hold: disconnect connected devices, unpair managePairing ones (idempotent). Quiet:
+    /// no "Disconnected" notice unless the device was actually connected.
+    private async Task ReleaseHeldAsync(Run run)
+    {
+        foreach (var device in Config.Devices)
+        {
+            if (!device.Enabled) continue;
+            if (StaleReason(run, respectSelection: false) is { } why)
+            {
+                Info($"run #{run.Token}: reconcile stopped: {why}");
+                return;
+            }
+            var connected = await SafeIsConnectedAsync(device);
+            if (!device.ManagePairing && !connected) continue;   // nothing held
+            MarkBusy(device.Id);
+            try { await DisconnectOneAsync(device, run, notify: connected); }
+            finally { ClearBusy(device.Id); }
+        }
+    }
+
     private async Task DisconnectAllAsync(Run run)
     {
         foreach (var device in Config.Devices)
@@ -763,12 +865,15 @@ public sealed class SelectionEngine
     /// after every await — a newer run owns the devices once it starts, and a stale release must
     /// not undo the connect/pair the new run just performed. A failed unpair is retried once:
     /// the bond is what blocks the other host, so a silent release failure strands the device.
-    private async Task DisconnectOneAsync(BTDevice device, Run run)
+    /// notify=false: the quiet reconcile-on-seed release (spec §3 Evaluate step 5) — no
+    /// "Disconnected" notice for a device that wasn't actually connected.
+    private async Task DisconnectOneAsync(BTDevice device, Run run, bool notify = true)
     {
         var addr = device.Address;
         var name = device.Name;
         var total = Stopwatch.StartNew();
         Info($"{name}: release started (run #{run.Token}, {run.Trigger}; managePairing={device.ManagePairing})");
+        NoteIntent(_releaseRequestedToken, device.Id, run.Token);
 
         Failure? disconnectError = null;
         try { await WithTimeoutAsync(ct => _bt.DisconnectAsync(addr, ct)); }
@@ -793,7 +898,7 @@ public sealed class SelectionEngine
             {
                 try
                 {
-                    await WithTimeoutAsync(ct => _bt.UnpairAsync(addr, ct));
+                    await UnpairTrackedAsync(device);
                     unpairError = null;
                     break;
                 }
@@ -834,7 +939,7 @@ public sealed class SelectionEngine
             }
             Info($"{name}: released (unpaired) in {Ms(total)}");
             SetStatus(device.Id, DeviceStatus.Disconnected);
-            OnNotice?.Invoke("Disconnected", name);
+            if (notify) OnNotice?.Invoke("Disconnected", name);
             return;
         }
 
@@ -846,7 +951,7 @@ public sealed class SelectionEngine
         {
             Info($"{name}: disconnected in {Ms(total)}");
             SetStatus(device.Id, DeviceStatus.Disconnected);
-            OnNotice?.Invoke("Disconnected", name);
+            if (notify) OnNotice?.Invoke("Disconnected", name);
         }
     }
 
@@ -872,24 +977,27 @@ public sealed class SelectionEngine
         _ => kind.ToString(),
     };
 
-    /// Right after a pair: wait (bounded by PostPairHidWaitMs) for the HID input the stack starts on
-    /// the pairing link. False when it doesn't come, the link closes, or the backend can't tell; the
-    /// caller then drops the link and reconnects.
-    private async Task<bool> HidUpAfterPairAsync(BTDevice device, string addr)
+    /// Right after a pair: wait for the HID input the stack starts on the pairing link. Bounded by
+    /// PostPairHidWaitMs of wall-clock time AND by the equivalent poll count (each Windows poll is a
+    /// ~0.4 s WMI query, so counting polls alone stretched "3 s" to ~8 s; the poll cap keeps tests
+    /// with an instant SleepHook finite). False when HID doesn't come, the link closes, the run
+    /// goes stale, or the backend can't tell; the caller then drops the link and reconnects.
+    private async Task<bool> HidUpAfterPairAsync(BTDevice device, string addr, Run run, bool respectSelection)
     {
         var sw = Stopwatch.StartNew();
-        var polls = Math.Max(1, PostPairHidWaitMs / Math.Max(1, HidPollIntervalMs));
-        for (var poll = 0; poll <= polls; poll++)
+        var maxPolls = Math.Max(1, PostPairHidWaitMs / Math.Max(1, HidPollIntervalMs));
+        for (var poll = 0; ; poll++)
         {
-            var ready = await _bt.IsHidReadyAsync(addr);
+            if (StaleReason(run, respectSelection) is not null) return false;
+            var ready = await SafeHidReadyAsync(device);
             if (ready is null) return false;
             if (ready == true)
             {
                 Info($"{device.Name}: HID up on the pairing link after {Ms(sw)}");
                 return true;
             }
-            if (poll == polls) break;
-            if (!await _bt.IsConnectedAsync(addr))
+            if (poll >= maxPolls || sw.ElapsedMilliseconds >= PostPairHidWaitMs) break;
+            if (!await SafeIsConnectedAsync(device))
             {
                 if (poll > 0) Info($"{device.Name}: the pairing link closed without HID ({Ms(sw)}); reconnecting");
                 return false;
@@ -900,23 +1008,25 @@ public sealed class SelectionEngine
         return false;
     }
 
-    /// Wait (bounded by HidReadyTimeoutMs) until the device's HID input is up. true/false, or null
-    /// when the backend can't tell (then the link alone counts).
-    private async Task<bool?> WaitForHidAsync(BTDevice device, string addr)
+    /// Wait until the device's HID input is up (same wall-clock + poll-count bound, using
+    /// HidReadyTimeoutMs). true/false, or null when the backend can't tell (then the link alone
+    /// counts). Returns early when the run goes stale; the caller checks staleness next.
+    private async Task<bool?> WaitForHidAsync(BTDevice device, string addr, Run run, bool respectSelection)
     {
         var sw = Stopwatch.StartNew();
-        var polls = Math.Max(1, HidReadyTimeoutMs / Math.Max(1, HidPollIntervalMs));
-        for (var poll = 0; poll <= polls; poll++)
+        var maxPolls = Math.Max(1, HidReadyTimeoutMs / Math.Max(1, HidPollIntervalMs));
+        for (var poll = 0; ; poll++)
         {
-            var ready = await _bt.IsHidReadyAsync(addr);
+            if (StaleReason(run, respectSelection) is not null) return false;
+            var ready = await SafeHidReadyAsync(device);
             if (ready is null) return null;
             if (ready == true)
             {
                 if (poll > 0) Info($"{device.Name}: HID up after {Ms(sw)}");
                 return true;
             }
-            if (poll == polls) break;
-            if (!await _bt.IsConnectedAsync(addr))
+            if (poll >= maxPolls || sw.ElapsedMilliseconds >= HidReadyTimeoutMs) break;
+            if (!await SafeIsConnectedAsync(device))
             {
                 Warn($"{device.Name}: the link dropped before HID came up ({Ms(sw)})");
                 return false;
@@ -925,6 +1035,88 @@ public sealed class SelectionEngine
         }
         Warn($"{device.Name}: link up but no HID after {Ms(sw)}");
         return false;
+    }
+
+    // ---- Unpair bookkeeping (spec §3 "pair waits for a recent unpair") ----
+
+    /// Every engine unpair goes through here so a later pair can wait for it (in flight) and keep
+    /// PostUnpairSettleMs after it returned.
+    private async Task UnpairTrackedAsync(BTDevice device)
+    {
+        var task = WithTimeoutAsync(ct => _bt.UnpairAsync(device.Address, ct));
+        _unpairInFlight[device.Id] = task;
+        try { await task; }
+        finally
+        {
+            if (_unpairInFlight.TryGetValue(device.Id, out var t) && ReferenceEquals(t, task))
+                _unpairInFlight.Remove(device.Id);
+            _lastUnpairReturned[device.Id] = Clock();
+        }
+    }
+
+    private async Task BestEffortUnpairAsync(BTDevice device, string what)
+    {
+        try { await UnpairTrackedAsync(device); }
+        catch (Exception ex) { Warn($"{device.Name}: {what} failed (continuing): {Classify(ex).Summary}"); }
+    }
+
+    /// Wait for an unpair of this device still in flight (a superseded release), then until
+    /// PostUnpairSettleMs have passed since the last one returned. Returns the stale reason if the
+    /// run was superseded meanwhile, else null.
+    private async Task<string?> WaitForUnpairGateAsync(BTDevice device, Run run, bool respectSelection)
+    {
+        if (_unpairInFlight.TryGetValue(device.Id, out var inFlight))
+        {
+            var sw = Stopwatch.StartNew();
+            Info($"{device.Name}: waiting for an unpair of this device still in flight before pairing");
+            try { await inFlight; } catch { /* its owner logs the failure */ }
+            Info($"{device.Name}: in-flight unpair finished after {Ms(sw)}");
+        }
+        if (_lastUnpairReturned.TryGetValue(device.Id, out var last))
+        {
+            var remaining = PostUnpairSettleMs - (int)(Clock() - last).TotalMilliseconds;
+            if (remaining > 0)
+            {
+                Info($"{device.Name}: last unpair returned {PostUnpairSettleMs - remaining} ms ago; settling {remaining} ms before pairing");
+                await SleepHook(remaining);
+            }
+        }
+        return StaleReason(run, respectSelection);
+    }
+
+    // ---- Release-overtakes-pair undo (spec §3: a pair that completes after a release is undone) ----
+
+    private static void NoteIntent(Dictionary<Guid, int> map, Guid id, int token)
+    {
+        if (!map.TryGetValue(id, out var existing) || token > existing) map[id] = token;
+    }
+
+    /// A release (per device, or the suspend release) was requested after this run started, and
+    /// no newer connect has been requested since (a KVM bounce's new connect must keep the bond).
+    private bool ReleaseRequestedAfter(BTDevice device, Run run)
+    {
+        var release = Math.Max(
+            _releaseRequestedToken.TryGetValue(device.Id, out var r) ? r : 0,
+            Volatile.Read(ref _globalReleaseToken));
+        var connect = _connectRequestedToken.TryGetValue(device.Id, out var c) ? c : 0;
+        return release > run.Token && release > connect;
+    }
+
+    /// The run went stale after this try paired the device. If a release overtook it, the bond
+    /// must not stand (the other host would be locked out): unpair it again. Otherwise a newer
+    /// connect owns the device; leave it.
+    private async Task AbortAfterPairAsync(BTDevice device, Run run, string reason)
+    {
+        if (device.ManagePairing && ReleaseRequestedAfter(device, run))
+        {
+            Warn($"{device.Name}: connect aborted {reason}; a release was requested meanwhile, so the new bond is undone");
+            await BestEffortUnpairAsync(device, "undo a pair that completed after a release");
+        }
+        else
+        {
+            Info($"{device.Name}: connect aborted {reason}");
+        }
+        MarkAborted(device.Id);
     }
 
     /// Run a step whose failure must not abort the flow, but must be visible in the log.
@@ -936,11 +1128,23 @@ public sealed class SelectionEngine
 
     private async Task<bool> SafeIsConnectedAsync(BTDevice device)
     {
-        try { return await _bt.IsConnectedAsync(device.Address); }
+        try { return await WithTimeoutAsync(ct => _bt.IsConnectedAsync(device.Address, ct)); }
         catch (Exception ex)
         {
             Warn($"{device.Name}: connection status query failed: {Classify(ex).Summary}");
             return false;
+        }
+    }
+
+    /// HID readiness with the per-call timeout. A failed/hung query counts as "can't tell" (null):
+    /// the link alone then decides, which is the pre-HID-check behavior.
+    private async Task<bool?> SafeHidReadyAsync(BTDevice device)
+    {
+        try { return await WithTimeoutAsync(ct => _bt.IsHidReadyAsync(device.Address, ct)); }
+        catch (Exception ex)
+        {
+            Warn($"{device.Name}: HID readiness query failed: {Classify(ex).Summary}");
+            return null;
         }
     }
 
@@ -957,6 +1161,22 @@ public sealed class SelectionEngine
         try
         {
             await op(cts.Token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            throw new TimeoutException($"no response within {timeout.TotalSeconds:0.#} s");
+        }
+    }
+
+    /// Value-returning variant. WaitAsync makes the await itself honor the timeout even when the
+    /// operation ignores its token (e.g. a hung WMI query).
+    private async Task<T> WithTimeoutAsync<T>(Func<CancellationToken, Task<T>> op)
+    {
+        var timeout = CallTimeout;
+        using var cts = new CancellationTokenSource(timeout);
+        try
+        {
+            return await op(cts.Token).WaitAsync(cts.Token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {

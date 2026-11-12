@@ -47,6 +47,11 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
 
     public IReadOnlyList<UsbDeviceInfo> Snapshot() => Enumerate();
 
+    /// The most recent reconcile result (refreshed every ~2 s and on device changes), for UI that
+    /// must not block on a WMI enumeration. Empty until the first reconcile.
+    public IReadOnlyList<UsbDeviceInfo> LastSnapshot => Volatile.Read(ref _lastSnapshot);
+    private IReadOnlyList<UsbDeviceInfo> _lastSnapshot = Array.Empty<UsbDeviceInfo>();
+
     public void Start()
     {
         lock (_gate)
@@ -156,6 +161,7 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
         try { snapshot = Enumerate(); }
         catch (Exception ex) { Log.Warn("usb", $"reconcile enumerate failed: {ex.Message}"); return; }
         var end = Stopwatch.GetTimestamp();
+        Volatile.Write(ref _lastSnapshot, snapshot);
 
         var signature = new HashSet<uint>(snapshot.Select(d => ((uint)d.VendorID << 16) | d.ProductID));
         Dictionary<string, UsbDeviceInfo> previous;

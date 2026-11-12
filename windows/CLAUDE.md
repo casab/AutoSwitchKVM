@@ -233,6 +233,24 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   comes up. Otherwise it drops + settles 0.8 s + connects, then waits ≤ 5 s for HID → else
   `HidNotReady` (two in a run end it with a power-cycle hint). Background: on 2026-11-12 the Mac
   wedged the trackpad by closing the pairing link before HID came up.
+- **Right after `BluetoothRemoveDevice` returns, WinRT's `IsPaired` is stale** (`True` for tens of
+  ms; seen 2026-11-12 22:58:57 during a KVM bounce), so a pair queued behind the unpair "succeeded"
+  without pairing. The engine follows spec §3: before pairing it waits for an engine unpair of the
+  device still in flight and keeps `PostUnpairSettleMs` (2 s) after the last one returned.
+- **A pair that lands after a release is undone.** The engine records the latest release and connect
+  run per device (plus the suspend release). When a run goes stale after it paired, it unpairs
+  again if a newer release, and no newer connect, was requested. This covers a KVM bounce (keep)
+  vs a switch-away (undo).
+- **Reconcile on seed (spec §3 Evaluate step 5).** A seed clears the latch, so after
+  launch/wake/unpause/profile switch/config change with the source **absent**, the engine quietly
+  releases what this PC may hold. `UnpairCoreAsync` skips the removal (and the release probe)
+  when Windows has neither a bond nor a link, so this costs ~10 ms when there's nothing to do.
+- **No WMI on the UI thread:** `SeedAsync` snapshots via `Task.Run`; a failed snapshot keeps the
+  previous presence and still evaluates. Settings uses `PnpUsbMonitor.LastSnapshot` (cached by the
+  2 s reconcile) and `UsbSnapshotAsync()` for fresh reads.
+- **Going away:** suspend *and* log-off/shutdown (`SessionEnding`) halt the engine and release
+  (bounded 1.5 s). A release that never got to run before sleep is cancelled on resume, and the
+  re-seed decides instead.
 - **USB detection lag.** On 2026-11-12 Windows saw each KVM switch 3.1-3.8 s after the Mac.
   `PnpUsbMonitor` now reconciles on the first event of a burst (leading edge) as well as after
   it, and logs `via <trigger>, enumerate N ms, M ms after the burst started`. Use that to

@@ -226,6 +226,7 @@ public sealed class WinRtBluetooth : IBluetoothController
     private Task<DevicePairingResult>? _orphanPair;
     private string? _orphanAddress;
     private DateTime _orphanSince;
+    private const int OrphanUndoGraceMs = 3000;
     /// Latest intent per device (digits -> want paired + sequence). Decides whether a pairing that
     /// completes after its caller gave up is kept or removed again, and lets a queued pair notice
     /// that a release was requested after it.
@@ -406,10 +407,18 @@ public sealed class WinRtBluetooth : IBluetoothController
                 (status?.ToString() ?? "error"));
             if (status is not (DevicePairingResultStatus.Paired or DevicePairingResultStatus.AlreadyPaired)) return;
 
+            // The latest intent may be the engine's own stale-bond unpair, which is followed within
+            // ~2 s by its next pair (review finding 7). Give a newer pair intent a moment to show up
+            // before undoing a bond the engine actually wants. A real release isn't followed by a
+            // pair, so it only delays the undo by this grace.
+            var digits = Digits(address);
+            for (var waited = 0; !WantsPaired(digits) && waited < OrphanUndoGraceMs; waited += 250)
+                await Task.Delay(250);
+
             await _opLock.WaitAsync();
             try
             {
-                if (WantsPaired(Digits(address)))
+                if (WantsPaired(digits))
                 {
                     Log.Info("bt", $"pair {address}: late pairing kept (a connect is still wanted)");
                     RearmMonitoring(address);
@@ -462,6 +471,25 @@ public sealed class WinRtBluetooth : IBluetoothController
     {
         var addr = ParseAddress(address);
         var sw = Stopwatch.StartNew();
+
+        // Nothing to release? (The engine's reconcile-on-seed and stale-bond paths unpair
+        // idempotently.) Skip the ~3.4 s removal and the probe when Windows has neither a bond nor a
+        // link. A stale "paired" record only makes us do the removal anyway, so this is safe.
+        try
+        {
+            using var known = await BluetoothDevice.FromBluetoothAddressAsync(addr).AsTask(ct);
+            if (known is null ||
+                (!known.DeviceInformation.Pairing.IsPaired && known.ConnectionStatus != BluetoothConnectionStatus.Connected))
+            {
+                Log.Info("bt", $"unpair {address}: not paired and not connected; nothing to release ({sw.ElapsedMilliseconds} ms)");
+                return;
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            Log.Warn("bt", $"unpair {address}: pre-check failed ({ex.Message}); removing anyway");
+        }
 
         // Forcefully remove the device via the classic Win32 API (the same call behind Control
         // Panel "Remove device"). Unlike WinRT UnpairAsync - which removes the pairing record on
