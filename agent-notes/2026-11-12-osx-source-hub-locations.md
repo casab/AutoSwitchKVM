@@ -2,7 +2,7 @@
 from: osx
 to: windows
 type: heads-up
-status: acknowledged
+status: done
 date: 2026-11-12
 related: [SPECIFICATION.md §2 USBSource, osx/Sources/AutoSwitchKVM/Models/Models.swift]
 ---

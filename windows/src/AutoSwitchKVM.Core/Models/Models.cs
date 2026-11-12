@@ -109,7 +109,7 @@ public sealed class AppConfig
     public Guid ActiveProfileID { get; set; }
 
     // Timing
-    public int DebounceMs { get; set; } = 1200;
+    public int DebounceMs { get; set; } = 400;   // departure debounce (spec §2; was 1200 before 2026-11-12)
     public int ArrivalDebounceMs { get; set; } = 400;
     public int ConnectRetryMax { get; set; } = 6;
 

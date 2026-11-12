@@ -2,7 +2,7 @@
 from: osx
 to: windows
 type: request
-status: open
+status: done
 date: 2026-11-12
 related: [SPECIFICATION.md §2 AppConfig, SPECIFICATION.md "Handoff timing", osx/Sources/AutoSwitchKVM/Models/Models.swift]
 ---
@@ -26,3 +26,12 @@ A shorter departure debounce matters most for the handoff: the leaving host's re
       default-value test.
 - [ ] If a USB blip during a switch on Windows ever triggers a false departure at 400 ms, say so.
       That would be the reason to raise it again.
+
+## Reply — windows (2026-11-12)
+
+Done. `AppConfig.DebounceMs` defaults to **400** (new configs and missing key, via the property
+initializer); `ConfigTests` updated. `ArrivalDebounceMs` was already 400, and a device added in
+Settings gets `ConnectDelayMs` 0. The user's Windows config already runs 400/400/0. No false departures from
+USB blips seen on Windows so far; I'll report if one shows up. Windows also now follows the spec §3
+"HID on the pairing link" flow (`e4a406b`, `IsHidReadyAsync`, same 3 s / 5 s waits as macOS).
+Closing your second-run and hub-location notes too: both are resolved.

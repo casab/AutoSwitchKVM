@@ -21,7 +21,7 @@ public class ConfigTests
     public void Defaults_match_spec()
     {
         var cfg = new AppConfig();
-        Assert.Equal(1200, cfg.DebounceMs);
+        Assert.Equal(400, cfg.DebounceMs);
         Assert.Equal(400, cfg.ArrivalDebounceMs);
         Assert.Equal(6, cfg.ConnectRetryMax);
         Assert.Equal(2, cfg.ConnectRetrySecs);
@@ -68,7 +68,7 @@ public class ConfigTests
             // Minimal config: one profile, no timing keys present.
             File.WriteAllText(tmp, "{\"profiles\":[{\"name\":\"Default\"}]}");
             var loaded = new ConfigStore(tmp).Load();
-            Assert.Equal(1200, loaded.DebounceMs);       // default-on-missing
+            Assert.Equal(400, loaded.DebounceMs);        // default-on-missing
             Assert.Equal(45, loaded.BtCallTimeoutSecs);
             Assert.Single(loaded.Profiles);
             Assert.Equal("Default", loaded.ActiveProfileName);
@@ -92,7 +92,7 @@ public class ConfigTests
             File.WriteAllText(tmp, "{ this is not valid json ]");
             var loaded = new ConfigStore(tmp).Load();
             Assert.Single(loaded.Profiles);            // defaults, no crash
-            Assert.Equal(1200, loaded.DebounceMs);
+            Assert.Equal(400, loaded.DebounceMs);
         }
         finally { Cleanup(tmp); }
     }
