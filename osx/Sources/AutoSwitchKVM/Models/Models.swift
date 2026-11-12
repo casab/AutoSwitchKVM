@@ -130,6 +130,9 @@ struct AppConfig: Codable {
     /// Base retry interval (seconds). Backoff between attempts is `connectRetrySecs * 2^(attempt-1)`.
     var connectRetrySecs: Int
     var btCallTimeoutSecs: Int
+    /// Minimum gap (ms) between an unpair of a device returning and the next pair of it (spec §3).
+    /// Only quick KVM bounces pay it: bluetoothd deletes the old key ~1.5 s after the link drops.
+    var postUnpairSettleMs: Int
     var showNotifications: Bool
     /// Notify when a managed device drops while the source is still present (e.g. another host
     /// claimed it). Off by default.
@@ -157,6 +160,7 @@ struct AppConfig: Codable {
         connectRetryMax: Int = 6,
         connectRetrySecs: Int = 2,
         btCallTimeoutSecs: Int = 15,
+        postUnpairSettleMs: Int = 2000,
         showNotifications: Bool = false,
         notifyUnexpectedDisconnect: Bool = false,
         autoReconnectOnDrop: Bool = true,
@@ -178,6 +182,7 @@ struct AppConfig: Codable {
         self.connectRetryMax = connectRetryMax
         self.connectRetrySecs = connectRetrySecs
         self.btCallTimeoutSecs = btCallTimeoutSecs
+        self.postUnpairSettleMs = postUnpairSettleMs
         self.showNotifications = showNotifications
         self.notifyUnexpectedDisconnect = notifyUnexpectedDisconnect
         self.autoReconnectOnDrop = autoReconnectOnDrop
@@ -219,6 +224,7 @@ struct AppConfig: Codable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion, profiles, activeProfileID
         case debounceMs, arrivalDebounceMs, connectRetryMax, connectRetrySecs, btCallTimeoutSecs
+        case postUnpairSettleMs
         case showNotifications, notifyUnexpectedDisconnect, autoReconnectOnDrop
         case launchAtLogin, paused, dockAutoHide
         case globalHotkeysEnabled, hotkeyPause, hotkeyConnectAll, hotkeyDisconnectAll
@@ -233,6 +239,7 @@ struct AppConfig: Codable {
         connectRetryMax = try c.decodeIfPresent(Int.self, forKey: .connectRetryMax) ?? 6
         connectRetrySecs = try c.decodeIfPresent(Int.self, forKey: .connectRetrySecs) ?? 2
         btCallTimeoutSecs = try c.decodeIfPresent(Int.self, forKey: .btCallTimeoutSecs) ?? 15
+        postUnpairSettleMs = try c.decodeIfPresent(Int.self, forKey: .postUnpairSettleMs) ?? 2000
         showNotifications = try c.decodeIfPresent(Bool.self, forKey: .showNotifications) ?? false
         notifyUnexpectedDisconnect = try c.decodeIfPresent(Bool.self, forKey: .notifyUnexpectedDisconnect) ?? false
         autoReconnectOnDrop = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectOnDrop) ?? true
@@ -284,6 +291,7 @@ struct AppConfig: Codable {
         try c.encode(connectRetryMax, forKey: .connectRetryMax)
         try c.encode(connectRetrySecs, forKey: .connectRetrySecs)
         try c.encode(btCallTimeoutSecs, forKey: .btCallTimeoutSecs)
+        try c.encode(postUnpairSettleMs, forKey: .postUnpairSettleMs)
         try c.encode(showNotifications, forKey: .showNotifications)
         try c.encode(notifyUnexpectedDisconnect, forKey: .notifyUnexpectedDisconnect)
         try c.encode(autoReconnectOnDrop, forKey: .autoReconnectOnDrop)

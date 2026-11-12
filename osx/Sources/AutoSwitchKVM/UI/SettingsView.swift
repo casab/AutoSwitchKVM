@@ -455,6 +455,11 @@ struct GeneralTab: View {
                 TimingSlider(
                     title: "Per-call timeout", value: $store.config.btCallTimeoutSecs,
                     range: 1...30, unit: "s")
+                TimingSlider(
+                    title: "Pause after unpair before re-pairing", value: $store.config.postUnpairSettleMs,
+                    range: 0...5000, step: 100, unit: "ms"
+                )
+                .help("Only quick KVM bounces wait for this. macOS finishes removing a pairing ~1.5 s late.")
             } header: {
                 Label("Timing", systemImage: "timer")
             }

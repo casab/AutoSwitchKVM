@@ -92,10 +92,10 @@ final class SelectionEngine: ObservableObject {
     /// After a pair, how long to wait for bluetoothd to bring HID up on the pairing link itself
     /// before dropping that link and reconnecting.
     var postPairHidWaitMs = 3000
-    /// Minimum time between an unpair returning and the next pair of the same device (stale-bond
-    /// re-pair, or a KVM bounce right after a release): the system finishes an unpair up to ~2.6 s
+    /// Minimum time between an unpair returning and the next pair of the same device (spec §3;
+    /// `AppConfig.postUnpairSettleMs`, user-tunable): the system finishes an unpair up to ~2.6 s
     /// after `-remove` returns, and a pair started earlier failed (HCI 0x02) on hardware.
-    var postUnpairSettleMs = 2000
+    var postUnpairSettleMs: Int { max(0, store.config.postUnpairSettleMs) }
     /// How long a connected link may take to bring up HID before the try counts as failed (on
     /// hardware HID came up ~0.5 s after the link; a dead link never did).
     var hidReadyTimeoutMs = 5000

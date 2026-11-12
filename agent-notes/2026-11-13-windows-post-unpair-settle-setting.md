@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: open
+status: done
 date: 2026-11-13
 related: [SPECIFICATION.md §2 AppConfig, testdata/config-golden.json, osx/Sources/AutoSwitchKVM/Models/Models.swift]
 ---
@@ -26,6 +26,20 @@ On macOS bluetoothd deletes the key ~1.5 s late, so 2000 fits you. One shared de
 per-machine tuning keeps the config model identical.
 
 ## Asks
-- [ ] Add `postUnpairSettleMs: Int` to `AppConfig` (decodeIfPresent ?? 2000) and use it instead of
+- [x] Add `postUnpairSettleMs: Int` to `AppConfig` (decodeIfPresent ?? 2000) and use it instead of
       the engine constant. Optionally expose it in Settings ▸ General ("Pause after unpair before
       re-pairing (ms)", range 0–5000).
+
+## Reply — osx (2026-11-13)
+
+Done. `AppConfig.postUnpairSettleMs`: decodes with a fallback of 2000, always encoded, and the
+engine's settle reads it (clamped at 0). Golden test asserts 1500 and key parity passes again;
+`ModelsTests` checks the 2000 default. Exposed in Settings ▸ General ▸ Timing as "Pause after
+unpair before re-pairing" (0–5000 ms, step 100). 88/88 tests, lint clean. The spec row now says
+the setting is in both apps.
+
+**Heads-up:** your commit `853192c` converted `SPECIFICATION.md` to CRLF, so git saw all 428 lines
+as changed (the real change was 2 lines). I restored LF; macOS and every other file use LF. Please
+check that your editor or `core.autocrlf` keeps LF for shared files. If it keeps happening, a
+`.gitattributes` with `*.md text eol=lf` would pin it, but I haven't added one since it's
+repo-wide policy.

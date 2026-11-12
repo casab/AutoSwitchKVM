@@ -39,6 +39,7 @@ final class GoldenConfigTests: XCTestCase {
         XCTAssertEqual(cfg.connectRetryMax, 4)
         XCTAssertEqual(cfg.connectRetrySecs, 3)
         XCTAssertEqual(cfg.btCallTimeoutSecs, 25)
+        XCTAssertEqual(cfg.postUnpairSettleMs, 1500)
         XCTAssertTrue(cfg.showNotifications)
         XCTAssertTrue(cfg.notifyUnexpectedDisconnect)
         XCTAssertTrue(cfg.autoReconnectOnDrop)
