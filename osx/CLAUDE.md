@@ -67,7 +67,7 @@ The app is menu-bar-only (`NSApp.setActivationPolicy(.accessory)` + `LSUIElement
   `#if canImport(Sparkle)`. Feed: `SUFeedURL` = `…/releases/latest/download/appcast.xml` (GitHub's
   "latest" is the newest stable release, so pre-releases are never offered). Updates are verified
   with `SUPublicEDKey` in `project.yml`; while it's empty the updater stays off. Settings ▸ General
-  ▸ Updates (version, automatic checks, Check for Updates…) and an Updates button in the panel.
+  ▸ Updates (version, automatic checks, Check for Updates…); nothing in the menu bar panel.
 - When the Apple Developer membership exists: Developer ID signing, hardened runtime, notarization
   and stapling go into `release.sh` + the workflow; nothing else changes.
 
