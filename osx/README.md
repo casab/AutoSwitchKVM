@@ -1,197 +1,173 @@
-# AutoSwitch KVM — macOS
+# AutoSwitch KVM for macOS
 
-The macOS app. This is a platform folder — run all commands (`swift build`, `swift test`,
-`xcodegen generate`) from here (`osx/`). Cross-platform overview is in the repo-root `README.md`.
+**Your Bluetooth trackpad and keyboard follow your KVM switch to this Mac, and leave with it.**
 
-A native macOS menu bar app that automatically connects/disconnects Bluetooth devices when a
-chosen USB "switcher source" appears or disappears — e.g. when your KVM switches this Mac in,
-its trackpad/keyboard reconnect; when it switches away, they release for the other host.
+AutoSwitch KVM lives in the menu bar. When your KVM switches to this Mac it connects your Bluetooth
+devices, pairing them first if needed. When the KVM switches away it releases them, so your other
+computer can take over. It's the Mac half of a pair: the [Windows app](../windows/README.md) does
+the same on your PC. See the [project overview](../README.md) for the bigger picture.
 
-Replaces the Hammerspoon prototype in `reference/hammerspoon_init.lua`. See `PLAN.md` for the
-full design.
+<p align="center">
+  <img src="docs/images/menu-bar-panel.png" alt="Menu bar panel: KVM status, each device with its state and switch, Connect all / Disconnect all" width="300">
+</p>
 
-## Requirements
+> **Status: stable.** Used every day to move an Apple Magic Trackpad between a Mac and a Windows
+> PC. Bug reports and ideas are welcome on
+> [GitHub Issues](https://github.com/casab/AutoSwitchKVM/issues).
 
-- macOS 13 (Ventura) or later
-- Xcode 15+ (for the SwiftUI / `MenuBarExtra` and `SMAppService` APIs)
+## Install
 
-## Open & run
+1. Download **`AutoSwitchKVM-<version>-macos.dmg`** from the latest
+   [release](https://github.com/casab/AutoSwitchKVM/releases) and drag **AutoSwitch KVM** into
+   **Applications**. One download covers Apple silicon and Intel Macs.
+2. Open it. The app isn't notarized by Apple yet, so macOS blocks the first open: go to
+   **System Settings ▸ Privacy & Security** and click **Open Anyway**. You only do this once.
+3. When macOS asks whether AutoSwitch KVM may use **Bluetooth**, click **Allow**. It can't move
+   your devices without it.
 
-There are two ways to build it. The Swift Package is fastest; the generated `.xcodeproj`
-produces a proper `.app` bundle (recommended — it eliminates console noise from missing
-bundle identity and is the path to signing).
+Requirements: macOS 13 Ventura or later, with Bluetooth.
 
-### Option A — proper .app via XcodeGen (recommended)
+**Updates are automatic.** The app checks once a day and offers new versions itself. To check
+now, or to turn the daily check off, open **Settings ▸ General ▸ Updates**.
 
-```sh
-brew install xcodegen            # once
-cd <this folder>
-xcodegen generate                # creates AutoSwitchKVM.xcodeproj
-open AutoSwitchKVM.xcodeproj
-```
+## Set up (about two minutes)
 
-Select the **AutoSwitchKVM** scheme + "My Mac" and Run.
+Click the AutoSwitch KVM icon in the menu bar and choose **Settings**.
 
-The generated project is **self-signed** (ad-hoc, "Sign to Run Locally") out of the box — no
-Apple account needed. To sign with your Apple Developer account instead (so Bluetooth/TCC
-permissions and notification authorization persist across rebuilds), set your Team ID in
-`project.yml` (`DEVELOPMENT_TEAM`) and change `CODE_SIGN_IDENTITY` to `Apple Development`, then
-re-run `xcodegen generate`. Developer ID signing + notarization (for sharing the app) is a later
-step — see `IMPROVEMENTS.md`.
+1. **Teach it your KVM.** In the **Source** tab, click **Learn source…**, then switch your KVM to
+   the other computer and back. AutoSwitch shows the USB devices that came and went (usually hubs
+   inside the KVM). Keep those, untick anything else, give the source a name such as "Desk KVM",
+   and save. You can also pick the devices yourself with **Pick manually…**.
+2. **Add your devices.** In the **Devices** tab, click **Add** and pick your trackpad, keyboard or
+   mouse from the devices this Mac knows. For the **Magic Trackpad**, or any device that only
+   pairs with one computer at a time, turn on **Manage pairing**.
+3. **Install it on your other computer too** and set it up the same way, so that computer
+   releases the devices when the KVM leaves it.
 
-### Option B — Swift Package (quick)
+That's it. Switch the KVM and your devices follow, usually within a few seconds.
 
-1. Open `Package.swift` in Xcode.
-2. Select the **AutoSwitchKVM** scheme and a "My Mac" destination, then Run.
+<p align="center">
+  <img src="docs/images/settings-devices.png" alt="Settings, Devices tab: each device with its state, Manage pairing, connect delay and manual controls" width="640">
+</p>
 
-On first run, macOS may prompt for Bluetooth access — allow it. The app runs **unsandboxed**
-(IOKit + IOBluetooth need it). Developer ID signing + notarization for distribution is a later
-step — see `IMPROVEMENTS.md`.
+## Everyday use
 
-### Quieting Xcode console noise
+Click the menu bar icon for a quick look:
 
-Running an unsigned dev build logs a lot of benign `os_log` chatter (CoreUI bundle lookups,
-App Intents / Spotlight "donation" failures, Dock/status-item scene messages). None affect
-behavior. To silence it when you don't need logs, add `OS_ACTIVITY_MODE = disable` to the Run
-scheme (Product ▸ Scheme ▸ Edit Scheme ▸ Run ▸ Arguments ▸ Environment Variables). Note this also
-hides the app's own `os.Logger` lines from the Xcode console (they remain in the in-app Activity
-panel and Console.app / `log stream`), so leave it off while debugging.
+- **What's happening:** whether the KVM is on this Mac ("Source active"), plus each device's
+  state: Connected, Connecting…, Disconnected, or Error (Settings shows the reason at the top).
+- **A switch per device**, to leave a device out of the automatic handoff for a while.
+- **Pause** automation, or **Connect all** / **Disconnect all** by hand.
+- **Profiles**, when you have more than one.
 
-## Using it
+The icon itself changes when the KVM is on this Mac, when it's elsewhere, when you've paused, and
+when Bluetooth is off.
 
-1. Click the menu bar icon ▸ **Settings…**
-2. **Source** tab: either
-   - **Learn source…** — click it, then switch your KVM to another computer and back. The app
-     detects which USB devices appeared/disappeared, lets you **uncheck** anything that isn't part
-     of the switch (e.g. a mouse), and **name** the source; or
-   - **Pick manually…** — choose the device(s) from the attached list and name them.
+Also in Settings:
 
-   A source is one vendor plus its product IDs (a hub often exposes several), so all selected
-   devices must share a vendor.
-3. **Devices** tab: **Add** a Bluetooth device (pick from paired devices, or type a name +
-   address like `3c-50-02-bf-22-45`). Toggle **Manage pairing** for devices like the Magic
-   Trackpad that must be unpaired on release and re-paired on return. Reorder cards with the
-   up/down arrows (devices connect top-to-bottom) and set a per-device **Connect delay** to stagger.
-4. The app now connects enabled devices when the source appears and disconnects them when it's gone.
+- **Profiles:** separate setups (a KVM source plus its devices), e.g. "Desk" and "Travel". Switch
+  between them from the bar at the top of Settings or from the menu bar.
+- **Device order and delay:** devices connect top to bottom; a per-device delay can stagger them.
+- **Keyboard shortcuts** (General): optional system-wide shortcuts to pause, connect all and
+  disconnect all. The defaults are ⌃⌥⌘P / ⌃⌥⌘C / ⌃⌥⌘D, and you can record your own.
+- **Launch at login**, **notifications**, and automatic **reconnect** when a device drops.
+- **Back up or restore** all your settings as a file (General ▸ Configuration).
+- **Extras:** hide the Dock automatically when the Mac is on its built-in display only.
 
-From the **menu bar** you can also **Pause/Resume automation** (the icon changes while paused) and
-trigger **Connect all now** / **Disconnect all now** manually. In General you can enable
-**Show notifications** (connect/disconnect alerts) and **Notify when a device drops unexpectedly**,
-tune timing (separate arrival/departure debounce, retries, per-call timeout), and **Export…/Import…**
-all settings as a JSON file.
+AutoSwitch also releases your devices when the Mac goes to sleep, and catches up when it wakes.
 
-**Profiles.** A profile is a named source + device set (e.g. "Desk", "Travel"). Switch between
-them from the profile bar at the top of Settings, or from the menu bar — segmented buttons for up
-to three profiles, an overflow (…) menu for more, hidden entirely when there's only one.
-Add/rename/delete in Settings. Timing and other global options are shared across profiles.
+## Troubleshooting
 
-**Global shortcuts.** Off by default. Enable in Settings ▸ General for system-wide hotkeys to
-pause/resume, connect all, and disconnect all. Each combo is **user-assignable** — click Record and
-press a combo with at least one of ⌃⌥⌘⇧ (defaults are ⌃⌥⌘P / ⌃⌥⌘C / ⌃⌥⌘D; ✕ clears one,
-**Restore defaults** resets all three). No Accessibility permission needed.
+- **A device takes a few seconds to connect after a switch.** That's usually the other computer
+  still holding it; AutoSwitch keeps retrying until it lets go. If it never arrives, check that
+  AutoSwitch is running on the other computer too.
+- **The trackpad says it's stuck** ("paired but never started its HID connection"). Switch the KVM
+  to the other computer and back, or turn the trackpad off and on.
+- **The Mac thinks the KVM is here when it isn't.** Some docks contain the same USB hubs as the
+  KVM. Run **Learn source…** again: it pins the source to the KVM's own port.
+- **Nothing happens at all.** Check **System Settings ▸ Privacy & Security ▸ Bluetooth** and make
+  sure AutoSwitch KVM is allowed.
+- **"AutoSwitch KVM is already running."** Only one copy can manage your devices at a time; use
+  the one in the menu bar.
+- **Reporting a bug.** In **Settings ▸ Diagnostics**, set **Log detail** to **Detailed**,
+  reproduce the problem, then click **Show Log Files** and attach that day's log. At the default
+  level the log stays small: a few lines per switch.
 
-## Manual device controls
+**Privacy:** everything happens on your Mac. The only network request is the update check to
+GitHub. Settings are in `~/Library/Application Support/AutoSwitchKVM`, logs in
+`~/Library/Logs/AutoSwitchKVM` (kept for 14 days).
 
-Each device card (Devices tab) has manual **Connect / Disconnect / Pair / Unpair** buttons, with
-results shown in the **Activity** log — handy for troubleshooting.
+**Uninstall:** quit the app from its menu, then drag it from Applications to the Trash. Delete the
+two folders above too if you don't plan to reinstall.
 
-The riskiest piece, **unpair**, has no public API: we use the private `-[IOBluetoothDevice remove]`
-selector (the same call `blueutil` makes), validated working on a Magic Trackpad. If it ever breaks
-across a macOS release, the fallback is to bundle `blueutil` invoked only for unpair, swapped in
-behind the `BluetoothController` protocol — no other code changes.
+---
 
-## Project layout
+## For developers
 
-```
-Package.swift                  SwiftPM manifest (app + test targets)
-project.yml                    XcodeGen spec for a proper .app bundle
-Info.plist                     Bundle identity / usage strings
-Resources/Assets.xcassets      App icon (XcodeGen .app build only; not in the SwiftPM target)
-Sources/AutoSwitchKVM/
-  App/
-    AutoSwitchKVMApp.swift     @main App: MenuBarExtra + Settings window, accessory policy
-    AppController.swift        Coordinator: owns managers, wires them, exposes actions
-  Models/
-    Models.swift               USBSource, BTDevice, Profile, AppConfig (profiles + active accessors)
-    ConfigStore.swift          JSON persistence (injectable directory for tests)
-  USB/
-    USBMonitoring.swift        Protocol the engine depends on (mockable)
-    USBMonitor.swift           IOKit attach/detach notifications + enumeration
-    SourceLearner.swift        Detects source devices by watching changes during a KVM switch
-  Bluetooth/
-    BluetoothController.swift  Backend protocol + errors + timeout helper
-    IOBluetoothController.swift Native impl (sync connect, pair, private-API unpair, power, events)
-  Engine/
-    SelectionEngine.swift      Debounced state machine: source presence -> connect/disconnect
-  System/
-    SleepWakeMonitor.swift     Sleep -> disconnect; wake -> re-seed
-    LoginItem.swift            Launch at login (SMAppService)
-    DockManager.swift          Extras: auto-hide Dock on built-in-display-only
-  UI/
-    MenuContentView.swift      Menu bar panel (status, device cards, quick actions)
-    SettingsView.swift         Profiles bar + Source / Devices / General / Extras / Diagnostics tabs
-    SourceConfiguration.swift  Learn + manual source editor sheets (name + device checkboxes)
-    DiagnosticsView.swift      Read-only USB + Bluetooth state for troubleshooting
-Tests/AutoSwitchKVMTests/
-  Mocks.swift                  Mock USB + Bluetooth for deterministic tests
-  SelectionEngineTests.swift   Connect/disconnect transitions, pair ordering, pause, edge cases
-  ConfigStoreTests.swift       Persistence round-trip
-  ModelsTests.swift            Address normalization, display formatting
-  ProfilesTests.swift          Legacy migration, active-profile accessors, profile round-trip
-reference/hammerspoon_init.lua The original prototype this replaces
-PLAN.md / IMPROVEMENTS.md      Design, milestones, roadmap
-```
+### Build and run
 
-## Running tests
+Requirements: **Xcode 16 or later** (the code needs the Swift 6 toolchain). The app targets
+macOS 13+. Run the commands from this folder (`osx/`).
 
-The engine, config persistence, and models are unit-tested via mocks (no hardware needed):
+- **Quick loop (Swift Package):** open `Package.swift` in Xcode, choose the **AutoSwitchKVM**
+  scheme and **My Mac**, and run. Or `swift build` from the terminal.
+- **The real `.app`:** `brew install xcodegen` once, then `xcodegen generate` and open
+  `AutoSwitchKVM.xcodeproj`. Use this for anything that needs a bundle: notifications, launch at
+  login, and automatic updates.
+- **Tests:** `swift test` (or ⌘U). The engine is tested against fake USB and Bluetooth, so no
+  hardware is needed. CI runs build, tests and a blocking `swift-format` lint on every push.
+- **Only one copy runs.** Quit the installed app before running a dev build; the dev build would
+  otherwise say it's already running.
+- Local builds are self-signed, so macOS may ask for the Bluetooth permission again after a
+  rebuild.
 
-```sh
-swift test
-```
+### How it's built
 
-Or in Xcode (with `Package.swift` open): press ⌘U.
+A single SwiftUI menu bar target, organized by folder under `Sources/AutoSwitchKVM/`:
 
-`swift build` + `swift test` also run in CI on every push/PR via GitHub Actions
-(`.github/workflows/ci.yml`), alongside a blocking `swift-format` lint (config in `.swift-format`).
+- **`Engine/`**: `SelectionEngine`, the switching state machine. It debounces USB changes,
+  connects or releases devices in *runs* that a newer switch can cancel, retries with failure
+  classification (the other computer still holding the device is retried patiently; a stale
+  pairing is redone), and releases devices before sleep.
+- **`USB/`**: IOKit attach/detach monitoring with a periodic reconcile, and the source learner.
+  Sources are matched by USB IDs and bus location, so identical hubs elsewhere don't count.
+- **`Bluetooth/`**: IOBluetooth pairing, connecting and unpairing, with every result code
+  decoded. Unpairing uses `-[IOBluetoothDevice remove]` (there's no public API; `blueutil` uses
+  the same call). A device counts as connected only once its HID connection is up.
+- **`Models/`**, **`System/`**, **`Support/`**, **`UI/`**: settings and profiles stored as JSON,
+  sleep/wake, login item, shortcuts, notifications, single-instance lock, logging (with a
+  user-set log level), and the menu bar panel and Settings window. `App/` wires it together and
+  holds the Sparkle updater.
 
-## Logs
+The behavior both platforms implement is specified in [`../SPECIFICATION.md`](../SPECIFICATION.md).
+[`CLAUDE.md`](CLAUDE.md) has the detailed engineering notes and the hardware lessons behind them,
+[`PLAN.md`](PLAN.md) the original design, and [`IMPROVEMENTS.md`](IMPROVEMENTS.md) the roadmap.
+`reference/hammerspoon_init.lua` is the prototype the app grew from.
 
-**Start here:** every line is also written to a daily file,
-`~/Library/Logs/AutoSwitchKVM/app-yyyyMMdd.log` (14 days kept; **Settings ▸ Diagnostics ▸ Show Log
-Files**). It survives restarts and records each handoff with timings: when the source ids
-detach/attach, every connect try and step, decoded IOBluetooth result codes, and the release. Share
-it when reporting a failed handoff. The unified log below is handy live, but it is not a reliable
-record. One real run kept none of the app's own lines.
+### Logs while developing
 
-The app logs via `os.Logger` under subsystem `com.enginal.AutoSwitchKVM` (categories: `app`,
-`usb`, `bluetooth`, `engine`). Watch them live with:
+Besides the daily file, the app logs through `os.Logger` (subsystem `com.enginal.AutoSwitchKVM`,
+categories `app`, `usb`, `bluetooth`, `engine`):
 
 ```sh
 log stream --predicate 'subsystem == "com.enginal.AutoSwitchKVM"'
 ```
 
-or browse in Console.app. The same lines are captured in-app under **Settings ▸ Diagnostics ▸ Debug
-logs**, where you can copy or export them to a file for sharing.
+For a handoff that went wrong, macOS's own Bluetooth log usually shows why:
+`/usr/bin/log show --predicate 'process == "bluetoothd"' --last 10m`.
 
-## Known caveats / things to verify on-device
+### Releasing
 
-- **Private unpair API** (`-[IOBluetoothDevice remove]`) — success is judged by re-checking
-  `isPaired()` since the selector's return value is unreliable. Not guaranteed across macOS releases.
-- **Connect uses the synchronous `openConnection()` deliberately** — the async callback proved
-  unreliable for this handoff (link up but HID dead). Don't switch it back.
-- **Programmatic pairing** of HID devices auto-confirms secure-simple-pairing prompts; a device
-  that demands a PIN won't pair headlessly.
-- **Launch at login** (`SMAppService`) needs a real app bundle; works when run from Xcode, not
-  from a bare `swift run`.
-- **Notifications** require a real `.app` bundle (the XcodeGen build). In a plain SwiftPM run they
-  are silently skipped to avoid a `UNUserNotificationCenter` crash.
-- **Menu bar icon** updates on source active/inactive; per-device status shows in the menu and
-  the Devices tab.
+Push a version tag. Together with the Windows build, the **macOS release** workflow builds a
+universal app, signs it, packs the DMG, and attaches it to the same GitHub release, along with the
+signed update feed (`appcast.xml`) that installed copies check:
 
-## Next steps
+```sh
+git tag v0.2.0 && git push origin v0.2.0
+```
 
-See `IMPROVEMENTS.md` for the roadmap. Remaining: Developer ID signing + notarization for
-distribution, lower-value polish, and the optional `blueutil` fallback. (The robustness and
-engineering-quality passes — power awareness, reliable connect, backoff, per-event debounce,
-disconnect notice, schema versioning, error banner, and blocking lint — are done.)
+A pre-release tag (`v0.2.0-beta.1`) is never offered as an update. To build a DMG locally:
+`tools/release.sh 0.2.0` (output in `build/release/`). The workflow needs the repository secrets
+`SPARKLE_ED_PRIVATE_KEY` (signs updates) and, optionally, `MACOS_SIGNING_P12` +
+`MACOS_SIGNING_P12_PASSWORD` (a fixed signing certificate, so the Bluetooth permission survives
+updates). With an Apple Developer ID, notarization would slot into the same script.

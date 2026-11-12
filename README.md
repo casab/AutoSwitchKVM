@@ -10,8 +10,11 @@ app on macOS, a tray app on Windows). It notices when the KVM switches to or awa
 computer and moves your Bluetooth devices along with it.
 
 <p align="center">
-  <img src="windows/docs/images/tray-panel.png" alt="AutoSwitch KVM tray panel on Windows" width="320">
+  <img src="osx/docs/images/menu-bar-panel.png" alt="AutoSwitch KVM menu bar panel on macOS" height="340">
+  &nbsp;&nbsp;
+  <img src="windows/docs/images/tray-panel.png" alt="AutoSwitch KVM tray panel on Windows" height="340">
 </p>
+<p align="center"><sub>The menu bar panel on macOS (left) and the tray panel on Windows (right).</sub></p>
 
 ## The problem it solves
 
@@ -48,14 +51,15 @@ AutoSwitch KVM does those steps for you every time the KVM switches.
 
 | | Platform | Get it | Status |
 |---|---|---|---|
-| 🍎 | **macOS** 13 Ventura or later | `AutoSwitchKVM-<version>-macos.dmg` from [Releases](https://github.com/casab/AutoSwitchKVM/releases) | Stable |
+| 🍎 | **macOS** 13 Ventura or later, Apple silicon or Intel | `AutoSwitchKVM-<version>-macos.dmg` from [Releases](https://github.com/casab/AutoSwitchKVM/releases) | Stable |
 | 🪟 | **Windows** 10 (1809) or 11, x64 or ARM64 | `AutoSwitchKVM.App-win-Setup.exe` (or `-win-arm64-Setup.exe`) from [Releases](https://github.com/casab/AutoSwitchKVM/releases) | Beta |
 
 The builds aren't signed with a paid developer certificate yet, so the first launch shows a
 warning:
 
 - **macOS:** after the first open is blocked, go to **System Settings ▸ Privacy & Security** and
-  click **Open Anyway**.
+  click **Open Anyway**. Then allow Bluetooth when the app asks; it can't move your devices
+  without it.
 - **Windows:** on the SmartScreen prompt, click **More info ▸ Run anyway**.
 
 ## Getting started
@@ -81,6 +85,13 @@ Platform guides with more detail: [Windows](windows/README.md) · [macOS](osx/RE
   of the device before it can pair. AutoSwitch retries quietly until that happens.
 - **Your settings stay put.** Each computer keeps its own settings. You can export and import
   them as a file.
+- **Updates install themselves.** Both apps check GitHub for new versions and offer them, so you
+  install once and stay current.
+- **Private by design.** Everything happens on your computers. The only network request is the
+  update check.
+- **Something not working?** Each platform guide has a troubleshooting section. For a bug
+  report, set **Settings ▸ Diagnostics ▸ Log detail** to **Detailed**, reproduce the problem, and
+  attach that day's log. At the default level the log stays small: a few lines per switch.
 
 ---
 
