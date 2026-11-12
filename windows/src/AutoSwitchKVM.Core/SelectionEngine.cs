@@ -73,6 +73,8 @@ public sealed class SelectionEngine
     internal TimeSpan? CallTimeoutOverride;
     /// Pause before the single retry of a failed release (unpair).
     internal int ReleaseRetryDelayMs = 1000;
+    /// HidNotReady failures in one connect run before it ends with a power-cycle hint (spec §3).
+    internal int MaxHidNotReady = 2;
 
     public SelectionEngine(AppConfig config, IUsbMonitor usb, IBluetoothController bt, ILogSink? log = null)
     {
@@ -559,6 +561,8 @@ public sealed class SelectionEngine
         var tries = 0;
         var hardFailures = 0;
         var softRetries = 0;
+        var hidNotReady = 0;
+        var wedged = false;
         var freshBond = false;
         Failure last = default;
 
@@ -655,6 +659,13 @@ public sealed class SelectionEngine
 
             if (failure.Kind == BluetoothFailureKind.InvalidAddress)
                 break;  // retrying can never help
+            if (failure.Kind == BluetoothFailureKind.HidNotReady && ++hidNotReady >= MaxHidNotReady)
+            {
+                // A device whose HID never starts is wedged (seen on hardware: only a power cycle
+                // recovered it). More pair/unpair churn doesn't help and may make it worse.
+                wedged = true;
+                break;
+            }
             if (failure.Kind == BluetoothFailureKind.AdapterUnavailable)
                 await RefreshPowerAsync();  // the loop top then stops with BluetoothOff if it's off
 
@@ -682,9 +693,12 @@ public sealed class SelectionEngine
             await SleepHook(backoff);
         }
 
-        var cause = last.Message ?? "unknown error";
+        var cause = wedged
+            ? "its input never started; turn the device off and on"
+            : last.Message ?? "unknown error";
         Log(LogLevel.Error, $"{name}: gave up after {Plural(tries, "try", "tries")} in {Ms(total)} " +
-            $"({hardFailures} hard, {softRetries} soft); last error: {last.Summary}");
+            $"({hardFailures} hard, {softRetries} soft{(wedged ? $", {hidNotReady} HID-not-ready: device looks wedged" : "")}); " +
+            $"last error: {last.Summary}");
         SetStatus(device.Id, DeviceStatus.Error($"gave up after {Plural(tries, "try", "tries")}: {cause}"));
         OnNotice?.Invoke("Connection failed", $"{name}: gave up after {Plural(tries, "try", "tries")} - {cause}");
     }

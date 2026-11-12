@@ -22,6 +22,14 @@ Hammerspoon script).
 (config: `%LOCALAPPDATA%\AutoSwitchKVM\config.json`). Categories: `engine` (runs, tries, retries,
 aborts, give-ups), `bt` (WinRT/Win32 calls with timings and raw statuses), `usb`, `power`, `app`.
 
+**Trackpad driver traces:** the Magic Trackpad's Windows driver is vitoplantamura's
+`MagicTrackpad2ForWindows` (checkout + Microsoft-signed package with PDBs in `reference_win_driver/`,
+untracked; don't commit it). Its Bluetooth filter (`AmtPtpHidFilter`) is loaded only while Windows
+holds the bond. It configures multitouch (SET_FEATURE `0xF1`) 1 s after start, retrying every 2 s,
+and polls the battery every 60 s. `tools/driver-trace.ps1` captures its WPP traces
+(`start`/`stop` need an admin shell) and decodes them with the PDB to
+`logs/driver-<timestamp>.txt`, with local timestamps that line up with the app log.
+
 ## Coordinating with the macOS agent
 
 Another agent usually works on `osx/` in parallel, on a Mac. Use `agent-notes/` at the repo root
@@ -218,6 +226,16 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   (Waiting inside the call ate the caller's timeout: a retry waited 19 s and had 13 s left to
   pair.) A watcher logs the orphan's outcome and unpairs again if it completes `Paired` after a
   release was requested. On hardware an orphan ends ~50-55 s after it started, as `Canceled`.
+- **A "Connected" link is not a working trackpad.** `ConnectAsync` waits (≤ 10 s) for the HID
+  chain: the `BTHENUM\{00001124-…}…<MAC>` service node and at least one
+  `HID\{00001124-…}_VID&…_PID&…` collection started (`ConfigManagerErrorCode == 0`). Only for
+  Peripheral class-of-device. Otherwise it throws `HidNotReady`; two in a run end it with a
+  power-cycle hint. Background: the trackpad wedged (HID never started, power cycle needed) when
+  one host paired it while the other was still releasing it.
+- **USB detection lag.** On 2026-11-12 Windows saw each KVM switch 3.1-3.8 s after the Mac.
+  `PnpUsbMonitor` now reconciles on the first event of a burst (leading edge) as well as after
+  it, and logs `via <trigger>, enumerate N ms, M ms after the burst started`. Use that to
+  attribute the remaining lag.
 - **`BluetoothRemoveDevice` is synchronous and slow (~3.4 s)** because it waits for the link
   teardown. It runs via `Task.Run`; called inline from the engine it froze the UI thread and kept
   the engine's timeout from firing.

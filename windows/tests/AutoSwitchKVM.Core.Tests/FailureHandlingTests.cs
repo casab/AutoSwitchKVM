@@ -143,6 +143,38 @@ public class FailureHandlingTests
         Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
     }
 
+    /// Spec §3 hidNotReady: hard, no stale-bond re-pair, and 2 of them end the run early with a
+    /// power-cycle hint instead of minutes of pair/unpair churn on a wedged device.
+    [Fact]
+    public async Task Hid_not_ready_twice_ends_the_run_with_power_cycle_hint()
+    {
+        var engine = MakeEngine(out var bt, out var config, out var log);
+        config.ConnectRetryMax = 6;
+        for (var i = 0; i < 10; i++) bt.ConnectErrors.Enqueue(Fail(BluetoothFailureKind.HidNotReady, "HID input never started"));
+        string? notice = null;
+        engine.OnNotice = (title, body) => { if (title == "Connection failed") notice = body; };
+
+        await Arrive(engine);
+
+        Assert.Equal(2, Count(bt, "connect"));     // stopped after 2, not 6
+        Assert.Equal(0, Count(bt, "unpair"));      // no stale-bond re-pair
+        Assert.Contains("off and on", engine.Statuses.Values.Single().Label);
+        Assert.Contains("off and on", notice);
+        Assert.True(log.Has(LogLevel.Error, "wedged"), log.Dump());
+    }
+
+    [Fact]
+    public async Task Hid_not_ready_once_then_recovers()
+    {
+        var engine = MakeEngine(out var bt, out _, out _);
+        bt.ConnectErrors.Enqueue(Fail(BluetoothFailureKind.HidNotReady, "HID input never started"));
+
+        await Arrive(engine);
+
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
+        Assert.Equal(0, Count(bt, "unpair"));
+    }
+
     [Fact]
     public async Task Invalid_address_gives_up_immediately()
     {

@@ -96,8 +96,119 @@ public sealed class WinRtBluetooth : IBluetoothController
 
     // ---- Connect / disconnect (Classic-HID semantics; see class doc) ----
 
-    // Connect == ensure paired (PairAsync is idempotent: no-op if already paired).
-    public Task ConnectAsync(string address, CancellationToken ct = default) => PairAsync(address, ct);
+    // Connect == ensure paired (PairAsync is idempotent: no-op if already paired), then require the
+    // device's HID input to be up. A bond + "Connected" link alone is not a working trackpad: on
+    // 2026-11-12 the Mac paired the trackpad while Windows was still releasing it, the link came
+    // up, HID never started, and the trackpad stayed wedged until power-cycled. The macOS app now
+    // requires its IOHIDDevice; the Windows equivalent is the BTHENUM HID-service node plus its
+    // HID child, both started.
+    public async Task ConnectAsync(string address, CancellationToken ct = default)
+    {
+        await PairAsync(address, ct);
+        await WaitForHidReadyAsync(address, ct);
+    }
+
+    private const int HidReadyTimeoutMs = 10_000;
+    private const string HidServiceGuid = "{00001124-0000-1000-8000-00805F9B34FB}";
+
+    private async Task WaitForHidReadyAsync(string address, CancellationToken ct)
+    {
+        using (var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct))
+        {
+            if (dev is null)
+            {
+                throw new BluetoothException(BluetoothFailureKind.DeviceNotFound,
+                    $"{address} is not known to Windows after pairing", "FromBluetoothAddressAsync=null");
+            }
+            // Only HID peripherals (mice, keyboards, trackpads) have a HID input to wait for.
+            if (dev.ClassOfDevice.MajorClass != BluetoothMajorClass.Peripheral)
+            {
+                Log.Info("bt", $"connect {address}: not a HID peripheral ({dev.ClassOfDevice.MajorClass}); skipping the HID check");
+                return;
+            }
+        }
+
+        var digits = Digits(address);
+        var sw = Stopwatch.StartNew();
+        HidState state;
+        while (true)
+        {
+            state = await Task.Run(() => QueryHidState(digits), ct);
+            if (state.Ready)
+            {
+                Log.Info("bt", $"connect {address}: HID input up after {sw.ElapsedMilliseconds} ms ({state})");
+                return;
+            }
+            if (sw.ElapsedMilliseconds >= HidReadyTimeoutMs) break;
+            await Task.Delay(250, ct);
+        }
+        Log.Warn("bt", $"connect {address}: HID input did not start within {HidReadyTimeoutMs / 1000} s ({state})");
+        throw new BluetoothException(BluetoothFailureKind.HidNotReady,
+            $"link is up but the HID input never started within {HidReadyTimeoutMs / 1000} s ({state})", state.ToString());
+    }
+
+    /// The HID chain for a Classic-HID device, from PnP:
+    ///   BTHENUM\{00001124-...}_VID&xxxx_PID&yyyy\...&MAC_...  (Bluetooth HID service, "Bluetooth HID Device")
+    ///   HID\{00001124-...}_VID&xxxx_PID&yyyy&COLnn...          (HID collections: trackpad filter, touch pad)
+    /// Ready = the service node is started and at least one HID collection of that VID/PID is started.
+    private readonly record struct HidState(bool ServicePresent, uint ServiceError, int ChildrenOk, int ChildrenTotal)
+    {
+        public bool Ready => ServicePresent && ServiceError == 0 && ChildrenOk > 0;
+        public override string ToString() => !ServicePresent
+            ? "no BTHENUM HID-service node"
+            : $"HID-service node error code {ServiceError}, HID collections started {ChildrenOk}/{ChildrenTotal}";
+    }
+
+    private static HidState QueryHidState(string digits)
+    {
+        string? vidPid = null;
+        uint serviceError = 0;
+        var servicePresent = false;
+        try
+        {
+            using (var searcher = new ManagementObjectSearcher(
+                "SELECT DeviceID, ConfigManagerErrorCode FROM Win32_PnPEntity WHERE DeviceID LIKE 'BTHENUM%'"))
+            {
+                foreach (ManagementBaseObject mo in searcher.Get())
+                {
+                    using (mo)
+                    {
+                        if (mo["DeviceID"] is not string id) continue;
+                        var upper = id.ToUpperInvariant();
+                        if (!upper.Contains(HidServiceGuid) || !upper.Contains(digits)) continue;
+                        servicePresent = true;
+                        serviceError = mo["ConfigManagerErrorCode"] is uint e ? e : 0;
+                        var m = System.Text.RegularExpressions.Regex.Match(upper, @"_VID&([0-9A-F]+)_PID&([0-9A-F]+)");
+                        if (m.Success) vidPid = $"_VID&{m.Groups[1].Value}_PID&{m.Groups[2].Value}";
+                    }
+                }
+            }
+            if (!servicePresent || vidPid is null) return new HidState(servicePresent, serviceError, 0, 0);
+
+            int ok = 0, total = 0;
+            var childPrefix = $@"HID\{HidServiceGuid}{vidPid}";
+            using (var searcher = new ManagementObjectSearcher(
+                "SELECT DeviceID, ConfigManagerErrorCode FROM Win32_PnPEntity WHERE DeviceID LIKE 'HID%'"))
+            {
+                foreach (ManagementBaseObject mo in searcher.Get())
+                {
+                    using (mo)
+                    {
+                        if (mo["DeviceID"] is not string id) continue;
+                        if (!id.StartsWith(childPrefix, StringComparison.OrdinalIgnoreCase)) continue;
+                        total++;
+                        if (mo["ConfigManagerErrorCode"] is uint e && e == 0) ok++;
+                    }
+                }
+            }
+            return new HidState(true, serviceError, ok, total);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("bt", $"HID state query failed ({ex.Message})");
+            return new HidState(servicePresent, serviceError, 0, 0);
+        }
+    }
 
     public Task DisconnectAsync(string address, CancellationToken ct = default) => Task.CompletedTask;
 

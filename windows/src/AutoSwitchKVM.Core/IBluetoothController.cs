@@ -73,6 +73,12 @@ public enum BluetoothFailureKind
 
     /// The configured address is malformed — retrying can never succeed.
     InvalidAddress,
+
+    /// The link/bond came up but the device never started its HID input (Windows: the BTHENUM
+    /// HID-service node or its HID child never started). Seen on hardware when the trackpad was
+    /// paired while the other host was still releasing it: it then stayed wedged until power-
+    /// cycled. Hard, no stale-bond re-pair; repeated occurrences end the run early.
+    HidNotReady,
 }
 
 /// Thrown by IBluetoothController implementations for expected, message-bearing failures. Kind

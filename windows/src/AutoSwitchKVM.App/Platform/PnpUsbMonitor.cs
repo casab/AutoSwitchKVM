@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Management;
 using System.Text.RegularExpressions;
@@ -77,7 +78,7 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
         }
 
         // Immediate first reconcile (dueTime 0) emits the initial snapshot, then every _reconcileMs.
-        _reconcileTimer = new Timer(_ => Reconcile(), null, 0, _reconcileMs);
+        _reconcileTimer = new Timer(_ => Reconcile("periodic"), null, 0, _reconcileMs);
     }
 
     public void Stop()
@@ -91,44 +92,86 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
 
     public void Dispose() => Stop();
 
-    /// Coalesce the device-change storm: (re)arm a one-shot debounce that triggers a single reconcile.
+    // Burst tracking (Stopwatch ticks): detection latency was ~3.1-3.8 s behind the Mac on
+    // 2026-11-12. A trailing-only debounce keeps re-arming during the KVM's multi-second
+    // re-enumeration storm, so detection fell back to the 2 s periodic tick. Reconcile on the
+    // leading edge too, and log the timings so the remaining lag can be attributed.
+    private const int BurstQuietMs = 2000;
+    private long _lastEventTicks;
+    private long _burstStartTicks;
+
+    /// Leading edge: the first event after a quiet period reconciles immediately. Trailing edge:
+    /// (re)arm a one-shot debounce so the end of the storm is reconciled once.
     private void OnDeviceChange()
     {
-        var t = new Timer(_ => Reconcile(), null, _eventDebounceMs, Timeout.Infinite);
+        var now = Stopwatch.GetTimestamp();
+        var last = Interlocked.Exchange(ref _lastEventTicks, now);
+        if (last == 0 || ElapsedMs(last, now) >= BurstQuietMs)
+        {
+            Interlocked.Exchange(ref _burstStartTicks, now);
+            Log.Info("usb", "device-change burst started");
+            ThreadPool.QueueUserWorkItem(_ => Reconcile("burst start"));
+        }
+
+        var t = new Timer(_ => Reconcile("debounce"), null, _eventDebounceMs, Timeout.Infinite);
         var old = Interlocked.Exchange(ref _debounceTimer, t);
         old?.Dispose();
     }
 
     private int _reconciling;
+    private int _rerunRequested;
 
-    private void Reconcile()
+    private void Reconcile(string trigger)
     {
-        // One reconcile at a time: overlapping runs (debounce + periodic timer during the KVM
-        // re-enumeration storm) can emit snapshots out of order and leave _lastSignature stale.
-        // A skipped run is fine — the next periodic tick converges.
-        if (Interlocked.Exchange(ref _reconciling, 1) == 1) return;
+        // One reconcile at a time: overlapping runs (leading edge + debounce + periodic timer
+        // during the KVM re-enumeration storm) can emit snapshots out of order and leave
+        // _lastSignature stale. A request that arrives mid-run is not dropped: it re-runs once
+        // the current one finishes, so the newest state is always enumerated.
+        if (Interlocked.Exchange(ref _reconciling, 1) == 1)
+        {
+            Interlocked.Exchange(ref _rerunRequested, 1);
+            return;
+        }
         try
         {
-            lock (_gate) { if (!_started) return; }  // don't emit after Stop()
-
-            List<UsbDeviceInfo> snapshot;
-            try { snapshot = Enumerate(); }
-            catch (Exception ex) { Log.Warn("usb", $"reconcile enumerate failed: {ex.Message}"); return; }
-
-            var signature = new HashSet<uint>(snapshot.Select(d => ((uint)d.VendorID << 16) | d.ProductID));
-            lock (_gate)
+            do
             {
-                if (signature.SetEquals(_lastSignature)) return;
-                _lastSignature = signature;
-            }
-            Log.Info("usb", $"snapshot changed: {snapshot.Count} USB device(s)");
-            Emit(snapshot);
+                Interlocked.Exchange(ref _rerunRequested, 0);
+                ReconcileOnce(trigger);
+                trigger = "re-run";
+            } while (Interlocked.CompareExchange(ref _rerunRequested, 0, 1) == 1);
         }
         finally
         {
             Interlocked.Exchange(ref _reconciling, 0);
         }
     }
+
+    private void ReconcileOnce(string trigger)
+    {
+        lock (_gate) { if (!_started) return; }  // don't emit after Stop()
+
+        var start = Stopwatch.GetTimestamp();
+        List<UsbDeviceInfo> snapshot;
+        try { snapshot = Enumerate(); }
+        catch (Exception ex) { Log.Warn("usb", $"reconcile enumerate failed: {ex.Message}"); return; }
+        var end = Stopwatch.GetTimestamp();
+
+        var signature = new HashSet<uint>(snapshot.Select(d => ((uint)d.VendorID << 16) | d.ProductID));
+        lock (_gate)
+        {
+            if (signature.SetEquals(_lastSignature)) return;
+            _lastSignature = signature;
+        }
+        var burst = Interlocked.Read(ref _burstStartTicks);
+        var sinceBurst = burst == 0 ? "" : $", {ElapsedMs(burst, end)} ms after the burst started";
+        Log.Info("usb", $"snapshot changed: {snapshot.Count} USB device(s) " +
+            $"(via {trigger}, enumerate {ElapsedMs(start, end)} ms{sinceBurst})");
+        Emit(snapshot);
+    }
+
+    private static long ElapsedMs(long fromTicks, long toTicks) =>
+        (toTicks - fromTicks) * 1000 / Stopwatch.Frequency;
 
     private void Emit(IReadOnlyList<UsbDeviceInfo> snapshot)
     {
