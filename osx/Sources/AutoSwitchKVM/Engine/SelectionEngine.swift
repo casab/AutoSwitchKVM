@@ -22,8 +22,17 @@ enum DeviceStatus: Equatable {
 }
 
 /// Core state machine: maps USB source presence to connect/disconnect of the enabled
-/// Bluetooth devices. Mirrors the Hammerspoon prototype (debounce, bounded retries,
-/// abort-if-deselected, pair/unpair where configured).
+/// Bluetooth devices (SPECIFICATION.md §3; the Windows engine mirrors it).
+///
+/// Work is organized in *runs*. Every automation transition, manual action and the sleep release
+/// starts or joins a run; a newer run supersedes older ones (`runToken`), and in-flight work checks
+/// `staleReason` after every await, so a superseded run unwinds instead of undoing the newer run's
+/// work. Devices with an operation in flight are *busy* (ref-counted), so status events and the
+/// poll don't misread transitions as unexpected drops.
+///
+/// Logging (category `engine`): every run, try, step (with elapsed time), backoff, abort reason,
+/// give-up (with the last error), and the handoff timeline (time since the source appeared or
+/// disappeared). Failures are classified (`BTFailureKind`) to pick the retry policy.
 @MainActor
 final class SelectionEngine: ObservableObject {
     @Published private(set) var selected: Bool = false
@@ -46,15 +55,39 @@ final class SelectionEngine: ObservableObject {
     /// which tracks raw presence even while paused).
     private var automationActed = false
     private var debounceTimer: Timer?
-    private var runToken = 0  // bumps on every evaluation to cancel in-flight work
+    /// Bumps on every new run so in-flight work can detect it was superseded.
+    private var runToken = 0
+    /// When the source presence last flipped (present ↔ absent): the start of the handoff timeline.
+    private var presenceChangedAt: ContinuousClock.Instant?
 
     private var statusTimer: Timer?
-    /// Devices with an in-flight connect/disconnect; the poller leaves their status alone.
-    private var busyDevices = Set<UUID>()
+    /// Devices with an engine operation in flight (ref-counted: a manual action can overlap a
+    /// superseded run that hasn't unwound yet). Status events/polls skip busy devices.
+    private var busyCounts: [UUID: Int] = [:]
+    /// Devices whose most recently requested operation is a release. A pair or connect that
+    /// completes after the release was requested (a stale run was mid-ceremony) is undone — or this
+    /// Mac would hold the bond while switched away, and the other host could not pair.
+    private var releaseRequested = Set<UUID>()
+    /// True between `prepareForSleep()` and `resumeAfterWake()`: automation is halted.
+    private(set) var suspended = false
 
-    // Auto-reconnect scheduling (internal so tests can make it deterministic).
+    // MARK: Tunables / test seams (internal so tests can make them instant)
+
     var autoReconnectDelayMs = 2000
     var autoReconnectMinInterval: TimeInterval = 30
+    /// Soft failures (device busy / operation in progress) retry on this fixed interval…
+    var softRetryIntervalMs = 3000
+    /// …up to this many times without spending `connectRetryMax`; then they count as hard.
+    var maxSoftRetries = 20
+    /// Delay before retrying a failed unpair during a release.
+    var releaseRetryDelayMs = 1000
+    /// Settle time after dropping the transient post-pair connection.
+    var postPairSettleMs = 800
+    /// Every engine delay goes through here (connect delay, settle, backoff, soft retry,
+    /// auto-reconnect delay) so tests can run retry paths instantly.
+    var sleepHook: @MainActor (Int) async -> Void = { ms in
+        if ms > 0 { try? await Task.sleep(nanoseconds: UInt64(ms) * 1_000_000) }
+    }
     private var lastAutoReconnect: [UUID: Date] = [:]
 
     init(store: ConfigStore, usb: USBMonitoring, bt: BluetoothController) {
@@ -81,6 +114,36 @@ final class SelectionEngine: ObservableObject {
             .store(in: &cancellables)
     }
 
+    // MARK: - Runs
+
+    /// A unit of engine work: its token, what started it (for the log), whether it may run while
+    /// the system is suspending (only the sleep release), and the presence change that triggered it.
+    private struct Run {
+        let token: Int
+        let trigger: String
+        var sleepRelease = false
+        var since: ContinuousClock.Instant?
+    }
+
+    private func newRun(_ trigger: String) -> Run {
+        runToken += 1
+        return Run(token: runToken, trigger: trigger)
+    }
+
+    private func currentRun(_ trigger: String) -> Run {
+        Run(token: runToken, trigger: trigger)
+    }
+
+    /// Why in-flight work for this run must stop, or nil if it may continue.
+    private func staleReason(_ run: Run, respectSelection: Bool) -> String? {
+        if suspended && !run.sleepRelease { return "the system is going to sleep" }
+        if run.token != runToken { return "superseded by run #\(runToken)" }
+        if respectSelection && !selected { return "the source is no longer present" }
+        return nil
+    }
+
+    // MARK: - Status monitoring
+
     /// Starts event-driven status updates (IOBluetooth notifications) plus a slow poll as a
     /// safety net in case an event is ever missed.
     func startStatusMonitor(pollIntervalSeconds: Double = 10.0) {
@@ -106,62 +169,79 @@ final class SelectionEngine: ObservableObject {
 
     private func handleStatusEvent(addr: String, connected: Bool) {
         guard let device = store.config.devices.first(where: { $0.normalizedAddress == addr }) else { return }
-        guard !busyDevices.contains(device.id) else { return }
-        updateStatus(device, connected: connected)
+        guard !isBusy(device.id) else { return }
+        updateStatus(device, connected: connected, origin: "event")
     }
 
     private func pollStatuses() async {
         await refreshPower()
         for device in store.config.devices {
-            guard !busyDevices.contains(device.id) else { continue }
+            guard !isBusy(device.id) else { continue }
             if !bluetoothPowered {
-                if statuses[device.id] != .bluetoothOff { statuses[device.id] = .bluetoothOff }
+                setStatus(device.id, .bluetoothOff)
                 continue
             }
             let connected = await bt.isConnected(device.normalizedAddress)
-            updateStatus(device, connected: connected)
+            guard !isBusy(device.id) else { continue }  // an operation started while we were asking
+            updateStatus(device, connected: connected, origin: "poll")
         }
     }
 
     /// Reflect a device's live connection state, and flag a passive drop (connected → disconnected
     /// while the source is present, BT is on, and we're not mid-transition) as unexpected.
-    private func updateStatus(_ device: BTDevice, connected: Bool) {
+    private func updateStatus(_ device: BTDevice, connected: Bool, origin: String) {
         let old = statuses[device.id]
         let new: DeviceStatus = connected ? .connected : .disconnected
-        if old != new { statuses[device.id] = new }
+        if old != new {
+            Log.engine.log(
+                old.map { "\(device.name): \($0.label) → \(new.label) (reported by \(origin))" }
+                    ?? "\(device.name): initial status \(new.label) (\(origin))")
+            setStatus(device.id, new)
+        }
 
-        if !connected, old == .connected, selected, bluetoothPowered, device.enabled {
-            Log.engine.log("\(device.name) dropped unexpectedly while source present")
+        if !connected, old == .connected, selected, bluetoothPowered, device.enabled, !suspended {
+            Log.engine.warn("\(device.name): dropped unexpectedly while the source is present")
             onUnexpectedDisconnect?(device)
             maybeAutoReconnect(device)
         }
     }
 
     /// One bounded, rate-limited reconnect after an unexpected drop (opt-out via
-    /// `autoReconnectOnDrop`). Uses the current runToken so any newer run supersedes it;
-    /// combined with the retry escalation (re-pair from scratch on attempt ≥ 2) this
-    /// self-heals even when the device stopped honoring its bond.
+    /// `autoReconnectOnDrop`). Joins the current run, so any newer run supersedes it; combined
+    /// with the stale-bond re-pair on retry this self-heals even when the bond went stale.
     private func maybeAutoReconnect(_ device: BTDevice) {
-        guard store.config.autoReconnectOnDrop, !store.config.paused else { return }
-        guard !busyDevices.contains(device.id) else { return }
+        guard store.config.autoReconnectOnDrop else { return }
+        if store.config.paused || suspended {
+            Log.engine.log("\(device.name): no auto-reconnect (\(suspended ? "going to sleep" : "automation paused"))")
+            return
+        }
+        guard !isBusy(device.id) else { return }
         let now = Date()
         if let last = lastAutoReconnect[device.id], now.timeIntervalSince(last) < autoReconnectMinInterval {
-            Log.engine.log("not auto-reconnecting \(device.name) (rate-limited)")
+            let ago = Int(now.timeIntervalSince(last))
+            Log.engine.log("\(device.name): auto-reconnect skipped (rate limit: last one \(ago) s ago)")
             return
         }
         lastAutoReconnect[device.id] = now
-        Log.engine.log("auto-reconnecting \(device.name) after unexpected drop")
+        Log.engine.log("\(device.name): auto-reconnect scheduled in \(autoReconnectDelayMs) ms")
 
-        let token = runToken
-        let delayMs = autoReconnectDelayMs
+        let run = currentRun("auto-reconnect after drop")
         Task { @MainActor [weak self] in
-            if delayMs > 0 { try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000) }
-            guard let self, token == self.runToken, self.selected, self.bluetoothPowered,
-                !self.store.config.paused, !self.busyDevices.contains(device.id)
-            else { return }
-            self.busyDevices.insert(device.id)
-            defer { self.busyDevices.remove(device.id) }
-            await self.connectOne(device, token: token, respectSelection: true)
+            guard let self else { return }
+            await self.sleepHook(self.autoReconnectDelayMs)
+            let skip =
+                self.staleReason(run, respectSelection: true)
+                ?? (!self.bluetoothPowered
+                    ? "Bluetooth is off"
+                    : self.store.config.paused
+                        ? "automation paused" : self.isBusy(device.id) ? "another operation is in flight" : nil)
+            if let skip {
+                Log.engine.log("\(device.name): auto-reconnect cancelled: \(skip)")
+                return
+            }
+            self.markBusy(device.id)
+            defer { self.clearBusy(device.id) }
+            await self.connectOne(device, run: run, respectSelection: true)
         }
     }
 
@@ -175,9 +255,53 @@ final class SelectionEngine: ObservableObject {
             Log.engine.log("Bluetooth powered on → re-evaluating")
             seed()
         } else {
-            Log.engine.log("Bluetooth powered off")
+            Log.engine.warn("Bluetooth powered off: connects are skipped until it is back on")
         }
     }
+
+    // MARK: - System sleep / wake
+
+    /// The system is about to sleep: halt automation, supersede in-flight work, and release the
+    /// enabled devices (disconnect, plus unpair for managePairing devices) so the other host can
+    /// take them while this Mac sleeps. Goes through the same busy/status bookkeeping as an
+    /// automation release, so the stack's late "disconnected" events can't look like unexpected
+    /// drops and trigger an auto-reconnect during sleep. `SleepWakeMonitor` holds the sleep
+    /// transition (bounded) until this returns.
+    func prepareForSleep() async {
+        suspended = true
+        debounceTimer?.invalidate()
+        debounceTimer = nil
+        var run = newRun("system sleep")
+        run.sleepRelease = true
+        let devices = store.config.devices.filter(\.enabled)
+        let start = ContinuousClock.now
+        Log.engine.log(
+            "run #\(run.token): system sleep → automation halted; releasing \(devices.count) enabled device(s)")
+        for device in devices {
+            if let why = staleReason(run, respectSelection: false) {
+                Log.engine.log("run #\(run.token): sleep release stopped: \(why)")
+                return
+            }
+            markBusy(device.id)
+            defer { clearBusy(device.id) }
+            await disconnectOne(device, run: run)
+        }
+        // Devices are released; on wake, seeding re-evaluates from scratch.
+        automationActed = false
+        Log.engine.log("run #\(run.token): sleep release finished in \(Elapsed.since(start))")
+    }
+
+    /// The system woke: re-enable automation and re-seed presence from the current USB snapshot
+    /// (call `usb.refreshAttached()` first).
+    func resumeAfterWake() {
+        if suspended {
+            suspended = false
+            Log.engine.log("system woke → automation re-enabled; re-seeding")
+        }
+        seed()
+    }
+
+    // MARK: - Seeding & USB input
 
     /// Called at launch and on wake to establish current presence from scratch.
     func seed() {
@@ -191,10 +315,16 @@ final class SelectionEngine: ObservableObject {
             }
         }
         lastReason = "initial scan"
+        presenceChangedAt = .now
+        if let source {
+            Log.engine.log(
+                "seed: source '\(source.name)' \(presentProductIDs.isEmpty ? "absent" : "present") "
+                    + "(\(presentProductIDs.count)/\(source.productIDs.count) ids attached)")
+        } else {
+            Log.engine.log("seed: no source configured")
+        }
         scheduleEvaluate()
     }
-
-    // MARK: - USB handling
 
     /// Internal (not private) so unit tests can simulate USB events directly.
     func handleUSB(_ event: (vendorID: UInt16, productID: UInt16, added: Bool)) {
@@ -203,12 +333,28 @@ final class SelectionEngine: ObservableObject {
             source.productIDs.contains(event.productID)
         else { return }
 
+        let wasPresent = !presentProductIDs.isEmpty
+        let id = String(format: "0x%04X:0x%04X", event.vendorID, event.productID)
         if event.added {
             presentProductIDs.insert(event.productID)
             lastReason = String(format: "source arrived (0x%04X)", event.productID)
         } else {
             presentProductIDs.remove(event.productID)
             lastReason = String(format: "source removed (0x%04X)", event.productID)
+        }
+        let isPresent = !presentProductIDs.isEmpty
+        // The handoff timeline starts here: the Windows side measures the Mac's release from it.
+        if isPresent != wasPresent {
+            presenceChangedAt = .now
+            Log.usb.log(
+                isPresent
+                    ? "source '\(source.name)' appeared (\(id) attached); arrival debounce \(store.config.arrivalDebounceMs) ms"
+                    : "source '\(source.name)' gone (\(id) detached, no source ids left); departure debounce \(store.config.debounceMs) ms"
+            )
+        } else {
+            Log.usb.log(
+                "source id \(id) \(event.added ? "attached" : "detached") "
+                    + "(\(presentProductIDs.count)/\(source.productIDs.count) source ids present)")
         }
         scheduleEvaluate()
     }
@@ -236,48 +382,139 @@ final class SelectionEngine: ObservableObject {
         let present = !presentProductIDs.isEmpty
         selected = present  // always reflect real presence for the UI
 
-        guard !store.config.paused else { return }  // automation suspended; don't act
+        let wouldAct = present != automationActed
+        if suspended {
+            if wouldAct { Log.engine.log("evaluate: going to sleep; not acting on '\(lastReason)'") }
+            return
+        }
+        guard !store.config.paused else {  // automation suspended; don't act
+            if wouldAct { Log.engine.log("evaluate: automation paused; not acting on '\(lastReason)'") }
+            return
+        }
 
         // `automationActed` latches the presence the automation last acted on, so resuming from
         // pause reconciles to the current state.
+        let since = presenceChangedAt.map { " \(Elapsed.since($0)) ago" } ?? ""
+        let enabled = store.config.devices.filter(\.enabled).count
         if present && !automationActed {
             automationActed = true
-            runToken += 1
-            Log.engine.log("source present → connecting enabled devices")
-            await connectAll(token: runToken)
+            var run = newRun("auto: \(lastReason)")
+            run.since = presenceChangedAt
+            Log.engine.log(
+                "run #\(run.token): source present (\(lastReason)\(since)) → connecting \(enabled) device(s)")
+            await connectAll(run: run)
         } else if !present && automationActed {
             automationActed = false
-            runToken += 1
-            Log.engine.log("source absent → disconnecting enabled devices")
-            await disconnectAll(token: runToken)
+            var run = newRun("auto: \(lastReason)")
+            run.since = presenceChangedAt
+            Log.engine.log("run #\(run.token): source gone (\(lastReason)\(since)) → releasing \(enabled) device(s)")
+            await disconnectAll(run: run)
         }
     }
 
-    // MARK: - Manual quick actions (menu) — operate on all configured devices, ignore selection
+    // MARK: - Manual actions (ignore selection; supersede in-flight automation)
 
     func connectAllNow() { Task { @MainActor in await connectAllNowImpl() } }
     func disconnectAllNow() { Task { @MainActor in await disconnectAllNowImpl() } }
 
     func connectAllNowImpl() async {
-        runToken += 1
-        let token = runToken
+        let run = newRun("manual: connect all")
+        Log.engine.log("run #\(run.token): manual connect all (\(store.config.devices.count) device(s))")
         for device in store.config.devices {
-            guard token == runToken else { return }  // superseded by a newer run
-            busyDevices.insert(device.id)
-            defer { busyDevices.remove(device.id) }
-            await connectOne(device, token: token, respectSelection: false)
+            if let why = staleReason(run, respectSelection: false) {
+                Log.engine.log("run #\(run.token): connect all stopped: \(why)")
+                return
+            }
+            markBusy(device.id)
+            defer { clearBusy(device.id) }
+            await connectOne(device, run: run, respectSelection: false)
         }
     }
 
     func disconnectAllNowImpl() async {
-        runToken += 1  // invalidate any in-flight connect run — the user asked for release
-        let token = runToken
+        let run = newRun("manual: disconnect all")  // invalidates any in-flight connect run
+        Log.engine.log("run #\(run.token): manual disconnect all (\(store.config.devices.count) device(s))")
         for device in store.config.devices {
-            guard token == runToken else { return }
-            busyDevices.insert(device.id)
-            defer { busyDevices.remove(device.id) }
-            await disconnectOne(device, token: token)
+            if let why = staleReason(run, respectSelection: false) {
+                Log.engine.log("run #\(run.token): disconnect all stopped: \(why)")
+                return
+            }
+            markBusy(device.id)
+            defer { clearBusy(device.id) }
+            await disconnectOne(device, run: run)
         }
+    }
+
+    /// Per-device manual connect (Settings ▸ Connect): the full connect flow, retries included,
+    /// ignoring selection.
+    func connectDeviceNow(_ device: BTDevice) async {
+        let run = beginManual(device, "manual connect")
+        markBusy(device.id)
+        defer { clearBusy(device.id) }
+        await connectOne(device, run: run, respectSelection: false)
+    }
+
+    /// Raw single disconnect (Settings ▸ Disconnect test button). Returns the error, or nil.
+    @discardableResult
+    func disconnectDeviceNow(_ device: BTDevice) async -> String? {
+        let addr = device.normalizedAddress
+        return await rawOp(device, "disconnect", releases: true) { try await self.bt.disconnect(addr) }
+    }
+
+    /// Raw single pair (Settings ▸ Pair test button). Returns the error, or nil.
+    @discardableResult
+    func pairDeviceNow(_ device: BTDevice) async -> String? {
+        let addr = device.normalizedAddress
+        return await rawOp(device, "pair", releases: false) { try await self.bt.pair(addr) }
+    }
+
+    /// Raw single unpair (Settings ▸ Unpair test button). Returns the error, or nil.
+    @discardableResult
+    func unpairDeviceNow(_ device: BTDevice) async -> String? {
+        let addr = device.normalizedAddress
+        return await rawOp(device, "unpair", releases: true) { try await self.bt.unpair(addr) }
+    }
+
+    /// A manual action on a device the engine is already working on supersedes that work (the
+    /// user took control). Otherwise it joins the current run, so a later automation run (e.g. the
+    /// source leaving) still supersedes it.
+    private func beginManual(_ device: BTDevice, _ what: String) -> Run {
+        if isBusy(device.id) {
+            let run = newRun(what)
+            Log.engine.log("\(device.name): \(what) supersedes the in-flight operation (run #\(run.token))")
+            return run
+        }
+        return currentRun(what)
+    }
+
+    private func rawOp(
+        _ device: BTDevice, _ op: String, releases: Bool, _ call: @escaping @Sendable () async throws -> Void
+    ) async -> String? {
+        _ = beginManual(device, "manual \(op)")
+        markBusy(device.id)
+        defer { clearBusy(device.id) }
+        if releases { releaseRequested.insert(device.id) } else { releaseRequested.remove(device.id) }
+
+        let start = ContinuousClock.now
+        Log.engine.log("\(device.name): manual \(op) started")
+        do {
+            try await withTimeout(store.config.btCallTimeoutSecs, call)
+        } catch {
+            let failure = Failure(error)
+            Log.engine.warn("\(device.name): manual \(op) failed after \(Elapsed.since(start)): \(failure.summary)")
+            setStatus(device.id, .error(failure.message))
+            return failure.message
+        }
+        Log.engine.log("\(device.name): manual \(op) OK (\(Elapsed.since(start)))")
+        // Set the status explicitly while still busy: the stack's late "disconnected" event then
+        // matches it instead of looking like an unexpected drop (which would trigger an
+        // auto-reconnect that undoes the user's unpair/disconnect).
+        if releases {
+            setStatus(device.id, .disconnected)
+        } else {
+            setStatus(device.id, await bt.isConnected(device.normalizedAddress) ? .connected : .disconnected)
+        }
+        return nil
     }
 
     // MARK: - Retry backoff
@@ -299,162 +536,377 @@ final class SelectionEngine: ObservableObject {
         return UInt64(max(0, capped) * 1_000_000_000)
     }
 
-    // MARK: - Actions
+    // MARK: - Connect
 
-    private func connectAll(token: Int) async {
+    private func connectAll(run: Run) async {
         for device in store.config.devices where device.enabled {
-            guard token == runToken else { return }
-            busyDevices.insert(device.id)
-            defer { busyDevices.remove(device.id) }
-            await connectOne(device, token: token, respectSelection: true)
+            if let why = staleReason(run, respectSelection: false) {
+                Log.engine.log("run #\(run.token): connect run stopped: \(why)")
+                return
+            }
+            markBusy(device.id)
+            defer { clearBusy(device.id) }
+            await connectOne(device, run: run, respectSelection: true)
         }
     }
 
-    private func connectOne(_ device: BTDevice, token: Int, respectSelection: Bool) async {
+    /// The connect flow for one device (SPECIFICATION.md §3), with failure classification:
+    /// - Soft failures (device busy / operation in progress) retry every `softRetryIntervalMs` and
+    ///   don't consume `connectRetryMax` (bounded by `maxSoftRetries`).
+    /// - Hard failures consume an attempt and back off exponentially. For managePairing devices, a
+    ///   hard failure that may mean a stale bond (authentication / timeout / unknown) makes the next
+    ///   try unpair first and re-pair from scratch.
+    /// - An invalid address gives up immediately; an unavailable adapter refreshes power first.
+    /// - Staleness is re-checked after every step; a pair/connect that completes after a release
+    ///   was requested is undone.
+    private func connectOne(_ device: BTDevice, run: Run, respectSelection: Bool) async {
         let cfg = store.config
         let addr = device.normalizedAddress
-        statuses[device.id] = .connecting
+        let name = device.name
+        let maxHard = max(1, cfg.connectRetryMax)
+        let start = ContinuousClock.now
+        releaseRequested.remove(device.id)
+
+        Log.engine.log(
+            "\(name): connect started (run #\(run.token), \(run.trigger); managePairing=\(device.managePairing))")
+        setStatus(device.id, .connecting)
 
         // Optional per-device stagger before connecting.
         if device.connectDelayMs > 0 {
-            try? await Task.sleep(nanoseconds: UInt64(device.connectDelayMs) * 1_000_000)
-            guard token == runToken, (!respectSelection || selected) else {
-                statuses[device.id] = .idle; return
+            await sleepHook(device.connectDelayMs)
+            if let why = staleReason(run, respectSelection: respectSelection) {
+                Log.engine.log("\(name): connect aborted during the \(device.connectDelayMs) ms connect delay: \(why)")
+                markAborted(device.id)
+                return
             }
         }
 
-        var attempt = 0
-        while attempt < cfg.connectRetryMax {
-            if !bluetoothPowered { statuses[device.id] = .bluetoothOff; return }
-            let aborted = token != runToken || (respectSelection && !selected)
-            guard !aborted else { statuses[device.id] = .idle; return }
-            attempt += 1
-            Log.engine.log(
-                "connect \(device.name): attempt \(attempt)/\(cfg.connectRetryMax) (managePairing=\(device.managePairing))"
-            )
+        var tries = 0
+        var hardFailures = 0
+        var softRetries = 0
+        var freshBond = false
+        var last: Failure?
 
-            if !device.managePairing, await bt.isConnected(addr) {
-                Log.bluetooth.log("\(device.name) already connected")
-                statuses[device.id] = .connected
+        while true {
+            if !bluetoothPowered {
+                Log.engine.log("\(name): connect stopped: Bluetooth is off")
+                setStatus(device.id, .bluetoothOff)
                 return
             }
+            if let why = staleReason(run, respectSelection: respectSelection) {
+                Log.engine.log("\(name): connect aborted before try \(tries + 1): \(why)")
+                markAborted(device.id)
+                return
+            }
+            tries += 1
+            let tryStart = ContinuousClock.now
+            var step = "status check"
+            var failure: Failure?
 
-            // A clean connect = `connect` returned without throwing, i.e. IOBluetooth's
-            // `connectionComplete` fired with success. That's the reliable "HID is up" signal;
-            // `isConnected()` alone can be a link-only (ACL) state that doesn't actually work.
-            var connectedCleanly = false
             do {
+                if !device.managePairing, await bt.isConnected(addr) {
+                    Log.engine.log("\(name): already connected")
+                    setStatus(device.id, .connected)
+                    return
+                }
                 if device.managePairing {
-                    if attempt > 1 {
-                        // A bond that survived a failed attempt may be a link key the device no
-                        // longer honors (the other host re-paired it, or it was power-cycled) —
-                        // observed on hardware as endless "pair: skipped" + openConnection
-                        // timeouts. Re-pair from scratch; pair() alone short-circuits on
-                        // isPaired(), so drop the stale bond first (best-effort).
-                        Log.bluetooth.log("re-pairing \(device.name) from scratch (attempt \(attempt))")
-                        try? await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.unpair(addr) }
+                    if freshBond {
+                        Log.engine.log("\(name): try \(tries): removing a possibly stale bond before re-pairing")
+                        await bestEffort(device, "stale-bond unpair") { try await self.bt.unpair(addr) }
                     }
-                    Log.bluetooth.log("pair \(device.name)…")
-                    try await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.pair(addr) }
-                    Log.bluetooth.log("pair \(device.name): ok")
+                    step = "pair"
+                    try await self.step(name, tries, "pair") { try await self.bt.pair(addr) }
+                    if let why = staleReason(run, respectSelection: respectSelection) {
+                        Log.engine.log("\(name): connect aborted after pairing: \(why)")
+                        await undoIfReleased(device, why: "a pair completed")
+                        markAborted(device.id)
+                        return
+                    }
                     // The connection IOBluetooth reports right after pairing is unreliable; drop it
                     // and reconnect cleanly.
-                    try? await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.disconnect(addr) }
-                    try? await Task.sleep(nanoseconds: 800_000_000)
-                    Log.bluetooth.log("post-pair settle done; reconnecting \(device.name)")
+                    await bestEffort(device, "post-pair disconnect") { try await self.bt.disconnect(addr) }
+                    await sleepHook(postPairSettleMs)
+                    if let why = staleReason(run, respectSelection: respectSelection) {
+                        Log.engine.log("\(name): connect aborted after the post-pair settle: \(why)")
+                        await undoIfReleased(device, why: "a pair completed")
+                        markAborted(device.id)
+                        return
+                    }
                 }
-                Log.bluetooth.log("openConnection \(device.name)…")
-                try await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.connect(addr) }
-                connectedCleanly = true
-                Log.bluetooth.log("openConnection \(device.name): completed cleanly")
+                step = "connect"
+                try await self.step(name, tries, "openConnection") { try await self.bt.connect(addr) }
+                step = "verify"
+                // A clean connect is necessary but not sufficient: isConnected must agree.
+                if !(await bt.isConnected(addr)) {
+                    failure = Failure(.unknown, "openConnection succeeded but the device does not report connected")
+                }
             } catch {
-                if case BTError.timeout = error, await bt.isConnected(addr) {
-                    // openConnection can complete just after the deadline (withTimeout abandons
-                    // it rather than waiting). A connection that arrived late is a success —
-                    // don't tear it down and burn a retry.
-                    connectedCleanly = true
-                    Log.bluetooth.log("connect \(device.name): completed just after timeout; keeping it")
+                let f = Failure(error)
+                if step == "connect", f.kind == .timeout, await bt.isConnected(addr) {
+                    // openConnection can complete just after the deadline (withTimeout abandons it
+                    // rather than waiting). A connection that arrived late is a success.
+                    Log.engine.log(
+                        "\(name): try \(tries): openConnection overran its timeout but the device is connected; "
+                            + "keeping it")
                 } else {
-                    statuses[device.id] = .error(String(describing: error))
-                    Log.bluetooth.error("connect \(device.name): \(error)")
+                    failure = f
                 }
             }
 
-            if connectedCleanly, await bt.isConnected(addr) {
-                Log.bluetooth.log("\(device.name) connected ✓")
-                statuses[device.id] = .connected
-                onNotice?("Connected", device.name)
+            guard let f = failure else {
+                // Connected. If a release was requested meanwhile (source left, sleep, manual
+                // release), the connection must not stand.
+                if let why = staleReason(run, respectSelection: respectSelection) {
+                    if releaseRequested.contains(device.id) || suspended {
+                        Log.engine.warn("\(name): connected after the run was superseded (\(why)); releasing it again")
+                        await undoIfReleased(device, why: "a connection completed")
+                    } else {
+                        Log.engine.log(
+                            "\(name): connected, but the run was superseded (\(why)); leaving it to the newer run")
+                    }
+                    markAborted(device.id)
+                    return
+                }
+                let timeline = run.since.map { "; \(Elapsed.since($0)) after the source appeared" } ?? ""
+                Log.engine.log(
+                    "\(name): connected ✓ after \(tries) \(tries == 1 ? "try" : "tries") in \(Elapsed.since(start))\(timeline)"
+                )
+                setStatus(device.id, .connected)
+                onNotice?("Connected", name)
                 return
-            } else {
-                // Don't trust a link-only state; drop any partial connection so the next attempt is clean.
-                Log.bluetooth.log(
-                    "\(device.name) not cleanly connected after attempt \(attempt); dropping partial link")
-                try? await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.disconnect(addr) }
             }
 
-            if attempt < cfg.connectRetryMax {
-                try? await Task.sleep(nanoseconds: Self.backoffNanos(base: cfg.connectRetrySecs, attempt: attempt))
+            last = f
+            Log.engine.warn("\(name): try \(tries): \(step) failed after \(Elapsed.since(tryStart)): \(f.summary)")
+            setStatus(device.id, .error(f.message))
+
+            // Don't trust a link-only state; drop any partial connection so the next try is clean.
+            if await bt.isConnected(addr) {
+                Log.engine.log(
+                    "\(name): the device reports connected despite the failed \(step); dropping it as a partial link")
             }
+            await bestEffort(device, "cleanup disconnect") { try await self.bt.disconnect(addr) }
+
+            // Superseded while the try was running: stop here rather than log a misleading retry.
+            if let why = staleReason(run, respectSelection: respectSelection) {
+                Log.engine.log("\(name): connect aborted after failed try \(tries): \(why)")
+                await undoIfReleased(device, why: "a failed try may have left a bond")
+                markAborted(device.id)
+                return
+            }
+
+            if f.kind == .invalidAddress { break }  // retrying can never help
+            if f.kind == .adapterUnavailable { await refreshPower() }  // loop top stops if it's off
+
+            if f.kind.isSoft {
+                if softRetries < maxSoftRetries {
+                    softRetries += 1
+                    Log.engine.log(
+                        "\(name): \(f.kind == .deviceBusy ? "device refused (most likely still held by the other host)" : "a previous Bluetooth operation is still running"); "
+                            + "retrying in \(softRetryIntervalMs) ms (soft retry \(softRetries)/\(maxSoftRetries), "
+                            + "not counted against the \(maxHard) attempts)")
+                    await sleepHook(softRetryIntervalMs)
+                    continue
+                }
+                Log.engine.warn("\(name): soft-retry budget (\(maxSoftRetries)) exhausted; counting failures as hard")
+            }
+
+            hardFailures += 1
+            if hardFailures >= maxHard { break }
+            freshBond = device.managePairing && f.kind.mayBeStaleBond
+            let backoffMs = Int(Self.backoffNanos(base: cfg.connectRetrySecs, attempt: hardFailures) / 1_000_000)
+            Log.engine.log(
+                "\(name): attempt \(hardFailures)/\(maxHard) failed; retrying in \(backoffMs) ms"
+                    + (freshBond ? " (will re-pair from scratch)" : ""))
+            await sleepHook(backoffMs)
         }
-        if case .connected = statuses[device.id] ?? .idle {
-        } else {
-            statuses[device.id] = .error("gave up after \(cfg.connectRetryMax) attempts")
-            onNotice?("Connection failed", "\(device.name): gave up after \(cfg.connectRetryMax) attempts")
-        }
+
+        let cause = last?.message ?? "unknown error"
+        let triesText = "\(tries) \(tries == 1 ? "try" : "tries")"
+        Log.engine.error(
+            "\(name): gave up after \(triesText) in \(Elapsed.since(start)) "
+                + "(\(hardFailures) hard, \(softRetries) soft); last error: \(last?.summary ?? cause)")
+        setStatus(device.id, .error("gave up after \(triesText): \(cause)"))
+        onNotice?("Connection failed", "\(name): gave up after \(triesText) — \(cause)")
     }
 
-    private func disconnectAll(token: Int) async {
-        for device in store.config.devices where device.enabled {
-            guard token == runToken else { return }  // superseded (e.g. the source came back)
-            busyDevices.insert(device.id)
-            defer { busyDevices.remove(device.id) }
-            await disconnectOne(device, token: token)
-        }
-    }
-
-    /// Tear down one device: disconnect, then (managePairing) unpair. `token` staleness is
-    /// re-checked after every await — a newer run owns the devices once it starts, and a stale
-    /// disconnect must not undo the connect/pair the new run just performed.
-    private func disconnectOne(_ device: BTDevice, token: Int) async {
-        let cfg = store.config
+    /// If a release was requested for this device (or the system is going to sleep) while a stale
+    /// connect run was still working, remove whatever bond/connection that run left behind.
+    private func undoIfReleased(_ device: BTDevice, why: String) async {
+        guard releaseRequested.contains(device.id) || suspended else { return }
         let addr = device.normalizedAddress
-
-        var disconnectError: Error?
-        do {
-            try await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.disconnect(addr) }
-        } catch {
-            disconnectError = error
-            Log.bluetooth.error("disconnect \(device.name): \(error)")
+        Log.engine.warn("\(device.name): \(why) after a release was requested; releasing it again")
+        await bestEffort(device, "late-release disconnect") { try await self.bt.disconnect(addr) }
+        if device.managePairing {
+            await bestEffort(device, "late-release unpair") { try await self.bt.unpair(addr) }
         }
-        guard token == runToken else { return }
+    }
+
+    // MARK: - Release
+
+    private func disconnectAll(run: Run) async {
+        for device in store.config.devices where device.enabled {
+            if let why = staleReason(run, respectSelection: false) {  // e.g. the source came back
+                Log.engine.log("run #\(run.token): release run stopped: \(why)")
+                return
+            }
+            markBusy(device.id)
+            defer { clearBusy(device.id) }
+            await disconnectOne(device, run: run)
+        }
+    }
+
+    /// Tear down one device: disconnect, then (managePairing) unpair. Staleness is re-checked
+    /// after every await — a newer run owns the devices once it starts, and a stale release must
+    /// not undo the connect/pair the new run just performed. A failed unpair is retried once: the
+    /// bond is what blocks the other host, so a silent release failure strands the device.
+    private func disconnectOne(_ device: BTDevice, run: Run) async {
+        let addr = device.normalizedAddress
+        let name = device.name
+        let start = ContinuousClock.now
+        releaseRequested.insert(device.id)
+        Log.engine.log(
+            "\(name): release started (run #\(run.token), \(run.trigger); managePairing=\(device.managePairing))")
+
+        var disconnectFailure: Failure?
+        do {
+            try await step(name, nil, "disconnect") { try await self.bt.disconnect(addr) }
+        } catch {
+            disconnectFailure = Failure(error)
+            Log.engine.warn(
+                "\(name): disconnect failed: \(disconnectFailure!.summary)"
+                    + (device.managePairing ? "; unpairing anyway" : ""))
+        }
+        if let why = staleReason(run, respectSelection: false) {
+            Log.engine.log("\(name): release abandoned after disconnect: \(why)")
+            return
+        }
+
+        let timeline = run.since.map { "; \(Elapsed.since($0)) after the source disappeared" } ?? ""
 
         // Release the bond even if the disconnect call failed — the bond is what blocks the
         // other host (Magic Trackpad), and unpair tears the link down anyway.
         if device.managePairing {
-            do {
-                try await withTimeout(cfg.btCallTimeoutSecs) { try await self.bt.unpair(addr) }
-            } catch {
-                guard token == runToken else { return }
-                statuses[device.id] = .error(String(describing: error))
-                Log.bluetooth.error("unpair \(device.name): \(error)")
+            var unpairFailure: Failure?
+            for attempt in 1...2 {
+                do {
+                    try await step(name, nil, "unpair") { try await self.bt.unpair(addr) }
+                    unpairFailure = nil
+                    break
+                } catch {
+                    let f = Failure(error)
+                    unpairFailure = f
+                    if let why = staleReason(run, respectSelection: false) {
+                        Log.engine.log("\(name): release abandoned after a failed unpair (\(f.summary)): \(why)")
+                        return
+                    }
+                    guard attempt == 1, f.kind != .invalidAddress else { break }
+                    Log.engine.warn("\(name): unpair failed: \(f.summary); retrying once in \(releaseRetryDelayMs) ms")
+                    await sleepHook(releaseRetryDelayMs)
+                    if let why = staleReason(run, respectSelection: false) {
+                        Log.engine.log("\(name): release abandoned before the unpair retry: \(why)")
+                        return
+                    }
+                }
+            }
+            if let why = staleReason(run, respectSelection: false) {
+                Log.engine.log("\(name): release abandoned after unpair: \(why)")
                 return
             }
-            guard token == runToken else { return }
-            statuses[device.id] = .disconnected
-            onNotice?("Disconnected", device.name)
+            if let f = unpairFailure {
+                Log.engine.error(
+                    "\(name): release FAILED after \(Elapsed.since(start)): \(f.summary) — the device may still "
+                        + "be bonded to this Mac, so the other host cannot take it")
+                setStatus(device.id, .error(f.message))
+                onNotice?("Release failed", "\(name): \(f.message)")
+                return
+            }
+            Log.engine.log("\(name): released (unpaired) in \(Elapsed.since(start))\(timeline)")
+            setStatus(device.id, .disconnected)
+            onNotice?("Disconnected", name)
             return
         }
 
-        if let disconnectError {
-            statuses[device.id] = .error(String(describing: disconnectError))
+        if let f = disconnectFailure {
+            Log.engine.error("\(name): release FAILED after \(Elapsed.since(start)): \(f.summary)")
+            setStatus(device.id, .error(f.message))
+            onNotice?("Release failed", "\(name): \(f.message)")
         } else {
-            statuses[device.id] = .disconnected
-            onNotice?("Disconnected", device.name)
+            Log.engine.log("\(name): disconnected in \(Elapsed.since(start))\(timeline)")
+            setStatus(device.id, .disconnected)
+            onNotice?("Disconnected", name)
         }
     }
 
     /// Used by the menu/Settings to force a re-evaluation (e.g. after editing devices).
     func reevaluate() {
         seed()
+    }
+
+    // MARK: - Helpers
+
+    /// A classified failure: what kind (drives the retry policy) and the human message.
+    private struct Failure {
+        let kind: BTFailureKind
+        let message: String
+
+        init(_ kind: BTFailureKind, _ message: String) {
+            self.kind = kind
+            self.message = message
+        }
+
+        init(_ error: Error) {
+            if let bt = error as? BTError {
+                self.init(bt.kind, bt.description)
+            } else {
+                self.init(.unknown, String(describing: error))
+            }
+        }
+
+        var summary: String { "[\(kind.rawValue)] \(message)" }
+    }
+
+    /// Run one timed Bluetooth step under the per-call timeout and log its success. Failures
+    /// propagate to the caller, which logs them with the classification.
+    private func step(
+        _ name: String, _ tryNumber: Int?, _ label: String, _ op: @escaping @Sendable () async throws -> Void
+    ) async throws {
+        let start = ContinuousClock.now
+        try await withTimeout(store.config.btCallTimeoutSecs, op)
+        let prefix = tryNumber.map { "try \($0): " } ?? ""
+        Log.engine.log("\(name): \(prefix)\(label) OK (\(Elapsed.since(start)))")
+    }
+
+    /// Run a step whose failure must not abort the flow, but must be visible in the log.
+    private func bestEffort(
+        _ device: BTDevice, _ what: String, _ op: @escaping @Sendable () async throws -> Void
+    ) async {
+        do {
+            try await withTimeout(store.config.btCallTimeoutSecs, op)
+        } catch {
+            Log.engine.warn("\(device.name): \(what) failed (continuing): \(Failure(error).summary)")
+        }
+    }
+
+    private func markBusy(_ id: UUID) { busyCounts[id, default: 0] += 1 }
+
+    private func clearBusy(_ id: UUID) {
+        guard let n = busyCounts[id] else { return }
+        busyCounts[id] = n <= 1 ? nil : n - 1
+    }
+
+    private func isBusy(_ id: UUID) -> Bool { busyCounts[id] != nil }
+
+    /// An aborted connect resets only the status it set itself (connecting / a per-try error).
+    /// If a newer run already reported connected/disconnected, that result stands.
+    private func markAborted(_ id: UUID) {
+        switch statuses[id] {
+        case .connecting, .error: setStatus(id, .idle)
+        default: break
+        }
+    }
+
+    private func setStatus(_ id: UUID, _ status: DeviceStatus) {
+        if statuses[id] != status { statuses[id] = status }
     }
 }

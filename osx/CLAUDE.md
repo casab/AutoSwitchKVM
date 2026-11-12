@@ -10,6 +10,13 @@ Use case: a KVM switch exposes a USB hub to whichever computer is selected; when
 selected its trackpad/keyboard reconnect, and when it's switched away they release for the other
 host. Replaces the Hammerspoon prototype in `reference/hammerspoon_init.lua`.
 
+**Logs to read when debugging a handoff:** `~/Library/Logs/AutoSwitchKVM/app-yyyyMMdd.log` (14 days
+kept; Settings ▸ Diagnostics ▸ Show Log Files). Config: `~/Library/Application Support/AutoSwitchKVM/
+config.json`. Categories: `engine` (runs, tries, steps with timings, retries, aborts, give-ups,
+handoff timeline), `bluetooth` (raw IOBluetooth calls with decoded result codes and durations),
+`usb` (source ids attaching/detaching), `app` (startup diagnostics, sleep/wake, config I/O). Don't
+rely on `log show`: a real run on 2026-11-11 left none of the app's own lines in the unified log.
+
 Design rationale lives in `PLAN.md`; the outstanding roadmap is in `IMPROVEMENTS.md`. This folder
 is the macOS half of a monorepo: the platform-neutral behavior contract is `../SPECIFICATION.md`,
 and the Windows port lives in `../windows/`.
@@ -76,16 +83,28 @@ Single executable target, organized by folder under `Sources/AutoSwitchKVM/`:
   are app-wide, not per-profile.
 - `USB/` — `USBMonitoring` (protocol), `USBMonitor` (IOKit attach/detach + enumeration),
   `SourceLearner` (detects the source by watching USB changes during a KVM switch).
-- `Bluetooth/` — `BluetoothController` (protocol + errors + `withTimeout`),
-  `IOBluetoothController` (native impl: synchronous connect/disconnect, async pair, private-API
-  unpair, adapter power via `isPoweredOn()`, and connect/disconnect event monitoring).
+- `Bluetooth/` — `BluetoothController` (protocol + `withTimeout`), `BluetoothErrors` (`BTError`,
+  `BTFailureKind`, and `BTCode`, which names IOReturn/HCI result codes and maps them to failure
+  kinds), `IOBluetoothController` (native impl: synchronous connect/disconnect, async pair that
+  `unpair` can cancel, private-API unpair, adapter power via `isPoweredOn()`, and
+  connect/disconnect event monitoring; logs every raw call with its duration).
 - `Engine/` — `SelectionEngine` (debounced state machine: source presence → connect/disconnect).
+  Work runs in *runs* (token + trigger); every await re-checks `staleReason`. Failure
+  classification per SPECIFICATION.md §3 (soft retries for busy/in-progress; stale-bond re-pair
+  only after timeout/auth/unknown). Per-device manual entry points (`connectDeviceNow`,
+  `disconnectDeviceNow`, `pairDeviceNow`, `unpairDeviceNow`) and sleep handling
+  (`prepareForSleep()` / `resumeAfterWake()`). Test seams: `sleepHook` (instant delays),
+  `softRetryIntervalMs`, `maxSoftRetries`, `releaseRetryDelayMs`, `postPairSettleMs`.
 - `System/` — `SleepWakeMonitor`, `LoginItem` (`SMAppService`), `DockManager`, `Notifier`,
   `HotKeyManager` (Carbon `RegisterEventHotKey`; user-assignable combos via `KeyShortcut`, off by
   default; `apply(enabled:pause:connectAll:disconnectAll:)` is idempotent).
 - `Support/` — `Log` (`os.Logger` wrappers: subsystem `com.enginal.AutoSwitchKVM`, categories
-  `app`/`usb`/`bluetooth`/`engine`) which also mirror into `DebugLog` (in-app buffer shown +
-  exportable from Settings ▸ Diagnostics ▸ Debug logs). Use `Log.*` instead of `NSLog`/`print`.
+  `app`/`usb`/`bluetooth`/`engine`; levels `log`/`warn`/`error`/`debug`) which also mirror into
+  `FileLog` (the persistent daily file, started by `AppController.init`, never by tests) and
+  `DebugLog` (in-app buffer shown + exportable from Settings ▸ Diagnostics ▸ Debug logs).
+  `Elapsed` formats durations for log lines. Use `Log.*` instead of `NSLog`/`print`.
+- `System/BluetoothPermission` — reads the app's Bluetooth privacy permission (logged at launch;
+  a denied permission makes IOBluetooth fail quietly, and ad-hoc rebuilds can reset it).
 - `UI/` — `MenuContentView` (menu panel + profile picker), `SettingsView` (profiles bar +
   Source/Devices/General/Extras/Diagnostics tabs), `SourceConfiguration` (Learn + manual source
   editor sheets), `DiagnosticsView` (read-only USB + Bluetooth state).
@@ -105,8 +124,14 @@ the new profile but does not force-disconnect the previous profile's devices.
 - New external dependencies go behind a **protocol** (like `BluetoothController`/`USBMonitoring`)
   so they can be mocked. Add tests when you touch the engine.
 - Async/await throughout; Bluetooth calls are wrapped in `withTimeout(_:)`; the engine uses a
-  `runToken` to cancel stale in-flight work and a `busyDevices` set so the status monitor doesn't
-  fight in-flight transitions.
+  `runToken` to cancel stale in-flight work and ref-counted busy devices so the status monitor
+  doesn't fight in-flight transitions.
+- **Never call `bt` directly from the app layer.** Manual actions and the sleep release go through
+  the engine (busy marking, explicit status, run supersession). Calling the controller directly let
+  the stack's late "disconnected" event trigger an auto-reconnect that undid the user's action.
+- **No silent `try?` on Bluetooth, config, or file paths.** A step that may fail without aborting
+  the flow goes through the engine's `bestEffort` (logs a warning); everything else logs the error
+  with context. Log decisions in `engine`, raw calls in `bluetooth`.
 - `-strict-concurrency=complete` is on (both targets) and builds clean. Keep it clean: Combine
   sinks that touch `@MainActor` state hop via `MainActor.assumeIsolated` (they deliver on main);
   cross-task closures must be `Sendable`; system-delegate conformances use `@preconcurrency`.
@@ -126,12 +151,29 @@ the new profile but does not force-disconnect the previous profile's devices.
   via an IMP cast in `IOBluetoothController` — there is no public unpair API. Its return value is
   unreliable, so success is judged by re-checking `isPaired()`. Validated on a Magic Trackpad; if it
   ever breaks, the fallback is to bundle `blueutil` behind the `BluetoothController` protocol.
+- **The synchronous IOBluetooth calls block the main thread.** `openConnection()` took 20 s in a
+  July hardware log when the device didn't answer. Meanwhile USB events, debounce timers, the
+  status poll, and the UI all stall, so a switch-away during a blocked connect is only seen after
+  it returns. `withTimeout` cannot interrupt it either; the timeout is only observed when the call
+  returns. `IOBluetoothController` logs a warning whenever a call holds the main thread for over 2 s.
+  Moving these calls off the main thread is an open item in `IMPROVEMENTS.md`; it needs a hardware
+  run to validate, since IOBluetooth is documented as main-thread.
+- **Failure classification uses IOBluetooth result codes** (`BTCode` in `BluetoothErrors.swift`).
+  IOBluetooth returns IOKit `IOReturn` values (`0xE00002xx`) or raw HCI error codes (small numbers,
+  e.g. 4 = page timeout). On this Mac, the stale-bond case appears as `kIOReturnTimeout` from
+  `openConnection`, so `timeout` stays re-pair-eligible. Refusals (HCI 0x0D–0x0F, 0x18) are soft
+  and must not unpair.
+- **A pair can land after a release.** If the source leaves while a stale run is mid-ceremony,
+  the engine undoes a pair/connection that completes after the release, and `unpair` cancels a
+  ceremony still in flight for that device. Without this the Mac holds the bond while switched away.
 - **A bond record can go stale** (observed on hardware): the other host's late release — or a
   device power-cycle — can invalidate the link key while `isPaired()` still reads true, producing
-  endless "pair: skipped" + `openConnection` timeouts. The engine self-heals: connect retries ≥ 2
-  for `managePairing` devices unpair and re-pair from scratch, and an unexpected drop while the
-  source is present triggers one rate-limited auto-reconnect (`autoReconnectOnDrop`, default on).
-  Don't reintroduce a bare pair-if-not-paired retry loop.
+  endless "pair: skipped" + `openConnection` timeouts. The engine self-heals: after a hard failure
+  that may mean a stale bond (timeout / authentication / unknown), the next try for a
+  `managePairing` device unpairs and re-pairs from scratch. An unexpected drop while the source is
+  present triggers one rate-limited auto-reconnect (`autoReconnectOnDrop`, default on). Don't
+  reintroduce a bare pair-if-not-paired retry loop, and don't make the re-pair unconditional again:
+  after a refusal, it only destroys a good fresh bond.
 - **Notifications and launch-at-login require a real `.app` bundle.** `Notifier` no-ops unless
   `Bundle.main.bundleURL.pathExtension == "app"` because `UNUserNotificationCenter.current()`
   crashes in a bare SwiftPM executable.

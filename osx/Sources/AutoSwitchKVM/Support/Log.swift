@@ -1,30 +1,41 @@
 import Foundation
 import os
 
-/// Per-category logger that writes to both `os.Logger` (Console.app / `log stream`) and the in-app
-/// `DebugLog` buffer (viewable/exportable from Settings). Messages are plain `String`s.
-struct CategoryLog {
+/// Per-category logger that writes to `os.Logger` (Console.app / `log stream`), the persistent
+/// `FileLog` (`~/Library/Logs/AutoSwitchKVM/app-yyyyMMdd.log`), and the in-app `DebugLog` buffer
+/// (viewable/exportable from Settings ▸ Diagnostics). Messages are plain `String`s.
+///
+/// Levels: `log` = normal flow (persisted), `warn` = something failed but the flow continues
+/// (a best-effort step, a retry), `error` = an operation failed for good. `debug` is for noise
+/// that is only useful while developing.
+struct CategoryLog: Sendable {
     let logger: Logger
     let category: String
 
     func log(_ message: String) {
         logger.log("\(message, privacy: .public)")
-        sink(message)
+        emit("INFO", message, buffered: message)
     }
     func debug(_ message: String) {
         logger.debug("\(message, privacy: .public)")
-        sink(message)
+        emit("DEBUG", message, buffered: message)
+    }
+    func warn(_ message: String) {
+        logger.warning("\(message, privacy: .public)")
+        emit("WARN", message, buffered: "WARN: \(message)")
     }
     func error(_ message: String) {
         logger.error("\(message, privacy: .public)")
-        sink("ERROR: \(message)")
+        emit("ERROR", message, buffered: "ERROR: \(message)")
     }
 
-    /// Mirror into the in-app buffer on the main actor (captures only Sendable values).
-    private func sink(_ message: String) {
+    /// Mirror into the file log (date captured now, so asynchronous writes keep the real order)
+    /// and into the in-app buffer on the main actor (captures only Sendable values).
+    private func emit(_ level: String, _ message: String, buffered: String) {
         let cat = category
         let date = Date()
-        Task { @MainActor in DebugLog.shared.add(date: date, category: cat, message: message) }
+        FileLog.shared.write(level: level, category: cat, message: message, date: date)
+        Task { @MainActor in DebugLog.shared.add(date: date, category: cat, message: buffered) }
     }
 }
 

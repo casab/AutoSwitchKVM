@@ -37,7 +37,10 @@ final class USBMonitor: ObservableObject, USBMonitoring {
     func start() {
         guard notifyPort == nil else { return }
 
-        guard let port = IONotificationPortCreate(kIOMainPortDefault) else { return }
+        guard let port = IONotificationPortCreate(kIOMainPortDefault) else {
+            Log.usb.error("IONotificationPortCreate failed: USB attach/detach events are unavailable")
+            return
+        }
         notifyPort = port
         IONotificationPortSetDispatchQueue(port, DispatchQueue.main)
 
@@ -110,13 +113,17 @@ final class USBMonitor: ObservableObject, USBMonitoring {
         var result: [USBDeviceInfo] = []
         var iter: io_iterator_t = 0
         let matching = IOServiceMatching(Self.usbDeviceClass)
-        if IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS {
-            while case let service = IOIteratorNext(iter), service != 0 {
-                if let info = Self.deviceInfo(from: service) { result.append(info) }
-                IOObjectRelease(service)
-            }
-            IOObjectRelease(iter)
+        let kr = IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter)
+        guard kr == KERN_SUCCESS else {
+            // Keep the previous snapshot rather than reporting every device as gone.
+            Log.usb.error("USB enumeration failed (kern_return \(kr)); keeping the previous snapshot")
+            return
         }
+        while case let service = IOIteratorNext(iter), service != 0 {
+            if let info = Self.deviceInfo(from: service) { result.append(info) }
+            IOObjectRelease(service)
+        }
+        IOObjectRelease(iter)
         // De-dup by vid/pid/name, keep stable order by name.
         let unique = Array(Set(result)).sorted { $0.name < $1.name }
         attachedDevices = unique

@@ -152,6 +152,19 @@ controller** (the operations in §5). It owns no platform APIs directly.
 ### Manual actions (ignore selection/source; act on all configured devices)
 - **Connect all now**, **Disconnect all now**.
 - Per-device test buttons: **Connect / Disconnect / Pair / Unpair**.
+- Every manual action goes **through the engine**, never straight to the Bluetooth controller: it
+  marks the device busy, supersedes in-flight automation on that device, and sets the device's
+  status explicitly before clearing busy. Otherwise the stack's late "disconnected" event after a
+  manual Disconnect/Unpair looks like an unexpected drop, and auto-reconnect undoes the user's
+  action (seen on Windows; same code pattern existed on macOS).
+
+### System sleep / wake
+- On sleep the engine **halts automation first** (supersedes in-flight runs; no evaluation,
+  no auto-reconnect while suspended), then releases the enabled devices through the same
+  busy/status bookkeeping as an automation release. Releasing straight through the controller let
+  the release's own disconnect events look like unexpected drops, and auto-reconnect re-paired the
+  device during sleep. On wake: re-enable automation and re-seed. (macOS: `prepareForSleep()` /
+  `resumeAfterWake()`; Windows: `NotifySuspending()` / `NotifyResumed()`.)
 
 ### Pause
 - `paused` suspends automatic connect/disconnect (presence still tracked; manual actions still
@@ -181,7 +194,7 @@ controller** (the operations in §5). It owns no platform APIs directly.
   must **unpair (best-effort) and re-pair from scratch** instead of trusting the platform's
   "already paired" state, so the retry loop can always recover without manual intervention.
 
-### Failure classification (connect retries) — Windows implemented; macOS pending
+### Failure classification (connect retries) — implemented on Windows and macOS
 - The Bluetooth controller may classify a failure: `deviceBusy` (device answered but refused —
   for an exclusive-bond device, the other host still holds it), `operationInProgress` (an earlier
   OS operation is still running), `timeout`, `authenticationFailed` (stale/mismatched key),
@@ -197,10 +210,25 @@ controller** (the operations in §5). It owns no platform APIs directly.
   `unknown`) — not after a refusal or a missing device.
 - `invalidAddress` gives up immediately; `adapterUnavailable` refreshes adapter power first.
 - Re-check staleness after the pair step and after a failed try (a release may have started).
+- **A pair or connection that completes after a release was requested is undone** (unpair /
+  disconnect again). A stale run can be mid-ceremony when the source leaves; if its pair lands
+  after the release, this host holds the exclusive bond while switched away and the other host
+  cannot pair. (macOS: the engine undoes it, and `unpair` also cancels a ceremony still in flight.
+  Windows: `WinRtBluetooth` tracks the timed-out "orphan" pairing and unpairs it again.)
 - Give-up status and notification carry the **last error**. Release: a failed unpair is retried
   once; a final failure sets `error` and raises a "Release failed" notification (the bond is what
   blocks the other host, so this must not fail silently).
 - Every attempt, step outcome (with elapsed time), backoff, abort reason, and give-up is logged.
+- Platform code mapping. **macOS** (`osx/…/Bluetooth/BluetoothErrors.swift`, `BTCode`): IOBluetooth
+  returns IOKit `IOReturn` values or raw HCI error codes. `deviceBusy`: HCI 0x09, 0x0D–0x0F
+  (connection rejected), 0x14, 0x18 (pairing not allowed), `kIOReturnExclusiveAccess`,
+  `kIOReturnNoResources`. `operationInProgress`: `kIOReturnBusy`, HCI 0x0B, 0x0C, 0x23, 0x2A, 0x38,
+  0x3A. `timeout`: `kIOReturnTimeout`, `kIOReturnNotResponding`, HCI 0x04 (page timeout), 0x08,
+  0x10, 0x22, 0x3E. `authenticationFailed`: HCI 0x05, 0x06 (PIN or key missing), 0x25, 0x26, 0x2F.
+  `deviceNotFound`: `kIOReturnNoDevice`/`NotAttached`/`NotFound`, HCI 0x02, 0x15.
+  `adapterUnavailable`: `kIOReturnNoPower`/`Offline`/`NotReady`, HCI 0x03. On macOS the stale-bond
+  case shows up as `kIOReturnTimeout` from `openConnection` (seen on hardware in July 2026), so
+  `timeout` must stay re-pair-eligible. **Windows**: `WinRtBluetooth.KindFor`.
 
 ### Per-device status states
 `idle`, `connecting`, `connected`, `disconnected`, `bluetoothOff`, `error`.
@@ -324,6 +352,14 @@ against real hardware in Milestone 0 (`windows/PLAN.md` "spike findings").
 - A categorized logger (`app` / `usb` / `bluetooth` / `engine`) to the OS log, **mirrored** into an
   in-app ring buffer shown in Diagnostics (view / copy / export). Detailed connect/pair steps are
   logged to aid troubleshooting.
+- A **persistent daily log file**, because handoff bugs are diagnosed across several switches and
+  restarts. Windows: `%LOCALAPPDATA%\AutoSwitchKVM\logs\app-yyyyMMdd.log`. macOS:
+  `~/Library/Logs/AutoSwitchKVM/app-yyyyMMdd.log` (14 days kept; Diagnostics ▸ Show Log Files).
+  The macOS unified log is not a reliable record here: a real run on 2026-11-11 left none of the
+  app's own lines in the log store.
+- The **handoff timeline** is logged on both sides so each host can measure the other: when the
+  source appears/disappears (per source id), when the debounced run starts, and when each device is
+  released/connected, with elapsed times.
 
 ---
 

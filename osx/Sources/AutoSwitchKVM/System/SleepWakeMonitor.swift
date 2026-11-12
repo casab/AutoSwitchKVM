@@ -96,16 +96,21 @@ final class SleepWakeMonitor {
             // release keeps running but the machine is allowed to sleep; wake re-seeds anyway.
             pendingSleepToken = token
             let limit = sleepHoldLimitSeconds
+            let start = ContinuousClock.now
+            Log.app.log("system will sleep: holding sleep (up to \(limit) s) while devices are released")
             Task { @MainActor [weak self] in
                 await handler()
-                self?.allowPendingSleep(expecting: token)
+                self?.allowPendingSleep(expecting: token, "release finished in \(Elapsed.since(start))")
             }
             Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(max(1, limit)) * 1_000_000_000)
-                self?.allowPendingSleep(expecting: token)
+                self?.allowPendingSleep(
+                    expecting: token,
+                    "hold limit of \(limit) s reached with the release still running; it continues during sleep")
             }
 
         case Self.msgSystemHasPoweredOn:
+            Log.app.log("system woke (powered on)")
             onDidWake?()
 
         default:
@@ -113,9 +118,14 @@ final class SleepWakeMonitor {
         }
     }
 
-    private func allowPendingSleep(expecting token: Int) {
+    private func allowPendingSleep(expecting token: Int, _ why: String) {
         guard pendingSleepToken == token, rootPort != 0 else { return }
         pendingSleepToken = nil
+        if why.hasPrefix("hold limit") {
+            Log.app.warn("allowing sleep: \(why)")
+        } else {
+            Log.app.log("allowing sleep: \(why)")
+        }
         IOAllowPowerChange(rootPort, token)
     }
 
@@ -127,12 +137,16 @@ final class SleepWakeMonitor {
             nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let handler = self?.onWillSleep else { return }
+                    Log.app.warn("system will sleep (workspace fallback: sleep cannot be held; release is best-effort)")
                     Task { @MainActor in await handler() }
                 }
             })
         workspaceObservers.append(
             nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.onDidWake?() }
+                MainActor.assumeIsolated {
+                    Log.app.log("system woke (workspace fallback)")
+                    self?.onDidWake?()
+                }
             })
     }
 }

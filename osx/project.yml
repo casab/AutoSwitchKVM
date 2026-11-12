@@ -34,6 +34,7 @@ targets:
     dependencies:
       - sdk: IOKit.framework
       - sdk: IOBluetooth.framework
+      - sdk: CoreBluetooth.framework
       - sdk: UserNotifications.framework
       - sdk: Carbon.framework
     settings:

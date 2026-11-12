@@ -1,26 +1,6 @@
 import Foundation
 
-enum BTError: Error, CustomStringConvertible {
-    case invalidAddress(String)
-    case connectFailed(Int32)
-    case disconnectFailed(Int32)
-    case pairFailed(String)
-    case unpairUnavailable
-    case unpairFailed(Int32)
-    case timeout
-
-    var description: String {
-        switch self {
-        case .invalidAddress(let a): return "Invalid Bluetooth address: \(a)"
-        case .connectFailed(let c): return "Connect failed (IOReturn \(c))"
-        case .disconnectFailed(let c): return "Disconnect failed (IOReturn \(c))"
-        case .pairFailed(let m): return "Pairing failed: \(m)"
-        case .unpairUnavailable: return "Unpair API unavailable on this macOS version"
-        case .unpairFailed(let c): return "Unpair failed (IOReturn \(c))"
-        case .timeout: return "Operation timed out"
-        }
-    }
-}
+// BTError, BTFailureKind and BTCode (IOReturn/HCI decoding) live in BluetoothErrors.swift.
 
 struct PairedDeviceInfo: Identifiable, Hashable {
     var name: String
@@ -69,6 +49,12 @@ private final class RaceOnce: @unchecked Sendable {
 /// a late success as a timeout). Here the loser is cancelled cooperatively and abandoned; a late
 /// completion is logged and discarded (the engine re-checks `isConnected` after a connect timeout,
 /// and the status poll reconciles any state a late call changed).
+///
+/// LIMITATION (macOS): `IOBluetoothController` runs the synchronous calls (`openConnection`,
+/// `closeConnection`, `remove`) on the main actor, so while one blocks, the engine's continuation
+/// cannot run either: the timeout is only *observed* when the blocked call returns. Async calls
+/// (pairing) are genuinely bounded. `IOBluetoothController` logs a warning whenever a synchronous
+/// call held the main thread for more than 2 s, so this is visible in the log.
 func withTimeout<T: Sendable>(_ seconds: Int, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
     let once = RaceOnce()
     return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
@@ -78,7 +64,7 @@ func withTimeout<T: Sendable>(_ seconds: Int, _ operation: @escaping @Sendable (
                 if once.claim() {
                     cont.resume(returning: value)
                 } else {
-                    Log.bluetooth.log("operation completed after its \(seconds)s timeout; result discarded")
+                    Log.bluetooth.warn("operation completed after its \(seconds) s timeout; result discarded")
                 }
             } catch {
                 if once.claim() { cont.resume(throwing: error) }
@@ -88,7 +74,7 @@ func withTimeout<T: Sendable>(_ seconds: Int, _ operation: @escaping @Sendable (
             try? await Task.sleep(nanoseconds: UInt64(max(0, seconds)) * 1_000_000_000)
             opTask.cancel()  // cooperative: async operations abort, blocking calls run out on their own
             if once.claim() {
-                cont.resume(throwing: BTError.timeout)
+                cont.resume(throwing: BTError.timeout(seconds: seconds))
             }
         }
     }

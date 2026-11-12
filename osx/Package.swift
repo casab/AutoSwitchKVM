@@ -19,6 +19,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("IOKit"),
                 .linkedFramework("IOBluetooth"),
+                .linkedFramework("CoreBluetooth"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("UserNotifications"),
                 .linkedFramework("Carbon"),
@@ -45,6 +46,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("IOKit"),
                 .linkedFramework("IOBluetooth"),
+                .linkedFramework("CoreBluetooth"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("UserNotifications"),
                 .linkedFramework("Carbon")

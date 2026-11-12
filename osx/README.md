@@ -157,6 +157,13 @@ Or in Xcode (with `Package.swift` open): press ⌘U.
 
 ## Logs
 
+**Start here:** every line is also written to a daily file,
+`~/Library/Logs/AutoSwitchKVM/app-yyyyMMdd.log` (14 days kept; **Settings ▸ Diagnostics ▸ Show Log
+Files**). It survives restarts and records each handoff with timings: when the source ids
+detach/attach, every connect try and step, decoded IOBluetooth result codes, and the release. Share
+it when reporting a failed handoff. The unified log below is handy live, but it is not a reliable
+record. One real run kept none of the app's own lines.
+
 The app logs via `os.Logger` under subsystem `com.enginal.AutoSwitchKVM` (categories: `app`,
 `usb`, `bluetooth`, `engine`). Watch them live with:
 

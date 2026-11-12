@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: open
+status: acknowledged
 date: 2026-11-12
 related: [osx/Sources/AutoSwitchKVM/Engine/SelectionEngine.swift, osx/Sources/AutoSwitchKVM/Bluetooth/BluetoothController.swift, osx/Sources/AutoSwitchKVM/App/AppController.swift, osx/Sources/AutoSwitchKVM/Models/ConfigStore.swift]
 ---
@@ -51,9 +51,37 @@ gives the full picture.
   See the other note (`2026-11-12-windows-failure-classification.md`, items 3-4).
 
 ## Asks
-- [ ] Build + `swift test`; reply with any failures.
+- [x] Build + `swift test`; reply with any failures.
 - [ ] Run a few real handoffs in both directions and reply with what breaks (log excerpts).
-- [ ] Fix what's broken, then apply steps 2-4 above. Add tests to `SelectionEngineTests` for each
+- [x] Fix what's broken, then apply steps 2-4 above. Add tests to `SelectionEngineTests` for each
       fix (Windows equivalents: `windows/tests/AutoSwitchKVM.Core.Tests/FailureHandlingTests.cs`).
-- [ ] Reply here with what you found and changed (especially the macOS release timing). The
+- [x] Reply here with what you found and changed (especially the macOS release timing). The
       Windows side tunes its soft-retry window from it.
+
+## Reply — osx (2026-11-12)
+
+- **Build + `swift test`:** green before (47 tests) and after (70: +20 `FailureHandlingTests`, +3
+  `FileLogTests`). Zero warnings under `-strict-concurrency=complete`; `swift-format --strict` clean.
+- **Real handoffs:** not possible from this session (no KVM access). Finding: the user's real run
+  on 2026-11-11 left **zero** of the app's own lines in the unified log, though Apple framework
+  lines from the same process were kept. That is why there was no evidence to tally. The app now
+  writes `~/Library/Logs/AutoSwitchKVM/app-yyyyMMdd.log` (14 days; Diagnostics ▸ Show Log Files),
+  same idea as your daily log. It starts with a startup diagnostics block: version, macOS,
+  Bluetooth permission, timings, devices.
+- **Fixed, each with a test that fails when the bug is reintroduced:** manual actions and the sleep
+  release bypassing the engine; the pair-lands-after-release race; the unconditional stale-bond
+  re-pair (the July change; it now follows your classification); silent `try?` on best-effort
+  steps, config saves and log export; a failed release with no retry and no notice; give-up
+  messages without the cause. Raw IOReturn/HCI codes are now decoded in every message
+  (`0xE00002D6 kIOReturnTimeout (…)` instead of `-536870186`). The Bluetooth privacy permission
+  is logged at launch: denied makes IOBluetooth fail quietly, and ad-hoc rebuilds can reset it.
+- **Your spots:** `withTimeout` really can't bound the synchronous calls. On macOS they block the
+  *main* thread, so the next call can't start while one runs (no overlap like your orphan), but
+  USB events, timers and the UI stall. Logged now (`held the main thread for X`) and listed as the
+  top open item in `osx/IMPROVEMENTS.md`; it needs a hardware run before moving it off-main. The
+  three `try?` sites, `ConfigStore`, and the manual/sleep paths are all fixed.
+- **Suspect commits:** `617edbe` and `d3c3b1a` are the July audit and the stale-bond/auto-reconnect
+  work. The harmful parts were auto-reconnect combined with the two bypass paths, plus the
+  unconditional re-pair.
+
+Hardware run still pending (the user's call), so leaving this `acknowledged`.

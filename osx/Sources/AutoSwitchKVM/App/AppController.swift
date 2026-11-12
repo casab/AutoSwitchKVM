@@ -34,6 +34,9 @@ final class AppController: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     init() {
+        // Start the persistent log first, so even config-load problems land in the file.
+        // (Only the app does this — tests never construct AppController.)
+        FileLog.shared.start()
         let store = ConfigStore()
         let usb = USBMonitor()
         let bt = IOBluetoothController()
@@ -105,23 +108,59 @@ final class AppController: ObservableObject {
             notifier.requestAuthorizationIfNeeded()
         }
 
+        logStartupDiagnostics()
         engine.seed()
         engine.startStatusMonitor()
         append("Started. Source: \(store.config.source?.name ?? "none")")
     }
 
+    /// One block at launch with everything needed to read the log that follows: build, OS,
+    /// Bluetooth permission, and the settings that shape a handoff.
+    private func logStartupDiagnostics() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        let packaging = Bundle.main.bundleURL.pathExtension == "app" ? ".app bundle" : "bare executable (SwiftPM)"
+        Log.app.log(
+            "AutoSwitch KVM \(version) (\(build)), \(packaging), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
+        )
+        Log.app.log("log file: \(FileLog.shared.folderURL?.path ?? "disabled")")
+
+        let permission = BluetoothPermission.current
+        if permission.isProblem {
+            Log.app.error("Bluetooth permission: \(permission.description)")
+            append("Bluetooth permission: \(permission.description)")
+        } else {
+            Log.app.log("Bluetooth permission: \(permission.description)")
+        }
+
+        let c = store.config
+        Log.app.log(
+            "config: profile '\(c.activeProfileName)', source \(c.source.map { "'\($0.name)' \($0.displayVidPid)" } ?? "none"); "
+                + "debounce arrival \(c.arrivalDebounceMs) ms / departure \(c.debounceMs) ms; "
+                + "retries \(c.connectRetryMax) (base \(c.connectRetrySecs) s); call timeout \(c.btCallTimeoutSecs) s; "
+                + "paused \(c.paused); autoReconnectOnDrop \(c.autoReconnectOnDrop)")
+        for d in c.devices {
+            Log.app.log(
+                "device '\(d.name)' \(d.normalizedAddress): enabled \(d.enabled), managePairing \(d.managePairing), "
+                    + "connectDelay \(d.connectDelayMs) ms")
+        }
+    }
+
     /// Awaited by SleepWakeMonitor, which holds the sleep transition (bounded) until this
     /// returns — so the release/unpair the other host depends on actually happens before sleep.
+    /// Goes through the engine: it halts automation first, so the release's own disconnect
+    /// events can't trigger an auto-reconnect during sleep.
     private func handleWillSleep() async {
         append("System sleep → releasing devices")
-        await manualDisconnectAll()
+        await engine.prepareForSleep()
         append("Devices released; allowing sleep")
     }
 
     private func handleDidWake() {
         append("Wake → re-seeding")
         usb.refreshAttached()
-        engine.seed()
+        engine.resumeAfterWake()
     }
 
     // MARK: - Settings application
@@ -253,7 +292,25 @@ final class AppController: ObservableObject {
         panel.nameFieldStringValue = "AutoSwitchKVM-log.txt"
         panel.allowedContentTypes = [.plainText]
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? Data(DebugLog.shared.plainText().utf8).write(to: url, options: .atomic)
+        do {
+            try Data(DebugLog.shared.plainText().utf8).write(to: url, options: .atomic)
+            append("Exported debug logs to \(url.lastPathComponent)")
+        } catch {
+            Log.app.error("exporting debug logs to \(url.path) failed: \(error)")
+            append("Export failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Reveal the persistent log files (`~/Library/Logs/AutoSwitchKVM/`) in Finder.
+    func revealLogFiles() {
+        FileLog.shared.flush()
+        if let file = FileLog.shared.fileURL {
+            NSWorkspace.shared.activateFileViewerSelecting([file])
+        } else if let folder = FileLog.shared.folderURL {
+            NSWorkspace.shared.open(folder)
+        } else {
+            append("File logging is not running")
+        }
     }
 
     // MARK: - Config import / export
@@ -303,48 +360,43 @@ final class AppController: ObservableObject {
         }
     }
 
-    // MARK: - Manual test actions (Phase 0 spike)
+    // MARK: - Manual per-device actions (Settings ▸ Devices test buttons)
 
+    // These go through the engine, never `bt` directly: the engine marks the device busy,
+    // supersedes in-flight automation on it, and sets the status before clearing busy — so the
+    // stack's late "disconnected" event can't look like an unexpected drop and trigger an
+    // auto-reconnect that undoes the user's Disconnect/Unpair.
+
+    /// Full connect flow (pair first when managePairing, retries included), ignoring selection.
     func testConnect(_ device: BTDevice) {
         Task {
             append("connect \(device.name)…")
-            do { try await bt.connect(device.normalizedAddress); append("connect \(device.name): ok") } catch {
-                append("connect \(device.name): \(error)")
-            }
+            await engine.connectDeviceNow(device)
+            append("connect \(device.name): \(engine.statuses[device.id]?.label ?? "done")")
         }
     }
 
     func testDisconnect(_ device: BTDevice) {
         Task {
             append("disconnect \(device.name)…")
-            do { try await bt.disconnect(device.normalizedAddress); append("disconnect \(device.name): ok") } catch {
-                append("disconnect \(device.name): \(error)")
-            }
+            let error = await engine.disconnectDeviceNow(device)
+            append("disconnect \(device.name): \(error ?? "ok")")
         }
     }
 
     func testPair(_ device: BTDevice) {
         Task {
             append("pair \(device.name)…")
-            do { try await bt.pair(device.normalizedAddress); append("pair \(device.name): ok") } catch {
-                append("pair \(device.name): \(error)")
-            }
+            let error = await engine.pairDeviceNow(device)
+            append("pair \(device.name): \(error ?? "ok")")
         }
     }
 
     func testUnpair(_ device: BTDevice) {
         Task {
             append("unpair \(device.name)…")
-            do { try await bt.unpair(device.normalizedAddress); append("unpair \(device.name): ok") } catch {
-                append("unpair \(device.name): \(error)")
-            }
-        }
-    }
-
-    private func manualDisconnectAll() async {
-        for device in store.config.devices where device.enabled {
-            try? await bt.disconnect(device.normalizedAddress)
-            if device.managePairing { try? await bt.unpair(device.normalizedAddress) }
+            let error = await engine.unpairDeviceNow(device)
+            append("unpair \(device.name): \(error ?? "ok")")
         }
     }
 

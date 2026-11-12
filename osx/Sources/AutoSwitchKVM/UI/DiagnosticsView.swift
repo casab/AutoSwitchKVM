@@ -36,6 +36,8 @@ struct DiagnosticsTab: View {
                 Spacer()
                 Button("Copy") { controller.copyDebugLogs() }
                 Button("Export…") { controller.exportDebugLogs() }
+                Button("Show Log Files") { controller.revealLogFiles() }
+                    .help("Daily log files kept across restarts: ~/Library/Logs/AutoSwitchKVM/")
                 Button("Clear") { debug.clear() }
             }
             .controlSize(.small)
