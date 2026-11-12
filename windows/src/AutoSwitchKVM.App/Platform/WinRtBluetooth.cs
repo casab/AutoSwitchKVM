@@ -96,55 +96,54 @@ public sealed class WinRtBluetooth : IBluetoothController
 
     // ---- Connect / disconnect (Classic-HID semantics; see class doc) ----
 
-    // Connect == ensure paired (PairAsync is idempotent: no-op if already paired), then require the
-    // device's HID input to be up. A bond + "Connected" link alone is not a working trackpad: on
-    // 2026-11-12 the Mac paired the trackpad while Windows was still releasing it, the link came
-    // up, HID never started, and the trackpad stayed wedged until power-cycled. The macOS app now
-    // requires its IOHIDDevice; the Windows equivalent is the BTHENUM HID-service node plus its
-    // HID child, both started.
-    public async Task ConnectAsync(string address, CancellationToken ct = default)
-    {
-        await PairAsync(address, ct);
-        await WaitForHidReadyAsync(address, ct);
-    }
+    // Connect == ensure paired (PairAsync is idempotent: no-op if already paired). Whether the
+    // device's HID input is up is checked by the engine through IsHidReadyAsync (spec §3 connect
+    // flow: wait for HID on the pairing link first, reconnect only without it).
+    public Task ConnectAsync(string address, CancellationToken ct = default) => PairAsync(address, ct);
 
-    private const int HidReadyTimeoutMs = 10_000;
     private const string HidServiceGuid = "{00001124-0000-1000-8000-00805F9B34FB}";
 
-    private async Task WaitForHidReadyAsync(string address, CancellationToken ct)
-    {
-        using (var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct))
-        {
-            if (dev is null)
-            {
-                throw new BluetoothException(BluetoothFailureKind.DeviceNotFound,
-                    $"{address} is not known to Windows after pairing", "FromBluetoothAddressAsync=null");
-            }
-            // Only HID peripherals (mice, keyboards, trackpads) have a HID input to wait for.
-            if (dev.ClassOfDevice.MajorClass != BluetoothMajorClass.Peripheral)
-            {
-                Log.Info("bt", $"connect {address}: not a HID peripheral ({dev.ClassOfDevice.MajorClass}); skipping the HID check");
-                return;
-            }
-        }
+    // Per device: is it a HID peripheral (class of device never changes), and the last HID state
+    // logged (so the log shows each change without repeating every 250 ms poll).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _isHidPeripheral = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _lastHidState = new();
 
+    /// A bond + "Connected" link alone is not a working trackpad: on 2026-11-12 a host paired it
+    /// while the link was still being set up, the link came up, HID never started, and the trackpad
+    /// stayed wedged. The Windows signal is the BTHENUM HID-service node plus a HID collection, both
+    /// started. null for non-HID devices or when Windows doesn't know the device.
+    public async Task<bool?> IsHidReadyAsync(string address, CancellationToken ct = default)
+    {
         var digits = Digits(address);
-        var sw = Stopwatch.StartNew();
-        HidState state;
-        while (true)
+        if (!_isHidPeripheral.TryGetValue(digits, out var hidPeripheral))
         {
-            state = await Task.Run(() => QueryHidState(digits), ct);
-            if (state.Ready)
+            try
             {
-                Log.Info("bt", $"connect {address}: HID input up after {sw.ElapsedMilliseconds} ms ({state})");
-                return;
+                using var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
+                if (dev is null) return null;
+                hidPeripheral = dev.ClassOfDevice.MajorClass == BluetoothMajorClass.Peripheral;
+                _isHidPeripheral[digits] = hidPeripheral;
+                if (!hidPeripheral)
+                    Log.Info("bt", $"hid {address}: not a HID peripheral ({dev.ClassOfDevice.MajorClass}); HID readiness not checked");
             }
-            if (sw.ElapsedMilliseconds >= HidReadyTimeoutMs) break;
-            await Task.Delay(250, ct);
+            catch (OperationCanceledException) { throw; }
+            catch (BluetoothException) { throw; }
+            catch (Exception ex)
+            {
+                Log.Warn("bt", $"hid {address}: class-of-device query failed ({ex.Message})");
+                return null;
+            }
         }
-        Log.Warn("bt", $"connect {address}: HID input did not start within {HidReadyTimeoutMs / 1000} s ({state})");
-        throw new BluetoothException(BluetoothFailureKind.HidNotReady,
-            $"link is up but the HID input never started within {HidReadyTimeoutMs / 1000} s ({state})", state.ToString());
+        if (!hidPeripheral) return null;
+
+        var state = await Task.Run(() => QueryHidState(digits), ct);
+        var text = state.ToString();
+        if (!_lastHidState.TryGetValue(digits, out var previous) || previous != text)
+        {
+            _lastHidState[digits] = text;
+            Log.Info("bt", $"hid {address}: {(state.Ready ? "up" : "not up")} ({text})");
+        }
+        return state.Ready;
     }
 
     /// The HID chain for a Classic-HID device, from PnP:

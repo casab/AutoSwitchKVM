@@ -142,7 +142,9 @@ controller** (the operations in §5). It owns no platform APIs directly.
     (macOS, 2026-11-12: closing the pairing link while the stack was still bringing HID up made
     it re-page at once; the trackpad's HID on that link was refused with a security failure, and
     the trackpad then refused this host's HID until it bonded elsewhere or was power-cycled.
-    Windows, measured 2026-11-12: its path keeps the link: the post-pair "disconnect" is a no-op for Classic HID, and HID was up ~0.9 s after every pair, including an idle 0.8 s settle.)
+    Windows: its path never closed the link (the post-pair "disconnect" is a no-op for Classic
+    HID); since 2026-11-12 it follows this flow too, skipping the idle drop + 0.8 s settle when HID
+    is already up on the pairing link.)
   - Else: if already connected, done; otherwise **connect**.
   - **Success requires a *clean* connect** — the connect call completing without error — **and**
     the device reporting connected. A link-only/ACL state that isn't a working connection does
@@ -215,7 +217,8 @@ controller** (the operations in §5). It owns no platform APIs directly.
   `unknown`) — not after a refusal or a missing device.
 - `invalidAddress` gives up immediately; `adapterUnavailable` refreshes adapter power first.
 - **`hidNotReady`** (macOS: a registered `IOHIDDevice`; Windows: the `BTHENUM` HID-service node and
-  at least one of its `HID\` collections started, waited for up to 10 s after connect): the
+  at least one of its `HID\` collections started; both engines ask through the controller's
+  `isHIDReady`, wait ≤ 3 s on the pairing link, then ≤ 5 s after a connect): the
   link came up but the device never started HID. It is hard, does **not** trigger the stale-bond
   re-pair, and **2 of them end the connect run early** with a "power-cycle the device" message.
   Seen on hardware 2026-11-12: a 1 ms `openConnection` on a bare link was reported as connected and

@@ -226,12 +226,13 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   (Waiting inside the call ate the caller's timeout: a retry waited 19 s and had 13 s left to
   pair.) A watcher logs the orphan's outcome and unpairs again if it completes `Paired` after a
   release was requested. On hardware an orphan ends ~50-55 s after it started, as `Canceled`.
-- **A "Connected" link is not a working trackpad.** `ConnectAsync` waits (≤ 10 s) for the HID
-  chain: the `BTHENUM\{00001124-…}…<MAC>` service node and at least one
-  `HID\{00001124-…}_VID&…_PID&…` collection started (`ConfigManagerErrorCode == 0`). Only for
-  Peripheral class-of-device. Otherwise it throws `HidNotReady`; two in a run end it with a
-  power-cycle hint. Background: the trackpad wedged (HID never started, power cycle needed) when
-  one host paired it while the other was still releasing it.
+- **A "Connected" link is not a working trackpad.** `IsHidReadyAsync` reports the HID chain: the
+  `BTHENUM\{00001124-…}…<MAC>` service node and at least one `HID\{00001124-…}_VID&…_PID&…`
+  collection started (`ConfigManagerErrorCode == 0`); null for non-Peripheral class-of-device.
+  The engine (spec §3, same as macOS) waits ≤ 3 s for HID on the pairing link and is done if it
+  comes up. Otherwise it drops + settles 0.8 s + connects, then waits ≤ 5 s for HID → else
+  `HidNotReady` (two in a run end it with a power-cycle hint). Background: on 2026-11-12 the Mac
+  wedged the trackpad by closing the pairing link before HID came up.
 - **USB detection lag.** On 2026-11-12 Windows saw each KVM switch 3.1-3.8 s after the Mac.
   `PnpUsbMonitor` now reconciles on the first event of a burst (leading edge) as well as after
   it, and logs `via <trigger>, enumerate N ms, M ms after the burst started`. Use that to

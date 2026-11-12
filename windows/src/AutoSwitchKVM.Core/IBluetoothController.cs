@@ -22,6 +22,12 @@ public interface IBluetoothController
 {
     Task<bool> IsConnectedAsync(string address, CancellationToken ct = default);
 
+    /// Whether the device's HID input is actually up (usable as an input device), as opposed to a
+    /// bare link: a "Connected" link alone was not a working trackpad on hardware. null when the
+    /// backend can't tell or the device isn't a HID peripheral (the engine then trusts
+    /// IsConnectedAsync). Mirrors macOS `isHIDReady`.
+    Task<bool?> IsHidReadyAsync(string address, CancellationToken ct = default);
+
     /// Bring the device up for this host (on Windows: ensure paired).
     Task ConnectAsync(string address, CancellationToken ct = default);
 

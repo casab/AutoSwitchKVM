@@ -75,6 +75,12 @@ public sealed class SelectionEngine
     internal int ReleaseRetryDelayMs = 1000;
     /// HidNotReady failures in one connect run before it ends with a power-cycle hint (spec §3).
     internal int MaxHidNotReady = 2;
+    /// Spec §3 connect flow (values match macOS): wait this long for HID on the pairing link before
+    /// falling back to drop + settle + connect; then wait up to HidReadyTimeoutMs for HID after the
+    /// connect; poll every HidPollIntervalMs.
+    internal int PostPairHidWaitMs = 3000;
+    internal int HidReadyTimeoutMs = 5000;
+    internal int HidPollIntervalMs = 250;
 
     public SelectionEngine(AppConfig config, IUsbMonitor usb, IBluetoothController bt, ILogSink? log = null)
     {
@@ -595,13 +601,15 @@ public sealed class SelectionEngine
                     Info($"{name}: try {tries}: {label} OK ({Ms(sw)})");
                 }
 
-                if (!device.ManagePairing && await _bt.IsConnectedAsync(addr))
+                if (!device.ManagePairing && await _bt.IsConnectedAsync(addr)
+                    && await _bt.IsHidReadyAsync(addr) != false)
                 {
                     Info($"{name}: already connected");
                     SetStatus(device.Id, DeviceStatus.Connected);
                     return;
                 }
 
+                var hidOnPairingLink = false;
                 if (device.ManagePairing)
                 {
                     if (freshBond)
@@ -611,9 +619,6 @@ public sealed class SelectionEngine
                         freshBond = false;  // once per hard failure; soft retries in between don't repeat it
                     }
                     await Step("pair", ct => _bt.PairAsync(addr, ct));
-                    // The connection reported right after pairing is unreliable; drop and reconnect.
-                    await BestEffortAsync(device, "post-pair disconnect", ct => _bt.DisconnectAsync(addr, ct));
-                    await SleepHook(PostPairSettleMs);
 
                     // A release may have been requested while we paired; don't go on to
                     // connect (on Windows: pair again) a device the newer run is releasing.
@@ -623,19 +628,54 @@ public sealed class SelectionEngine
                         MarkAborted(device.Id);
                         return;
                     }
-                }
-                await Step("connect", ct => _bt.ConnectAsync(addr, ct));
 
-                // A clean connect is necessary but not sufficient: IsConnected must agree.
-                step = "verify";
-                if (await _bt.IsConnectedAsync(addr))
-                {
-                    Info($"{name}: connected after {Plural(tries, "try", "tries")} in {Ms(total)}");
-                    SetStatus(device.Id, DeviceStatus.Connected);
-                    OnNotice?.Invoke("Connected", name);
-                    return;
+                    // Spec §3: keep the pairing link and wait for HID on it; drop and reconnect only
+                    // without it. (macOS, 2026-11-12: tearing the pairing link down while the stack
+                    // was bringing HID up wedged the trackpad. Windows never closed it — its
+                    // post-pair disconnect is a no-op — but skipping the drop + settle when HID is
+                    // already up saves ~0.8 s per arrival.)
+                    step = "post-pair HID";
+                    if (await HidUpAfterPairAsync(device, addr))
+                    {
+                        hidOnPairingLink = true;
+                    }
+                    else
+                    {
+                        await BestEffortAsync(device, "post-pair disconnect", ct => _bt.DisconnectAsync(addr, ct));
+                        await SleepHook(PostPairSettleMs);
+                        if (StaleReason(run, respectSelection) is { } afterSettle)
+                        {
+                            Info($"{name}: connect aborted after the post-pair settle: {afterSettle}");
+                            MarkAborted(device.Id);
+                            return;
+                        }
+                    }
                 }
-                failure = new Failure(BluetoothFailureKind.Unknown, "connect completed but the device does not report connected");
+
+                if (!hidOnPairingLink)
+                {
+                    await Step("connect", ct => _bt.ConnectAsync(addr, ct));
+
+                    // A clean connect is necessary but not sufficient: IsConnected must agree.
+                    step = "verify";
+                    if (!await _bt.IsConnectedAsync(addr))
+                        throw new BluetoothException("connect completed but the device does not report connected");
+                }
+
+                // A link alone is not success: the device's HID input must be up (null = the
+                // backend can't tell, e.g. not a HID peripheral; then the link counts).
+                step = "HID";
+                if (await WaitForHidAsync(device, addr) == false)
+                {
+                    throw new BluetoothException(BluetoothFailureKind.HidNotReady,
+                        $"link is up but the HID input never started within {HidReadyTimeoutMs / 1000.0:0.#} s");
+                }
+
+                Info($"{name}: connected after {Plural(tries, "try", "tries")} in {Ms(total)}" +
+                     (hidOnPairingLink ? " (HID on the pairing link)" : ""));
+                SetStatus(device.Id, DeviceStatus.Connected);
+                OnNotice?.Invoke("Connected", name);
+                return;
             }
             catch (Exception ex)
             {
@@ -831,6 +871,61 @@ public sealed class SelectionEngine
         BluetoothFailureKind.OperationInProgress => "a previous Bluetooth operation is still running",
         _ => kind.ToString(),
     };
+
+    /// Right after a pair: wait (bounded by PostPairHidWaitMs) for the HID input the stack starts on
+    /// the pairing link. False when it doesn't come, the link closes, or the backend can't tell; the
+    /// caller then drops the link and reconnects.
+    private async Task<bool> HidUpAfterPairAsync(BTDevice device, string addr)
+    {
+        var sw = Stopwatch.StartNew();
+        var polls = Math.Max(1, PostPairHidWaitMs / Math.Max(1, HidPollIntervalMs));
+        for (var poll = 0; poll <= polls; poll++)
+        {
+            var ready = await _bt.IsHidReadyAsync(addr);
+            if (ready is null) return false;
+            if (ready == true)
+            {
+                Info($"{device.Name}: HID up on the pairing link after {Ms(sw)}");
+                return true;
+            }
+            if (poll == polls) break;
+            if (!await _bt.IsConnectedAsync(addr))
+            {
+                if (poll > 0) Info($"{device.Name}: the pairing link closed without HID ({Ms(sw)}); reconnecting");
+                return false;
+            }
+            await SleepHook(HidPollIntervalMs);
+        }
+        Info($"{device.Name}: no HID on the pairing link after {Ms(sw)}; dropping it and reconnecting");
+        return false;
+    }
+
+    /// Wait (bounded by HidReadyTimeoutMs) until the device's HID input is up. true/false, or null
+    /// when the backend can't tell (then the link alone counts).
+    private async Task<bool?> WaitForHidAsync(BTDevice device, string addr)
+    {
+        var sw = Stopwatch.StartNew();
+        var polls = Math.Max(1, HidReadyTimeoutMs / Math.Max(1, HidPollIntervalMs));
+        for (var poll = 0; poll <= polls; poll++)
+        {
+            var ready = await _bt.IsHidReadyAsync(addr);
+            if (ready is null) return null;
+            if (ready == true)
+            {
+                if (poll > 0) Info($"{device.Name}: HID up after {Ms(sw)}");
+                return true;
+            }
+            if (poll == polls) break;
+            if (!await _bt.IsConnectedAsync(addr))
+            {
+                Warn($"{device.Name}: the link dropped before HID came up ({Ms(sw)})");
+                return false;
+            }
+            await SleepHook(HidPollIntervalMs);
+        }
+        Warn($"{device.Name}: link up but no HID after {Ms(sw)}");
+        return false;
+    }
 
     /// Run a step whose failure must not abort the flow, but must be visible in the log.
     private async Task BestEffortAsync(BTDevice device, string what, Func<CancellationToken, Task> op)

@@ -175,6 +175,70 @@ public class FailureHandlingTests
         Assert.Equal(0, Count(bt, "unpair"));
     }
 
+    // ---- Spec §3 connect flow: keep the pairing link, wait for HID on it ----
+
+    /// HID comes up on the pairing link: done — no drop, no settle, no reconnect.
+    [Fact]
+    public async Task Hid_on_pairing_link_skips_drop_and_reconnect()
+    {
+        var engine = MakeEngine(out var bt, out _, out var log);
+        bt.HidReady = addr => bt.Paired.Contains(addr);
+
+        await Arrive(engine);
+
+        Assert.Equal(new[] { $"pair:{N}" }, bt.Calls);
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
+        Assert.True(log.Has(LogLevel.Info, "HID on the pairing link"), log.Dump());
+    }
+
+    /// No HID on the pairing link within the wait: fall back to drop + settle + connect, and
+    /// accept once HID is up after the connect.
+    [Fact]
+    public async Task No_hid_on_pairing_link_falls_back_to_drop_and_reconnect()
+    {
+        var engine = MakeEngine(out var bt, out _, out _);
+        bt.HidReady = addr => bt.Calls.Contains($"connect:{addr}");
+
+        await Arrive(engine);
+
+        Assert.Equal(new[] { $"pair:{N}", $"disconnect:{N}", $"connect:{N}" }, bt.Calls);
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
+    }
+
+    /// Link up after connect but HID never: HidNotReady, detected by the engine (not thrown by the
+    /// backend); twice ends the run with the power-cycle hint.
+    [Fact]
+    public async Task Engine_detects_hid_not_ready_after_connect()
+    {
+        var engine = MakeEngine(out var bt, out var config, out _);
+        config.ConnectRetryMax = 6;
+        bt.HidReady = _ => false;
+
+        await Arrive(engine);
+
+        Assert.Equal(2, Count(bt, "connect"));
+        Assert.Equal(0, Count(bt, "unpair"));
+        Assert.Contains("off and on", engine.Statuses.Values.Single().Label);
+    }
+
+    /// Unmanaged device: "already connected" only counts if HID isn't known to be down.
+    [Fact]
+    public async Task Unmanaged_already_connected_requires_hid()
+    {
+        var engine = MakeEngine(out var bt, out _, out _, managePairing: false);
+        await bt.ConnectAsync(Addr);
+        var hidUp = false;
+        bt.HidReady = _ => hidUp;
+        bt.ConnectError = null;
+        bt.BeforeConnect = () => { hidUp = true; return Task.CompletedTask; };
+        var callsBefore = bt.Calls.Count;
+
+        await Arrive(engine);
+
+        Assert.True(bt.Calls.Count > callsBefore, "link up but HID down must not count as already connected");
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
+    }
+
     [Fact]
     public async Task Invalid_address_gives_up_immediately()
     {

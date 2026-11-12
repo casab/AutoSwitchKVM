@@ -43,6 +43,13 @@ public sealed class FakeBluetoothController : IBluetoothController
         return Task.FromResult(Connected.Contains(Norm(address)));
     }
 
+    /// HID readiness per call (address digits → true/false/null). Default null = "can't tell",
+    /// so the engine falls back to the link-only behavior (drop + settle + connect after a pair).
+    public Func<string, bool?>? HidReady { get; set; }
+
+    public Task<bool?> IsHidReadyAsync(string address, CancellationToken ct = default)
+        => Task.FromResult(HidReady?.Invoke(Norm(address)));
+
     public async Task ConnectAsync(string address, CancellationToken ct = default)
     {
         if (BeforeConnect is not null) await BeforeConnect();
