@@ -78,7 +78,7 @@ display string convention, e.g. `⌃⌥⌘P` / on Windows `Ctrl+Alt+Cmd⇒Win` e
 |-------|------|---------|-------|
 | `profiles` | [Profile] | one "Default" | Never empty |
 | `activeProfileID` | UUID | first profile | Must reference an existing profile |
-| `debounceMs` | int | `1200` | **Departure** debounce |
+| `debounceMs` | int | `400` | **Departure** debounce (was `1200` before 2026-11-12) |
 | `arrivalDebounceMs` | int | `400` | **Arrival** debounce (snappier connect) |
 | `connectRetryMax` | int | `6` | Max connect attempts per handoff |
 | `connectRetrySecs` | int | `2` | Backoff **base** seconds |
@@ -296,6 +296,11 @@ before the leaving host's release has finished.** Windows needs ~8 s from the sw
 debounce 1.2 s, `BluetoothRemoveDevice` 3.4 s). When the Mac paired 2.7 s after the switch, pairing
 succeeded but HID never came up and the trackpad wedged. Until a LAN release-ack exists, the arrival
 side waits (macOS: the device's connect delay, now 6 s).
+*Superseded later on 2026-11-12:* that wedge was the Mac closing the pairing link (see Connect flow),
+not the overlap. With the link kept, the user ran both apps with **no connect delay and 400 ms
+arrival/departure debounces**, and handoffs worked. Windows' release times show Mac pairings
+starting while `BluetoothRemoveDevice` was still running. Defaults are now `connectDelayMs` 0 and
+`debounceMs` 400.
 
 **Important cross-platform discrepancy.** macOS exposes explicit connect/disconnect for a device.
 On Windows, Classic-HID devices (like the Magic Trackpad) effectively **connect on pair and

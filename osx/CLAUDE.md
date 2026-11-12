@@ -189,10 +189,11 @@ the new profile but does not force-disconnect the previous profile's devices.
   ~1 s later, and the key is deleted ~1.5 s after that. `unpair` waits for the link to drop. The
   engine settles `postUnpairSettleMs` (2 s) before re-pairing, because a pair started straight
   after an unpair failed with HCI 0x02.
-- **Don't pair before the other host has finished releasing** (~8 s after a switch on Windows
-  today). The trackpad accepted a Mac pairing mid-release, never started HID, and needed a power
-  cycle. Until the LAN release-ack exists, the trackpad's `connectDelayMs` is 6 s (picker now
-  offers 4/6/8 s).
+- **No connect delay is needed** (since 2026-11-12). The old "don't pair before the other host
+  has released" rule (6–12 s delays) was masking the pairing-link bug below. With the link kept,
+  the user ran 0 ms delay and 400/400 ms debounces on both apps, and handoffs worked. The defaults
+  are now departure debounce 400 ms (was 1200) and `connectDelayMs` 0. The picker still offers up to
+  12 s for diagnosis.
 - **Leave the pairing link alone after a successful pair** (since 2026-11-12). `PairingHelper`
   no longer calls `IOBluetoothDevicePair.stop()` on success (it closes the link the pairer opened)
   and keeps the finished object alive for 30 s; the engine waits up to `postPairHidWaitMs` (3 s)

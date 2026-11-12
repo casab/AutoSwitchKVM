@@ -120,7 +120,9 @@ struct AppConfig: Codable {
     var activeProfileID: UUID
 
     /// Debounce before reacting to the source *disappearing* (avoids disconnecting on brief USB
-    /// blips during a switch).
+    /// blips during a switch). Default 400 ms since 2026-11-12 (was 1200): with the pairing-link fix,
+    /// 400/400 ms debounces and no connect delay handed off reliably on hardware, and every
+    /// millisecond here delays the other host's connect.
     var debounceMs: Int
     /// Debounce before reacting to the source *appearing* — typically shorter so connect is snappy.
     var arrivalDebounceMs: Int
@@ -150,7 +152,7 @@ struct AppConfig: Codable {
         schemaVersion: Int = AppConfig.currentSchemaVersion,
         profiles: [Profile] = [Profile(name: "Default")],
         activeProfileID: UUID? = nil,
-        debounceMs: Int = 1200,
+        debounceMs: Int = 400,
         arrivalDebounceMs: Int = 400,
         connectRetryMax: Int = 6,
         connectRetrySecs: Int = 2,
@@ -226,7 +228,7 @@ struct AppConfig: Codable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? AppConfig.currentSchemaVersion
-        debounceMs = try c.decodeIfPresent(Int.self, forKey: .debounceMs) ?? 1200
+        debounceMs = try c.decodeIfPresent(Int.self, forKey: .debounceMs) ?? 400
         arrivalDebounceMs = try c.decodeIfPresent(Int.self, forKey: .arrivalDebounceMs) ?? 400
         connectRetryMax = try c.decodeIfPresent(Int.self, forKey: .connectRetryMax) ?? 6
         connectRetrySecs = try c.decodeIfPresent(Int.self, forKey: .connectRetrySecs) ?? 2

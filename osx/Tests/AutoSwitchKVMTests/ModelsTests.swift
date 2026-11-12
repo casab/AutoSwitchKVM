@@ -27,7 +27,7 @@ final class ModelsTests: XCTestCase {
     /// instead of failing the whole decode.
     func testMissingKeysDecodeToDefaults() throws {
         let cfg = try JSONDecoder().decode(AppConfig.self, from: Data("{}".utf8))
-        XCTAssertEqual(cfg.debounceMs, 1200)
+        XCTAssertEqual(cfg.debounceMs, 400)
         XCTAssertEqual(cfg.arrivalDebounceMs, 400)
         XCTAssertEqual(cfg.btCallTimeoutSecs, 15)
         XCTAssertEqual(cfg.profiles.count, 1)  // empty → one Default profile
