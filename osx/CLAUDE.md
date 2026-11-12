@@ -10,7 +10,25 @@ Use case: a KVM switch exposes a USB hub to whichever computer is selected; when
 selected its trackpad/keyboard reconnect, and when it's switched away they release for the other
 host. Replaces the Hammerspoon prototype in `reference/hammerspoon_init.lua`.
 
-Design rationale lives in `PLAN.md`; the outstanding roadmap is in `IMPROVEMENTS.md`.
+Design rationale lives in `PLAN.md`; the outstanding roadmap is in `IMPROVEMENTS.md`. This folder
+is the macOS half of a monorepo: the platform-neutral behavior contract is `../SPECIFICATION.md`,
+and the Windows port lives in `../windows/`.
+
+## Coordinating with the Windows agent
+
+Another agent usually works on `windows/` in parallel, on a Windows PC. Use `agent-notes/` at the
+repo root (protocol: `../agent-notes/README.md`):
+
+- At session start, `git pull --ff-only` and check open notes `to: osx|all`:
+  `grep -lE '^status: (open|acknowledged)' agent-notes/2*.md | xargs grep -lE '^to: (osx|all)'`
+  (run from the repo root). Read them before related work; reply by appending a section and
+  updating `status:`.
+- Write a note `to: windows` when you change `SPECIFICATION.md`/config keys, see trackpad or
+  Windows-host behavior from the Mac side (e.g. how long Windows takes to release), or fix a bug
+  whose pattern likely exists in `windows/`. Tell the user when a note is waiting to be
+  committed/pushed.
+- `SPECIFICATION.md` sections marked "macOS pending" are behavior the Windows engine already
+  has and this engine should get. Don't edit `windows/` yourself unless the user asks.
 
 ## Build & run
 
@@ -130,6 +148,9 @@ the new profile but does not force-disconnect the previous profile's devices.
 ## When making changes
 
 - Touching the engine, config, or models → update/extend the tests in `Tests/AutoSwitchKVMTests/`.
+- Engine behavior changes must stay in sync with `../SPECIFICATION.md` §3 and the Windows engine
+  (`../windows/src/AutoSwitchKVM.Core/SelectionEngine.cs`). Update the spec and leave a note in
+  `../agent-notes/` so the other side can mirror it.
 - Adding a config field → for backward-compatible decoding of existing saved configs, decode with
   `decodeIfPresent ?? default` (Swift's synthesized `Decodable` throws on missing keys). `BTDevice`
   and `AppConfig` already have custom `init(from:)` doing this; follow that pattern.

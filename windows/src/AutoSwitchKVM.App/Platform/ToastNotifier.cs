@@ -43,6 +43,9 @@ public sealed class ToastNotifier
                 .BuildNotification();
             AppNotificationManager.Default.Show(toast);
         }
-        catch { /* ignore */ }
+        catch (Exception ex)
+        {
+            Log.Warn("toast", $"showing '{title}' failed: {ex.Message}");
+        }
     }
 }

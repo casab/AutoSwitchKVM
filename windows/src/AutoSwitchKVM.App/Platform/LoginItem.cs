@@ -27,9 +27,10 @@ public static class LoginItem
                 key.DeleteValue(ValueName, throwOnMissingValue: false);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Best-effort; failing to set a login item should never crash the app.
+            // Best-effort; failing to set a login item should never crash the app — but say so.
+            AutoSwitchKVM.App.Support.Log.Warn("app", $"launch-at-login {(enabled ? "enable" : "disable")} failed: {ex.Message}");
         }
     }
 

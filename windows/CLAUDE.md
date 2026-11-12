@@ -11,10 +11,25 @@ feature parity to the macOS app: detect a USB "switcher source" appearing/disapp
 pair/connect (or unpair/disconnect) the configured Bluetooth devices, with the same model (profiles,
 per-device pairing management, timing, global shortcuts).
 
-Status: **M0 validated on real hardware; M1-M7 implemented** (Core ported and unit-tested; platform
-layer, tray UI, and Settings built; WinUI app build verified) - pending on-device runtime handoff validation. The full milestone roadmap
-and per-component status live in `PLAN.md`; the proven prototype is `reference/Trackpad-AutoSwitch.ps1`
-(the Windows counterpart of the macOS Hammerspoon script).
+Status: **M0 validated on real hardware; M1-M7 implemented and running on-device.** Current focus
+is handoff reliability. Pairing after a switch was the weak point (refusals while the Mac still holds
+the trackpad; timed-out pairs that kept running inside Windows). The engine now classifies failures
+and logs every step. The full milestone roadmap and per-component status live in `PLAN.md`; the
+proven prototype is `reference/Trackpad-AutoSwitch.ps1` (the Windows counterpart of the macOS
+Hammerspoon script).
+
+**Logs to read when debugging a handoff:** `%LOCALAPPDATA%\AutoSwitchKVM\logs\app-yyyyMMdd.log`
+(config: `%LOCALAPPDATA%\AutoSwitchKVM\config.json`). Categories: `engine` (runs, tries, retries,
+aborts, give-ups), `bt` (WinRT/Win32 calls with timings and raw statuses), `usb`, `power`, `app`.
+
+## Coordinating with the macOS agent
+
+Another agent usually works on `osx/` in parallel, on a Mac. Use `agent-notes/` at the repo root
+(protocol: `../agent-notes/README.md`). At session start, `git pull --ff-only` and check open
+notes `to: windows|all`. Write a note `to: osx` when you change `SPECIFICATION.md`/config keys,
+see trackpad/Mac behavior in the Windows logs (e.g. how long the Mac takes to release), or fix a
+bug whose pattern likely exists in `osx/`. Tell the user when a note is waiting to be
+committed/pushed. Don't edit `osx/` yourself unless the user asks.
 
 ## Build & run
 
@@ -46,7 +61,10 @@ Unit coverage so far (mirrors the macOS suite):
 - `ConfigTests` - defaults, save/load round-trip, default-on-missing, corrupt-file fallback,
   camelCase JSON key parity with macOS, dock/paused persistence, atomic/debounced writes, absent-vs-null hotkeys.
 - `ProfilesTests` - active-profile accessors, multi-profile round-trip, legacy single-source migration.
-- `SelectionEngineTests` (16) - the full engine state machine.
+- `SelectionEngineTests` - the full engine state machine.
+- `FailureHandlingTests` - failure classification (soft vs hard retries, fresh-bond rules,
+  timeout, invalid address), logging of every failure, release retry, manual actions routed
+  through the engine, suspend/resume.
 - `SourceLearnerTests` - appear/disappear detection, steady-device ignore, cancel.
 
 Not unit-tested (validated on-device / by the spikes, by design): `PnpUsbMonitor` (Spike 3),
@@ -69,15 +87,25 @@ testability):
     `SPECIFICATION.md` §5). The Bluetooth interface's doc comments carry the exact Milestone 0 recipe.
   - `SourceLearner.cs` — **ported (Milestone 3)**; snapshot-diff Learn logic (baseline at Start,
     accumulate appeared/disappeared keys, resolve candidates at Finish). Tested with FakeUsbMonitor.
-  - `SelectionEngine.cs` + `DeviceStatus.cs` — **ported (Milestone 2)**, 1:1 from the macOS state
-    machine. Drive it via `HandleUsb`/`ApplyUsbSnapshot` + `EvaluateNowAsync` (no-timer test seams);
-    production uses `OnUsbEvent`/`OnUsbSnapshot` (debounced) + `PollStatusesAsync`. `SleepHook`
-    (internal) makes per-device delay / post-pair settle / retry backoff instant in tests.
+  - `SelectionEngine.cs` + `DeviceStatus.cs` — **ported (Milestone 2)** from the macOS state
+    machine, plus **failure classification** (soft retries for busy/in-progress, which don't
+    spend `connectRetryMax`; stale-bond re-pair only after auth-failed/timeout/unknown; see
+    SPECIFICATION.md §3). Also has per-device manual entry points
+    (`ConnectDeviceNowAsync`/`ReleaseDeviceNowAsync`/`Pair|UnpairDeviceNowAsync`), suspend
+    handling (`NotifySuspending`/`NotifyResumed`), and structured logging through `ILogSink`
+    (`ILogSink.cs`). Drive it via `HandleUsb`/`ApplyUsbSnapshot` + `EvaluateNowAsync` (no-timer
+    test seams); production uses `OnUsbEvent`/`OnUsbSnapshot` (debounced) + `PollStatusesAsync`.
+    Internal seams for tests: `SleepHook` (instant delays), `CallTimeoutOverride`,
+    `SoftRetryIntervalMs`/`MaxSoftRetries`.
+  - `IBluetoothController.cs` also defines `BluetoothFailureKind` + `BluetoothException.Kind/Detail`:
+    the backend classifies, the engine picks the retry policy.
 - `src/AutoSwitchKVM.App/` — `net8.0-windows10.0.19041.0`, WinUI 3, unpackaged.
   - `Services/AppController.cs` — **the coordinator (Milestone 5)**: owns config + engine + USB
     monitor + Bluetooth controller, starts everything, exposes state + actions (connect/disconnect
-    all, pause, switch profile, per-device test, learner, config mutate/save). Lives on the UI
+    all, pause, switch profile, per-device actions, learner, config mutate/save). Lives on the UI
     thread; monitors marshal callbacks to its SynchronizationContext and the poll via DispatcherQueue.
+    Per-device actions route through the engine. Fire-and-forget calls go through `Fire` (logs
+    faults). Wires the engine's log to `Support/AppLogSink.cs`.
   - `Support/DebugLog.cs` — in-memory categorized log buffer (Diagnostics tab).
   - `App.xaml(.cs)` — tray-only app via **H.NotifyIcon** with a **dynamic context menu** rebuilt from
     AppController state on open (status, profiles, device rows, quick actions, Settings, Exit). The
@@ -94,11 +122,14 @@ testability):
     AppNotificationManager toasts (unpackaged Register). Wired in AppController; recorder in the
     General tab. (Note: namespaced under `Platform`, not `System`, to avoid clashing with `System.*`.)
   - `Platform/WinRtBluetooth.cs` — **implemented (Milestone 4)**: radio power, ConnectionStatus+HID
-    `isConnected`, idempotent `pair` (discover endpoint + Custom.PairAsync ConfirmOnly auto-accept),
-    `unpair`=`BluetoothRemoveDevice` first + WinRT fallback, `connect`=ensure-paired, `disconnect`=no-op (Classic HID: release is unpair),
-    paired-list, ConnectionStatusChanged monitoring. **Key mapping:** the engine's mid-connect
-    `disconnect` is a deliberate no-op and `pair` is idempotent, so the shared connect/disconnect
-    flow resolves correctly on Windows. Needs an on-device run to confirm vs the spikes.
+    `isConnected`, idempotent `pair` (resolve endpoint by address + Custom.PairAsync ConfirmOnly
+    auto-accept), `unpair`=`BluetoothRemoveDevice` first + WinRT fallback, `connect`=ensure-paired,
+    `disconnect`=no-op (Classic HID: release is unpair), paired-list, ConnectionStatusChanged
+    monitoring. Maps `DevicePairingResultStatus` → `BluetoothFailureKind` (`KindFor`). Tracks a
+    timed-out pairing that is still running ("orphan"; see Gotchas), and records per-device
+    pair/release intent so a queued pair steps aside for a newer release. **Key mapping:** the
+    engine's mid-connect `disconnect` is a deliberate no-op and `pair` is idempotent, so the shared
+    connect/disconnect flow resolves correctly on Windows.
 - `tests/AutoSwitchKVM.Core.Tests/` — xUnit; `ConfigTests.cs` + `Fakes/Fake{Usb,Bluetooth}*`.
 
 CI: a `windows-latest` job in `.github/workflows/ci.yml` runs `dotnet test` on the Core tests and
@@ -179,6 +210,24 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   `MenuFlyout.Opening` never fires (rebuild the menu from `RightClickCommand` instead) and item
   selection executes the item's `ICommand` — `Click` handlers are never raised.
 - **Size the Settings window** via `AppWindow.Resize` - a WinUI `Window` opens very large by default.
+- **WinRT pairing ignores cancellation.** Cancelling `Custom.PairAsync` (incl. via `AsTask(ct)`)
+  does not stop the ceremony; it runs inside Windows until its own ~45-60 s timeout. Releasing the
+  op lock on our timeout made every retry fail instantly with `OperationAlreadyInProgress` (64 in
+  one day's log). `WinRtBluetooth` now keeps a timed-out ceremony as an *orphan*: the next pair
+  waits for it (without holding the lock, so a release isn't blocked), and a watcher logs its
+  outcome and unpairs again if it completes `Paired` after a release was requested.
+- **Classify Bluetooth failures** (`BluetoothException.Kind`, mapped from `DevicePairingResultStatus`
+  in `WinRtBluetooth.KindFor`). `AuthenticationNotAllowed` right after a KVM switch means the Mac
+  still holds the trackpad: the engine soft-retries it every ~3 s without spending
+  `connectRetryMax` (see SPECIFICATION.md §3 "Failure classification").
+- **Manual actions go through the engine** (`ConnectDeviceNowAsync`, `ReleaseDeviceNowAsync`,
+  `Pair/UnpairDeviceNowAsync`). Calling `_bt` directly bypassed the busy guard: a manual unpair
+  while selected produced a late "disconnected" event that looked like an unexpected drop, and
+  auto-reconnect re-paired the device. Only the suspend release calls `_bt` directly (it must
+  run off the UI thread), after `Engine.NotifySuspending()` halts automation.
+- **Log through `ILogSink`** in Core (the app wires `AppLogSink`). No silent `catch { }` on
+  Bluetooth paths: best-effort steps log a warning; fire-and-forget calls go through
+  `RunLoggedAsync`/`Fire` so a fault is logged instead of becoming an unobserved task exception.
 
 ## When making changes
 

@@ -58,6 +58,14 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
         {
             _watcher = new ManagementEventWatcher(new WqlEventQuery("SELECT * FROM Win32_DeviceChangeEvent"));
             _watcher.EventArrived += (_, _) => OnDeviceChange();
+            // WMI can drop the subscription (e.g. the WMI service restarts). The 2 s reconcile
+            // still converges, but arrival/departure detection gets slower — make that visible.
+            _watcher.Stopped += (_, e) =>
+            {
+                bool started;
+                lock (_gate) started = _started;
+                if (started) Log.Warn("usb", $"device-change watcher stopped unexpectedly ({e.Status}); relying on the 2 s reconcile");
+            };
             _watcher.Start();
             Log.Info("usb", "device-change watcher started");
         }

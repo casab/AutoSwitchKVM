@@ -181,6 +181,27 @@ controller** (the operations in §5). It owns no platform APIs directly.
   must **unpair (best-effort) and re-pair from scratch** instead of trusting the platform's
   "already paired" state, so the retry loop can always recover without manual intervention.
 
+### Failure classification (connect retries) — Windows implemented; macOS pending
+- The Bluetooth controller may classify a failure: `deviceBusy` (device answered but refused —
+  for an exclusive-bond device, the other host still holds it), `operationInProgress` (an earlier
+  OS operation is still running), `timeout`, `authenticationFailed` (stale/mismatched key),
+  `deviceNotFound`, `adapterUnavailable`, `invalidAddress`, or `unknown`. Unclassified failures
+  are `unknown`, which gets exactly the generic behavior above — so a backend that doesn't
+  classify (currently macOS) behaves as before.
+- **Soft** failures (`deviceBusy`, `operationInProgress`) retry on a short fixed interval (~3 s),
+  **not** counted against `connectRetryMax`, bounded (~20 soft retries); beyond that they count
+  as hard. (Observed on hardware: right after a KVM switch the trackpad refuses pairing for
+  ~20 s while the Mac releases it; exponential backoff overshoots that window.)
+- **Hard** failures consume an attempt and back off exponentially. The stale-bond re-pair applies
+  only after a hard failure that may mean a stale bond (`authenticationFailed`, `timeout`,
+  `unknown`) — not after a refusal or a missing device.
+- `invalidAddress` gives up immediately; `adapterUnavailable` refreshes adapter power first.
+- Re-check staleness after the pair step and after a failed try (a release may have started).
+- Give-up status and notification carry the **last error**. Release: a failed unpair is retried
+  once; a final failure sets `error` and raises a "Release failed" notification (the bond is what
+  blocks the other host, so this must not fail silently).
+- Every attempt, step outcome (with elapsed time), backoff, abort reason, and give-up is logged.
+
 ### Per-device status states
 `idle`, `connecting`, `connected`, `disconnected`, `bluetoothOff`, `error`.
 

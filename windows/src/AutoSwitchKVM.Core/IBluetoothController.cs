@@ -41,10 +41,56 @@ public interface IBluetoothController
     void StopMonitoring();
 }
 
-/// Thrown by IBluetoothController implementations for expected, message-bearing failures
-/// (the engine treats these as retryable per its backoff policy).
+/// Why a Bluetooth operation failed. Backends classify what they can; the engine picks its
+/// retry strategy from this (see SelectionEngine.ConnectOneAsync and SPECIFICATION.md §3
+/// "Failure classification"). A backend that can't tell reports Unknown, which gets the
+/// generic behavior (exponential backoff + stale-bond re-pair on retry).
+public enum BluetoothFailureKind
+{
+    /// Not classified — generic retry with backoff (and a fresh bond on the next try).
+    Unknown,
+
+    /// The device answered but refused (Windows: AuthenticationNotAllowed, ConnectionRejected,
+    /// NotReadyToPair, ...). For an exclusive-bond device this almost always means the other
+    /// host still holds it and is about to release: retry soon, don't escalate.
+    DeviceBusy,
+
+    /// An earlier OS-level operation on the radio/device is still running (Windows:
+    /// OperationAlreadyInProgress). Wait for it; retrying immediately only collides again.
+    OperationInProgress,
+
+    /// The device never answered in time (our per-call timeout, or Windows AuthenticationTimeout).
+    Timeout,
+
+    /// Key exchange failed — typically a stale/mismatched link key. Re-pair from scratch.
+    AuthenticationFailed,
+
+    /// The system doesn't know the device (never paired here / out of range / powered off).
+    DeviceNotFound,
+
+    /// The local adapter is off, missing, or failed.
+    AdapterUnavailable,
+
+    /// The configured address is malformed — retrying can never succeed.
+    InvalidAddress,
+}
+
+/// Thrown by IBluetoothController implementations for expected, message-bearing failures. Kind
+/// drives the engine's retry policy; Detail carries the raw platform status for the log.
 public sealed class BluetoothException : Exception
 {
-    public BluetoothException(string message) : base(message) { }
-    public BluetoothException(string message, Exception inner) : base(message, inner) { }
+    public BluetoothFailureKind Kind { get; }
+
+    /// Raw platform status (e.g. "AuthenticationNotAllowed", "rc=0x490"), if any.
+    public string? Detail { get; }
+
+    public BluetoothException(string message) : this(BluetoothFailureKind.Unknown, message) { }
+    public BluetoothException(string message, Exception inner) : this(BluetoothFailureKind.Unknown, message, null, inner) { }
+
+    public BluetoothException(BluetoothFailureKind kind, string message, string? detail = null, Exception? inner = null)
+        : base(message, inner)
+    {
+        Kind = kind;
+        Detail = detail;
+    }
 }

@@ -39,7 +39,7 @@ public sealed class AppController
         Log.Info("app", $"config loaded from {_store.Path}: profile='{Config.ActiveProfileName}', " +
             $"source={(Config.Source is null ? "(none)" : Config.Source.DisplayVidPid)}, devices={Config.Devices.Count}, paused={Config.Paused}");
 
-        Engine = new SelectionEngine(Config, _usb, _bt);
+        Engine = new SelectionEngine(Config, _usb, _bt, new AppLogSink());
         Engine.Changed += () => StateChanged?.Invoke();
         Engine.OnNotice = (title, body) =>
         {
@@ -48,10 +48,20 @@ public sealed class AppController
         };
         Engine.OnUnexpectedDisconnect = d =>
         {
-            Log.Warn("bt", $"{d.Name} dropped unexpectedly while selected");
+            // The engine logs the drop itself; this only raises the optional toast.
             if (Config.NotifyUnexpectedDisconnect)
                 _toasts.Notify("Device disconnected", $"{d.Name} dropped while still selected");
         };
+    }
+
+    /// Fire-and-forget with logging: a background call must never fault unobserved (it would
+    /// only surface, if ever, when the GC finalizes the task — i.e. the error is effectively lost).
+    private static void Fire(Func<Task> work, string what) => _ = RunLoggedAsync(work, what);
+
+    private static async Task RunLoggedAsync(Func<Task> work, string what)
+    {
+        try { await work(); }
+        catch (Exception ex) { Log.Error("app", $"{what} failed unexpectedly", ex); }
     }
 
     public void Start()
@@ -63,18 +73,20 @@ public sealed class AppController
         _usb.Start();
         Log.Info("usb", "monitor started");
         Engine.RefreshMonitoring();
-        _ = Engine.SeedAsync();
-        _pollTimer = new Timer(_ => _dispatcher.TryEnqueue(() => { _ = Engine.PollStatusesAsync(); }),
+        Fire(Engine.SeedAsync, "initial seed");
+        _pollTimer = new Timer(_ => _dispatcher.TryEnqueue(() => Fire(Engine.PollStatusesAsync, "status poll")),
             null, 10_000, 10_000);
 
         // Sleep/wake. Suspend runs on the SystemEvents thread and blocks it (bounded): an
         // enqueued-to-UI handler may never get pumped before the machine sleeps, and the unpair
-        // is what frees the devices for the other host. The release talks to the Bluetooth
-        // controller directly (not the engine, which is UI-thread-only); resume re-seeds the
-        // engine so statuses reconcile.
+        // is what frees the devices for the other host. NotifySuspending (thread-safe) first halts
+        // the engine so it can't re-pair (e.g. an auto-reconnect after the "drop" our own release
+        // causes). The release talks to the Bluetooth controller directly (the engine is
+        // UI-thread-only); resume re-enables and re-seeds the engine so statuses reconcile.
         _power.OnSuspend = () =>
         {
-            Log.Info("power", "suspend -> releasing enabled devices (bounded)");
+            Engine.NotifySuspending();
+            Log.Info("power", "suspend -> releasing enabled devices (bounded to 1.5 s)");
             try
             {
                 // Task.Run keeps continuations off this thread's SynchronizationContext so the
@@ -90,7 +102,8 @@ public sealed class AppController
         _power.OnResume = () => _dispatcher.TryEnqueue(() =>
         {
             Log.Info("power", "resume -> re-evaluate");
-            _ = Engine.ReevaluateAsync();
+            Engine.NotifyResumed();
+            Fire(Engine.ReevaluateAsync, "resume re-evaluate");
         });
         _power.Start();
 
@@ -126,25 +139,29 @@ public sealed class AppController
         var devices = Config.Devices.Where(d => d.Enabled).ToList();
         foreach (var device in devices)
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
                 await _bt.DisconnectAsync(device.Address);
                 if (device.ManagePairing) await _bt.UnpairAsync(device.Address);
+                Log.Info("power", $"released {device.Name} ({sw.ElapsedMilliseconds} ms)");
             }
             catch (Exception ex)
             {
-                Log.Warn("power", $"release {device.Name} failed: {ex.Message}");
+                var kind = ex is BluetoothException b ? b.Kind.ToString() : ex.GetType().Name;
+                Log.Warn("power", $"release {device.Name} failed after {sw.ElapsedMilliseconds} ms: [{kind}] {ex.Message}");
             }
         }
     }
 
     private void HandleHotkey(HotKeyAction action)
     {
+        Log.Info("hotkey", $"{action}");
         switch (action)
         {
             case HotKeyAction.TogglePause: TogglePause(); break;
-            case HotKeyAction.ConnectAll: _ = ConnectAllAsync(); break;
-            case HotKeyAction.DisconnectAll: _ = DisconnectAllAsync(); break;
+            case HotKeyAction.ConnectAll: ConnectAll(); break;
+            case HotKeyAction.DisconnectAll: DisconnectAll(); break;
         }
     }
 
@@ -217,8 +234,10 @@ public sealed class AppController
 
     // ---- Quick actions ----
 
-    public Task ConnectAllAsync() { Log.Info("action", "connect all"); return Engine.ConnectAllNowAsync(); }
-    public Task DisconnectAllAsync() { Log.Info("action", "disconnect all"); return Engine.DisconnectAllNowAsync(); }
+    // Quick actions are fire-and-forget (tray menu / hotkeys); failures are logged by the engine
+    // and, for anything unexpected, by Fire.
+    public void ConnectAll() => Fire(Engine.ConnectAllNowAsync, "connect all");
+    public void DisconnectAll() => Fire(Engine.DisconnectAllNowAsync, "disconnect all");
 
     public void TogglePause()
     {
@@ -227,7 +246,7 @@ public sealed class AppController
         Save();
         // Resuming re-seeds so the engine reconciles to the current state (spec §3); pausing
         // just stops acting — presence keeps updating via the USB monitor.
-        if (!Config.Paused) _ = Engine.ReevaluateAsync();
+        if (!Config.Paused) Fire(Engine.ReevaluateAsync, "re-evaluate after unpause");
         StateChanged?.Invoke();
     }
 
@@ -238,7 +257,7 @@ public sealed class AppController
         Log.Info("action", $"switch profile -> '{Config.ActiveProfileName}'");
         Save();
         Engine.RefreshMonitoring();
-        _ = Engine.ReevaluateAsync();
+        Fire(Engine.ReevaluateAsync, "re-evaluate after profile switch");
         StateChanged?.Invoke();
     }
 
@@ -250,7 +269,7 @@ public sealed class AppController
         Log.Info("action", $"add profile -> '{profile.Name}'");
         Save();
         Engine.RefreshMonitoring();
-        _ = Engine.ReevaluateAsync();
+        Fire(Engine.ReevaluateAsync, "re-evaluate after add profile");
         StateChanged?.Invoke();
     }
 
@@ -273,7 +292,7 @@ public sealed class AppController
         Log.Info("action", $"delete profile -> now '{Config.ActiveProfileName}'");
         Save();
         Engine.RefreshMonitoring();
-        _ = Engine.ReevaluateAsync();
+        Fire(Engine.ReevaluateAsync, "re-evaluate after delete profile");
         StateChanged?.Invoke();
     }
 
@@ -286,45 +305,24 @@ public sealed class AppController
         return $"{baseName} {n}";
     }
 
-    // ---- Per-device test actions (Settings buttons) ----
+    // ---- Per-device actions (tray device rows + Settings buttons) ----
 
-    // Manual test actions catch failures and log them - they run from button-click (async void)
-    // handlers, so an uncaught BluetoothException would otherwise crash the app.
+    // These go through the engine so they share its run tracking, busy guard and status: a
+    // manual action supersedes engine work on the same device instead of racing it, and its
+    // result shows in the device status. They never throw (the callers are async-void click
+    // handlers and tray commands, where an exception would crash the app or vanish).
 
-    public async Task TestConnectAsync(BTDevice d)
-    {
-        Log.Info("action", $"connect {d.Name}");
-        try { await _bt.ConnectAsync(d.Address); }
-        catch (Exception ex) { Log.Error("bt", $"connect {d.Name} failed", ex); }
-    }
+    /// Full connect flow for one device (pair + connect for managePairing devices, with retries).
+    public Task ConnectDeviceAsync(BTDevice d) => RunLoggedAsync(() => Engine.ConnectDeviceNowAsync(d), $"connect {d.Name}");
 
     /// Release a device from this PC: disconnect, and (for Classic-HID / managePairing devices, where
-    /// the bond is the only lever) unpair. Mirrors the engine's switch-away path. A plain
-    /// DisconnectAsync is a no-op on Windows, so this is what the tray/Settings "disconnect" must call.
-    public async Task TestDisconnectAsync(BTDevice d)
-    {
-        Log.Info("action", $"release {d.Name} (managePairing={d.ManagePairing})");
-        try
-        {
-            await _bt.DisconnectAsync(d.Address);
-            if (d.ManagePairing) await _bt.UnpairAsync(d.Address);
-        }
-        catch (Exception ex) { Log.Error("bt", $"release {d.Name} failed", ex); }
-    }
+    /// the bond is the only lever) unpair. A plain DisconnectAsync is a no-op on Windows, so this is
+    /// what the tray/Settings "disconnect" must call.
+    public Task ReleaseDeviceAsync(BTDevice d) => RunLoggedAsync(() => Engine.ReleaseDeviceNowAsync(d), $"release {d.Name}");
 
-    public async Task TestPairAsync(BTDevice d)
-    {
-        Log.Info("action", $"pair {d.Name}");
-        try { await _bt.PairAsync(d.Address); }
-        catch (Exception ex) { Log.Error("bt", $"pair {d.Name} failed", ex); }
-    }
+    public Task PairDeviceAsync(BTDevice d) => RunLoggedAsync(() => Engine.PairDeviceNowAsync(d), $"pair {d.Name}");
 
-    public async Task TestUnpairAsync(BTDevice d)
-    {
-        Log.Info("action", $"unpair {d.Name}");
-        try { await _bt.UnpairAsync(d.Address); }
-        catch (Exception ex) { Log.Error("bt", $"unpair {d.Name} failed", ex); }
-    }
+    public Task UnpairDeviceAsync(BTDevice d) => RunLoggedAsync(() => Engine.UnpairDeviceNowAsync(d), $"unpair {d.Name}");
 
     /// Dump a full Bluetooth diagnostic for this device to the log (radio, FromBluetoothAddress state,
     /// paired/unpaired/all-Bluetooth device lists with the target marked, HID nodes).
@@ -348,7 +346,7 @@ public sealed class AppController
         change(Config);
         Save();
         if (refreshMonitoring) Engine.RefreshMonitoring();
-        if (reevaluate) _ = Engine.ReevaluateAsync();
+        if (reevaluate) Fire(Engine.ReevaluateAsync, "re-evaluate after config change");
         StateChanged?.Invoke();
     }
 
@@ -362,7 +360,7 @@ public sealed class AppController
         Engine.RefreshMonitoring();
         ApplyHotkeys();
         LoginItem.SetEnabled(Config.LaunchAtLogin);
-        _ = Engine.ReevaluateAsync();
+        Fire(Engine.ReevaluateAsync, "re-evaluate after config import");
         StateChanged?.Invoke();
     }
 

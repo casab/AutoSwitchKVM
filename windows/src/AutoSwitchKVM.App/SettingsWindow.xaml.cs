@@ -427,13 +427,13 @@ public sealed partial class SettingsWindow : Window
             };
 
             var conn = new Button { Content = "Connect" };
-            conn.Click += async (_, _) => await C.TestConnectAsync(device);
+            conn.Click += async (_, _) => await C.ConnectDeviceAsync(device);
             var disc = new Button { Content = "Disconnect" };
-            disc.Click += async (_, _) => await C.TestDisconnectAsync(device);
+            disc.Click += async (_, _) => await C.ReleaseDeviceAsync(device);
             var pair = new Button { Content = "Pair" };
-            pair.Click += async (_, _) => await C.TestPairAsync(device);
+            pair.Click += async (_, _) => await C.PairDeviceAsync(device);
             var unpair = new Button { Content = "Unpair" };
-            unpair.Click += async (_, _) => await C.TestUnpairAsync(device);
+            unpair.Click += async (_, _) => await C.UnpairDeviceAsync(device);
 
             var up = new Button { Content = "Up", IsEnabled = index > 0 };
             up.Click += (_, _) => MoveDevice(index, index - 1);

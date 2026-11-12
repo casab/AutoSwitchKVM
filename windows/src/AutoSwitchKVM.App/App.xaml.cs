@@ -145,11 +145,12 @@ public partial class App : Application
             menu.Items.Add(new MenuFlyoutItem
             {
                 Text = $"{dev.Name}  -  {c.StatusFor(dev).Label}",
+                // Never throws: the controller's per-device actions log their own failures.
                 Command = new RelayCommand(() =>
                 {
                     _ = c.StatusFor(dev).Kind == DeviceStatusKind.Connected
-                        ? c.TestDisconnectAsync(dev)
-                        : c.TestConnectAsync(dev);
+                        ? c.ReleaseDeviceAsync(dev)
+                        : c.ConnectDeviceAsync(dev);
                 }),
             });
         }
@@ -158,12 +159,12 @@ public partial class App : Application
         menu.Items.Add(new MenuFlyoutItem
         {
             Text = "Connect all",
-            Command = new RelayCommand(() => _ = c.ConnectAllAsync()),
+            Command = new RelayCommand(c.ConnectAll),
         });
         menu.Items.Add(new MenuFlyoutItem
         {
             Text = "Disconnect all",
-            Command = new RelayCommand(() => _ = c.DisconnectAllAsync()),
+            Command = new RelayCommand(c.DisconnectAll),
         });
         menu.Items.Add(new ToggleMenuFlyoutItem
         {
