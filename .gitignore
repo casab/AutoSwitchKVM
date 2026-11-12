@@ -16,3 +16,7 @@ desktop.ini
 # Local reference checkouts (not part of this repo)
 # Magic Trackpad 2 Windows driver: vitoplantamura/MagicTrackpad2ForWindows + signed package/PDBs
 reference_win_driver/
+
+# Signing material must never be committed (certificates, update-signing keys).
+*.p12
+*.key

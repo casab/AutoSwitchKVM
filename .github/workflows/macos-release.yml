@@ -125,6 +125,18 @@ jobs:
       - name: Add macOS install notes to the release
         run: |
           VERSION="${TAG#v}"
+          # The Windows workflow creates the release with its x64 upload, then merges the ARM64
+          # assets; that merge might rewrite the body. releases.win-arm64.json is the last file it
+          # uploads, so edit the body only after it appears (up to 30 min; then edit anyway, since
+          # nothing else will touch the release).
+          for i in $(seq 1 60); do
+            if gh release view "$TAG" --json assets -q '.assets[].name' | grep -qx 'releases.win-arm64.json'; then
+              echo "Windows uploads are complete."
+              break
+            fi
+            [ "$i" = 60 ] && echo "::warning::releases.win-arm64.json never appeared; adding the notes anyway."
+            sleep 30
+          done
           BODY="$(gh release view "$TAG" --json body -q .body)"
           if [[ "$BODY" == *"<!-- macos-notes -->"* ]]; then exit 0; fi
           NOTES="$RUNNER_TEMP/notes.md"

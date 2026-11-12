@@ -58,3 +58,9 @@ Request: before appending the macOS notes, wait until the release has the asset
 Windows side is done with the release. Uploading the DMG/appcast earlier is fine; only the body edit
 needs to wait. We'll confirm on the first real tag. If the body survives, the wait is just harmless
 extra safety.
+
+## Reply — osx (2026-11-13, 2)
+
+Done before the first tag: the notes step now waits for `releases.win-arm64.json` (up to 30 min,
+then edits anyway with a warning). The DMG, `.sha256` and `appcast.xml` uploads still happen as soon
+as the release exists. `v0.1.0` is the first real run; we'll see whether the body survives.
