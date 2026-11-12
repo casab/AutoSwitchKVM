@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or (site.name + " · " + site.tagline) }}</title>
+  <meta name="description" content="{{ description or site.description }}">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#fff7ec" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1b1a2e" media="(prefers-color-scheme: dark)">
+  <link rel="canonical" href="{{ site.url }}{{ page.url }}">
+  <link rel="icon" href="/assets/icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/assets/icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ site.name }}">
+  <meta property="og:title" content="{{ title or site.name }}">
+  <meta property="og:description" content="{{ description or site.description }}">
+  <meta property="og:url" content="{{ site.url }}{{ page.url }}">
+  <meta property="og:image" content="{{ site.url }}/assets/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preload" href="/assets/fonts/nunito-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/css/site.css">
+  <script src="/assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="topbar">
+    <div class="wrap topbar__inner">
+      <a class="brand" href="/">
+        <img src="/assets/icon.png" alt="" width="32" height="32">
+        <span>AutoSwitch KVM</span>
+      </a>
+      <nav class="topnav" aria-label="Main">
+        <a href="/#how">How it works</a>
+        <a href="/#faq">FAQ</a>
+        <a href="{{ site.github }}">GitHub</a>
+        <a class="btn btn--small" href="/#download">Download</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    {{ content | safe }}
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer__inner">
+      <p>
+        <img src="/assets/icon.png" alt="" width="24" height="24">
+        <span><strong>AutoSwitch KVM</strong>, made by someone who got tired of re-pairing a trackpad.</span>
+      </p>
+      <p class="footer__links">
+        <a href="{{ site.github }}">Source on GitHub</a>
+        <a href="{{ site.releases }}">All releases</a>
+        <a href="{{ site.issues }}">Report a bug</a>
+      </p>
+      <p class="footer__small">
+        Not affiliated with Apple or Microsoft. Magic Trackpad and Magic Keyboard are trademarks of Apple Inc.
+      </p>
+    </div>
+  </footer>
+</body>
+</html>

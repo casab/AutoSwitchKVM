@@ -1,0 +1,14 @@
+{
+  "name": "autoswitchkvm-website",
+  "private": true,
+  "description": "autoswitchkvm.com: the AutoSwitch KVM website (Eleventy, deployed on Cloudflare Pages)",
+  "type": "module",
+  "scripts": {
+    "build": "eleventy",
+    "start": "eleventy --serve"
+  },
+  "devDependencies": {
+    "@11ty/eleventy": "3.1.8",
+    "@fontsource-variable/nunito": "5.3.0"
+  }
+}

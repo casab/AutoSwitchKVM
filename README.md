@@ -119,6 +119,7 @@ windows/          Windows app: sources, tests, tools, docs (README, CLAUDE, PLAN
 SPECIFICATION.md  Behavior contract both apps implement (config model, engine, Bluetooth ops)
 testdata/         Shared config fixture; both test suites read it, so settings stay compatible
 agent-notes/      Coordination notes between the macOS and Windows work streams
+website/          autoswitchkvm.com (Eleventy, deployed on Cloudflare Pages)
 .github/          CI (build + tests for both apps) and release workflows
 ```
 

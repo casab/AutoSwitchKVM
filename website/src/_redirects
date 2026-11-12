@@ -1,0 +1,9 @@
+# Cloudflare Pages redirects. Stable download links for the site and for sharing.
+# The Windows installers keep the same file name in every release, so "latest/download" always
+# serves the newest stable build. The macOS DMG name carries the version, so it goes to the
+# latest release page.
+/download/windows        https://github.com/casab/AutoSwitchKVM/releases/latest/download/AutoSwitchKVM.App-win-Setup.exe        302
+/download/windows-arm64  https://github.com/casab/AutoSwitchKVM/releases/latest/download/AutoSwitchKVM.App-win-arm64-Setup.exe  302
+/download/mac            https://github.com/casab/AutoSwitchKVM/releases/latest                                                  302
+/download                https://github.com/casab/AutoSwitchKVM/releases/latest                                                  302
+/github                  https://github.com/casab/AutoSwitchKVM                                                                  302
