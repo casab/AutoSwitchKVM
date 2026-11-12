@@ -1,121 +1,139 @@
-# AutoSwitch KVM — Windows
+# AutoSwitch KVM for Windows
 
-Native Windows port of AutoSwitch KVM. **Status: M0 validated on hardware; M1-M7 implemented — Core
-ported and unit-tested, platform layer + tray UI + Settings built, and the WinUI app builds cleanly
-on Windows. Pending on-device runtime validation of the full KVM/Bluetooth handoff.**
+**Your Bluetooth trackpad and keyboard follow your KVM switch to this PC, and leave with it.**
 
-The goal is feature parity with the macOS app (`../osx/`): a background **system-tray** app that
-detects a USB "switcher source" appearing/disappearing and pairs/connects (or unpairs/disconnects)
-the configured Bluetooth devices, with the same model (profiles, per-device pairing management,
-timing, global shortcuts).
+AutoSwitch KVM sits in the system tray. When your KVM switches to this PC it connects your
+Bluetooth devices, pairing them first if needed. When the KVM switches away it releases them, so
+your other computer can take over. It's the Windows half of a pair: the
+[macOS app](../osx/README.md) does the same on your Mac. See the [project overview](../README.md)
+for the bigger picture.
 
-## Working reference: `reference/Trackpad-AutoSwitch.ps1`
+<p align="center">
+  <img src="docs/images/tray-panel.png" alt="Tray panel: status, device toggles, profile, Pause / Connect all / Release all" width="300">
+</p>
 
-A proven PowerShell prototype (the Windows counterpart of macOS's `hammerspoon_init.lua`) that does
-the full handoff for an Apple Magic Trackpad on Windows 11. The native port should mirror its
-behavior. Key things it establishes:
-
-- **Source detection (USB / PnP).** Watches the KVM hub `USB\VID_05E3&PID_0626` (Genesys Logic
-  SuperSpeed hub) as the selection signal — it reliably goes from `Status=OK` to absent when the KVM
-  switches away. The sibling `PID_0610` hub has an always-on instance and **can't** be used to
-  detect switch-away. It "learns" the instance group key to scope to the right physical hub.
-- **No polling.** Event-driven via WMI `Win32_DeviceChangeEvent` + `Win32_SystemConfigurationChangeEvent`
-  and a Kernel-PnP EventLog watcher, **plus a ~2 s periodic reconcile** safety-net (the USB
-  re-enumeration storm on a KVM switch starves a pure debounce, so a steady reconcile guarantees
-  convergence). Debounce ≈ 1200 ms. The reconcile is idempotent (acts only on a transition).
-- **Handoff = pair/unpair, not connect/disconnect.** The Magic Trackpad is **Classic HID**
-  (`BTHENUM\…`, HID service GUID `00001124-0000-1000-8000-00805F9B34FB`), not BLE. On **select**:
-  pair, then verify the HID PnP nodes appear. On **deselect**: **unpair / remove the bond** — because
-  the device keeps one link key per host, and once the Mac re-pairs, Windows's stored key is stale;
-  you must re-pair on return. (This is exactly the macOS `managePairing` model.)
-- **Pair-release race.** Right after a Mac→Windows switch the Mac may still hold the device, so
-  pairing returns `AuthenticationFailure`; the prototype retries across successive reconciles rather
-  than giving up.
-- **Pairing tooling.** Uses the PolarGoose `BluetoothDevicePairing.exe` CLI
-  (`pair-by-mac` / `unpair-by-mac`), with `pnputil /remove-device` as a last-resort unpair. A native
-  app could use WinRT `DeviceInformation` pairing instead, or bundle a helper.
-
-## Build plan
-
-See **`PLAN.md`** for the full build plan — stack (C#/.NET 8 + WinUI 3, Windows 10 1809+/11,
-unpackaged, native WinRT pairing), solution structure, a component-by-component mapping from the
-macOS app, the platform discrepancies and how they're resolved, and milestones (spike-first). The
-behavior contract it targets is `../SPECIFICATION.md`.
-
-## Solution layout
-
-```
-AutoSwitchKVM.sln
-src/
-  AutoSwitchKVM.Core/        net8.0 class library (portable, unit-tested) - NO WinUI/WinRT deps
-    Models/Models.cs          USBSource, BTDevice, Profile, KeyShortcut, AppConfig (System.Text.Json)
-    ConfigStore.cs            %LOCALAPPDATA%\AutoSwitchKVM\config.json (atomic/debounced + legacy migration)
-    SelectionEngine.cs        ported state machine     DeviceStatus.cs   per-device status
-    SourceLearner.cs          Learn-source (snapshot diff)
-    IUsbMonitor.cs / IBluetoothController.cs           platform seams
-  AutoSwitchKVM.App/         net8.0-windows10.0.19041.0, WinUI 3, unpackaged (WindowsPackageType=None)
-    App.xaml(.cs)             tray app + dynamic context menu (status/profiles/devices/quick actions)
-    SettingsWindow.xaml(.cs)  Source / Devices / General / Extras / Diagnostics tabs (code-behind)
-    Services/AppController.cs  coordinator: wires config + engine + monitors, exposes state + actions
-    Support/Log.cs             Trace + rolling file + in-app Diagnostics buffer
-    Platform/PnpUsbMonitor.cs  IUsbMonitor via WMI (Win32_PnPEntity + Win32_DeviceChangeEvent + reconcile)
-    Platform/WinRtBluetooth.cs IBluetoothController via WinRT pair/connect + Win32 remove-device release
-    Platform/HotKeyService.cs  global hotkeys (RegisterHotKey + message-only window)
-    Platform/PowerMonitor.cs   sleep/wake (SystemEvents.PowerModeChanged)
-    Platform/LoginItem.cs      run-at-login (HKCU Run key)
-    Platform/ToastNotifier.cs  toasts (AppNotificationManager)
-tests/
-  AutoSwitchKVM.Core.Tests/  xUnit (40 tests): models, config, profiles, engine, source-learner
-spikes/                      PowerShell hardware validations (Spike1 read-state, Spike2 pairing, Spike3 USB)
-```
-
-See **`PLAN.md`** ("Milestones") for the per-component status and design notes.
+> **Status: beta.** Used daily on real hardware (Apple Magic Trackpad between a Windows 11 PC and
+> a Mac). Feedback and bug reports are welcome on
+> [GitHub Issues](https://github.com/casab/AutoSwitchKVM/issues).
 
 ## Install
 
-Download `AutoSwitchKVM.App-win-Setup.exe` (or `-win-arm64-Setup.exe`) from the
-[GitHub releases](https://github.com/casab/AutoSwitchKVM/releases) and run it. It installs per user
-(no admin) to `%LOCALAPPDATA%\AutoSwitchKVM.App`, adds a Start menu shortcut, starts the app and
-opens Settings. The app updates itself from new releases (Settings ▸ General ▸ About). Builds are
-not code-signed yet, so SmartScreen warns on the installer: **More info → Run anyway**.
-Uninstall from Windows Settings ▸ Apps; your settings and logs in `%LOCALAPPDATA%\AutoSwitchKVM`
-are kept.
+1. Download **`AutoSwitchKVM.App-win-Setup.exe`** from the latest
+   [release](https://github.com/casab/AutoSwitchKVM/releases). On an ARM PC (e.g. Snapdragon),
+   take `AutoSwitchKVM.App-win-arm64-Setup.exe`.
+2. Run it. If SmartScreen says "Windows protected your PC", click **More info ▸ Run anyway**. The
+   app isn't code-signed yet.
+3. It installs for your user account only (no admin needed), starts, and opens Settings.
 
-## Releasing
+Requirements: Windows 10 version 1809 or later, or Windows 11, with Bluetooth. Nothing else to
+install; everything the app needs is included.
 
-Push a SemVer tag and the `Windows release` workflow builds both architectures, packs them with
-Velopack and publishes the GitHub release:
+**Updates are automatic.** The app checks in the background and offers **Restart to update**
+when a new version is ready (in the tray menu, as a notification, and in
+**Settings ▸ General ▸ About**).
+
+## Set up (about two minutes)
+
+1. **KVM source.** Open **Settings ▸ KVM source** and choose **Learn from a switch**. Switch your
+   KVM to the other computer and back. AutoSwitch finds the USB device that comes and goes with
+   the switch (usually a hub inside the KVM). You can also pick it from a list or type its IDs.
+2. **Devices.** In **Settings ▸ Devices**, choose **Add device** and pick your trackpad, keyboard
+   or mouse. For the **Magic Trackpad**, or any device that only pairs with one computer at a
+   time, keep **Manage pairing** on.
+3. **Do the same on your other computer**, so it releases the devices when the KVM leaves it.
+
+That's it. Switch the KVM and your devices follow, usually within a few seconds.
+
+<p align="center">
+  <img src="docs/images/settings-overview.png" alt="Settings: overview of the KVM state and each device" width="720">
+</p>
+
+## Everyday use
+
+- **Click the tray icon** for the quick panel: what's connected, a switch per device, the active
+  profile, and **Pause**, **Connect all** and **Release all**.
+- **Right-click** for the menu: the same actions, profiles, Settings and Exit.
+- **Double-click** to open Settings.
+- **The icon shows the state:** this PC selected, another computer selected, paused, or Bluetooth
+  off.
+
+Also in Settings:
+
+- **Profiles:** separate setups (a source plus its devices), e.g. "Desk" and "Travel".
+- **Keyboard shortcuts:** optional global shortcuts to pause, connect all and release all
+  (defaults Ctrl+Alt+P / C / D).
+- **Launch at login**, **notifications**, and **timing and retry** options for unusual hardware.
+- **Back up or restore** your settings as a file.
+
+AutoSwitch also releases your devices when the PC sleeps, signs out or shuts down, and catches
+up when it wakes.
+
+## Troubleshooting
+
+- **A device takes a while to connect after a switch.** That's usually the other computer still
+  holding it; AutoSwitch keeps retrying until it lets go. If it never arrives, check that
+  AutoSwitch is running on the other computer too.
+- **A device shows "Problem".** Use **Connect** on it, or **Settings ▸ Devices ▸ Manual control**
+  to pair or unpair it by hand. Turning the device off and on also helps.
+- **Reporting a bug.** Set **Settings ▸ Diagnostics ▸ Log detail** to **Detailed**, reproduce the
+  problem, then **Open folder** and attach that day's log. Logs and settings live in
+  `%LOCALAPPDATA%\AutoSwitchKVM`.
+
+**Uninstall** from Windows Settings ▸ Apps. Your settings and logs are kept, in case you
+reinstall.
+
+---
+
+## For developers
+
+### Build and run
+
+Requirements: **.NET 8 SDK** and **Visual Studio 2022** (".NET desktop development" workload with
+the Windows App SDK C# templates), on Windows.
+
+- Open `AutoSwitchKVM.sln`, set **AutoSwitchKVM.App** as the startup project, platform **x64**,
+  and run. A tray icon appears.
+- Command line: `dotnet build src/AutoSwitchKVM.App/AutoSwitchKVM.App.csproj -c Debug -p:Platform=x64`.
+- Tests: `dotnet test tests/AutoSwitchKVM.Core.Tests`. The Core library and its tests are plain
+  `net8.0`, so they run anywhere, without the Windows SDK.
+- UI work without touching your devices: `AutoSwitchKVM.App.exe --ui-preview --settings=overview`
+  (Debug builds) runs the UI with no engine and no writes, next to a running copy. Add
+  `--config=<file>` and `--preview-demo` for sample data.
+- A running copy locks its output folder: exit it first, or build a different configuration.
+
+### How it's built
+
+- **`src/AutoSwitchKVM.Core`**: portable, unit-tested logic with no UI or Windows dependencies.
+  It holds the settings model and JSON store, the switching engine (debounce, connect/release
+  runs, retries with failure classification), and source learning. Platform services sit behind
+  interfaces (`IUsbMonitor`, `IBluetoothController`), so tests use fakes.
+- **`src/AutoSwitchKVM.App`**: the WinUI 3 app.
+  - `Platform/`: USB detection (WMI/PnP with a periodic reconcile), Bluetooth (WinRT pairing plus
+    Win32 `BluetoothRemoveDevice` for a clean release), hotkeys, sleep/wake, launch at login,
+    notifications.
+  - `Services/`: the `AppController` that wires everything together, and Velopack updates.
+  - UI: MVVM `ViewModels/`, the Settings window with its `Views/` pages, and `TrayPanel`.
+- **`tests/AutoSwitchKVM.Core.Tests`**: xUnit tests for models, config (including the shared
+  golden fixture with macOS), the engine state machine, failure handling and source learning.
+- **`tools/`**: `release.ps1` (build an installer), `make-app-icon.py`, and `driver-trace.ps1`
+  (Magic Trackpad driver traces).
+- **`spikes/`, `reference/`**: the PowerShell hardware experiments and prototype the app grew
+  from.
+
+The behavior both platforms implement is specified in [`../SPECIFICATION.md`](../SPECIFICATION.md).
+[`PLAN.md`](PLAN.md) has the roadmap, the macOS-to-Windows mapping and size/startup measurements.
+[`CLAUDE.md`](CLAUDE.md) has detailed engineering notes and the hardware gotchas learned along
+the way.
+
+### Releasing
+
+Push a version tag. The **Windows release** workflow builds x64 and ARM64, packs them with
+[Velopack](https://velopack.io) and publishes the GitHub release that installed apps update from:
 
 ```sh
 git tag v0.2.0 && git push origin v0.2.0
 ```
 
-A pre-release tag (`v0.2.0-beta.1`) becomes a GitHub pre-release, which installed apps ignore.
-To build an installer locally: `pwsh tools/release.ps1 -Version 0.2.0 [-Arch arm64]` (output in
+A pre-release tag (`v0.2.0-beta.1`) becomes a GitHub pre-release, which installed apps ignore. To
+build an installer locally: `pwsh tools/release.ps1 -Version 0.2.0 [-Arch arm64]` (output in
 `releases/<arch>/`).
-
-## Build & run
-
-Requires **Visual Studio 2022** with the **.NET Desktop** workload and the **Windows App SDK C#
-templates** (or the standalone Windows App SDK), and the **.NET 8 SDK**.
-
-- Open `AutoSwitchKVM.sln`, set **AutoSwitchKVM.App** as startup, platform **x64**, and run. You
-  get a tray icon; left-click opens Settings, right-click shows the status/quick-actions menu.
-- Tests: `dotnet test tests/AutoSwitchKVM.Core.Tests` (the Core lib + tests are plain `net8.0`, no
-  Windows SDK needed). CI also builds the WinUI app on `windows-latest`.
-
-Notes:
-- The app is **unpackaged**; the Windows App SDK bootstrapper auto-initializes (`WindowsPackageType=None`).
-- NuGet versions in the `.csproj` files are a known-good baseline — if restore complains, let VS
-  update the packages. The tray creation in `App.xaml.cs` follows H.NotifyIcon 2.x.
-- The **App project** builds cleanly on Windows (`Release|x64` verified 2026-06-25). If the app is
-  already running, build to a clean output directory or exit the tray app first because the runtime
-  locks its DLLs.
-- Remaining validation is runtime/hardware: full KVM switch-away/back, `BluetoothRemoveDevice`
-  release, sleep/resume release timing, global hotkeys, and toast visibility.
-
-## Reference
-
-- Behavior contract / shared concept: `../README.md` and `../CLAUDE.md`.
-- macOS implementation (reference for engine behavior): `../osx/`.
-- Windows prototype: `reference/Trackpad-AutoSwitch.ps1`.
