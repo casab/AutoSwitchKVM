@@ -12,7 +12,7 @@ computer and moves your Bluetooth devices along with it.
 <p align="center">
   <img src="osx/docs/images/menu-bar-panel.png" alt="AutoSwitch KVM menu bar panel on macOS" height="340">
   &nbsp;&nbsp;
-  <img src="windows/docs/images/tray-panel.png" alt="AutoSwitch KVM tray panel on Windows" height="380">
+  <img src="windows/docs/images/tray-panel.png" alt="AutoSwitch KVM tray panel on Windows" height="340">
 </p>
 <p align="center"><sub>The menu bar panel on macOS (left) and the tray panel on Windows (right).</sub></p>
 
