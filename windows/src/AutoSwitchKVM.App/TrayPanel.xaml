@@ -11,26 +11,15 @@
     <Grid>
     <!-- Gaps are top margins, not StackPanel.Spacing: Spacing also counts collapsed children (the
          empty-state text and the profile picker), which left a gap at the bottom. -->
-    <StackPanel x:Name="Root" Padding="16" VerticalAlignment="Top" SizeChanged="OnRootSizeChanged">
-
-        <!-- Header -->
-        <Grid>
-            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <FontIcon Glyph="&#xE7F4;" FontSize="16" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
-                <TextBlock Text="AutoSwitch KVM" Style="{StaticResource BodyStrongTextBlockStyle}" />
-            </StackPanel>
-            <Button HorizontalAlignment="Right" Style="{StaticResource SubtleButtonStyle}" Padding="8,6"
-                    Click="OnOpenSettings" ToolTipService.ToolTip="Settings">
-                <FontIcon Glyph="&#xE713;" FontSize="16" />
-            </Button>
-        </Grid>
+    <StackPanel x:Name="Root" Padding="12" VerticalAlignment="Top" SizeChanged="OnRootSizeChanged">
 
         <!-- Status -->
-        <Border Style="{StaticResource SurfaceCardStyle}" Padding="14" Margin="0,12,0,0">
+        <Border Style="{StaticResource SurfaceCardStyle}" Padding="14,12,6,12">
             <Grid ColumnSpacing="14">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Border Width="40" Height="40" CornerRadius="20" VerticalAlignment="Center"
                         Background="{x:Bind ViewModel.StatusBackground, Mode=OneWay}">
@@ -39,14 +28,17 @@
                 </Border>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                     <TextBlock Text="{x:Bind ViewModel.StatusTitle, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock Text="{x:Bind ViewModel.StatusDetail, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="WrapWholeWords" />
                 </StackPanel>
+                <!-- The detail line is left out here: the device rows below already show it. -->
+                <Button Grid.Column="2" VerticalAlignment="Center" Style="{StaticResource SubtleButtonStyle}" Padding="8,6"
+                        Click="OnOpenSettings" ToolTipService.ToolTip="Open AutoSwitch KVM settings">
+                    <FontIcon Glyph="&#xE713;" FontSize="16" />
+                </Button>
             </Grid>
         </Border>
 
         <!-- Devices -->
-        <ItemsRepeater ItemsSource="{x:Bind ViewModel.Devices}" Margin="0,12,0,0">
+        <ItemsRepeater ItemsSource="{x:Bind ViewModel.Devices}" Margin="0,8,0,0">
             <ItemsRepeater.Layout>
                 <StackLayout Spacing="4" />
             </ItemsRepeater.Layout>
@@ -80,37 +72,37 @@
         </ItemsRepeater>
 
         <TextBlock Text="No devices yet. Add one in Settings." Style="{StaticResource CaptionTextBlockStyle}"
-                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="2,0,2,0"
+                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="2,8,2,0"
                    Visibility="{x:Bind ViewModel.NoDevices, Mode=OneWay}" />
 
         <!-- Profile -->
-        <ComboBox HorizontalAlignment="Stretch" Header="Profile" Margin="0,12,0,0"
+        <ComboBox HorizontalAlignment="Stretch" Header="Profile" Margin="0,8,0,0"
                   ItemsSource="{x:Bind ViewModel.Profiles}"
                   SelectedItem="{x:Bind ViewModel.SelectedProfile, Mode=TwoWay}"
                   Visibility="{x:Bind ViewModel.HasMultipleProfiles, Mode=OneWay}" />
 
         <!-- Quick actions (tiles) -->
-        <Grid ColumnSpacing="8" Margin="0,12,0,0">
+        <Grid ColumnSpacing="8" Margin="0,8,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <ToggleButton HorizontalAlignment="Stretch" Height="64" IsChecked="{x:Bind ViewModel.IsPaused, Mode=TwoWay}"
+            <ToggleButton HorizontalAlignment="Stretch" Height="56" IsChecked="{x:Bind ViewModel.IsPaused, Mode=TwoWay}"
                           ToolTipService.ToolTip="Ignore KVM switches until you resume">
                 <StackPanel Spacing="4">
                     <FontIcon Glyph="&#xE769;" FontSize="16" />
                     <TextBlock Text="Pause" Style="{StaticResource CaptionTextBlockStyle}" HorizontalAlignment="Center" />
                 </StackPanel>
             </ToggleButton>
-            <Button Grid.Column="1" HorizontalAlignment="Stretch" Height="64" Click="{x:Bind ViewModel.ConnectAll}"
+            <Button Grid.Column="1" HorizontalAlignment="Stretch" Height="56" Click="{x:Bind ViewModel.ConnectAll}"
                     ToolTipService.ToolTip="Connect every device now">
                 <StackPanel Spacing="4">
                     <FontIcon Glyph="&#xE71B;" FontSize="16" />
                     <TextBlock Text="Connect all" Style="{StaticResource CaptionTextBlockStyle}" HorizontalAlignment="Center" />
                 </StackPanel>
             </Button>
-            <Button Grid.Column="2" HorizontalAlignment="Stretch" Height="64" Click="{x:Bind ViewModel.DisconnectAll}"
+            <Button Grid.Column="2" HorizontalAlignment="Stretch" Height="56" Click="{x:Bind ViewModel.DisconnectAll}"
                     ToolTipService.ToolTip="Release every device for the other computer">
                 <StackPanel Spacing="4">
                     <FontIcon Glyph="&#xE8CD;" FontSize="16" />
