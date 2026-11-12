@@ -274,11 +274,12 @@ public sealed class AppController
         if (IsDemo)
         {
             var i = Config.Devices.FindIndex(d => d.Id == device.Id);
-            return (i % 4) switch
+            // Screenshot mix (README): two connected, one connecting, then a problem and an idle one.
+            return (i % 5) switch
             {
-                0 => DeviceStatus.Connected,
-                1 => DeviceStatus.Connecting,
-                2 => DeviceStatus.Error("no response within 30 s"),
+                0 or 1 => DeviceStatus.Connected,
+                2 => DeviceStatus.Connecting,
+                3 => DeviceStatus.Error("no response within 30 s"),
                 _ => DeviceStatus.Disconnected,
             };
         }
