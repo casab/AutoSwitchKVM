@@ -163,6 +163,29 @@ public class HandoffRaceTests
         Assert.Contains(1500, sleeps);     // 2000 ms gap − 500 ms already passed
     }
 
+    /// postUnpairSettleMs is user-tunable (Settings ▸ General); 0 turns the settle off.
+    [Theory]
+    [InlineData(1000, 200, 800)]
+    [InlineData(0, 0, null)]
+    public async Task Pair_settle_follows_the_config_setting(int settleMs, int elapsedMs, int? expectedSleep)
+    {
+        var engine = MakeEngine(out _, out var config, out var log, out _);
+        config.PostUnpairSettleMs = settleMs;
+        var now = new DateTime(2026, 11, 13, 9, 0, 0, DateTimeKind.Utc);
+        engine.Clock = () => now;
+        var sleeps = new List<int>();
+        engine.SleepHook = ms => { sleeps.Add(ms); return Task.CompletedTask; };
+
+        await Arrive(engine);
+        await Leave(engine);
+        sleeps.Clear();
+        now = now.AddMilliseconds(elapsedMs);
+        await Arrive(engine);
+
+        if (expectedSleep is { } ms) Assert.Contains(ms, sleeps);
+        else Assert.False(log.Has(LogLevel.Info, "settling"), log.Dump());
+    }
+
     // ---- Spec §3 Evaluate step 5: reconcile on seed ----
 
     [Fact]

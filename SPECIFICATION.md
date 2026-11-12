@@ -83,6 +83,7 @@ display string convention, e.g. `⌃⌥⌘P` / on Windows `Ctrl+Alt+Cmd⇒Win` e
 | `connectRetryMax` | int | `6` | Max connect attempts per handoff |
 | `connectRetrySecs` | int | `2` | Backoff **base** seconds |
 | `btCallTimeoutSecs` | int | `15` macOS / `45` Windows | Per Bluetooth-call timeout. Platform default differs by design: a Windows pair legitimately takes ~14 s and must absorb the other-host-release race |
+| `postUnpairSettleMs` | int | `2000` | Minimum gap between an unpair of a device returning and the next pair of it (§3 Connect flow). Only quick KVM bounces pay it. User-tunable (Windows Settings ▸ General); the macOS reason is bluetoothd deleting the key ~1.5 s late, the Windows one WinRT's ~70 ms stale `IsPaired` |
 | `showNotifications` | bool | `false` | Connect/disconnect alerts |
 | `notifyUnexpectedDisconnect` | bool | `false` | Alert on passive drops |
 | `autoReconnectOnDrop` | bool | `true` | One rate-limited automatic reconnect after a passive drop (§3) |
@@ -146,7 +147,7 @@ controller** (the operations in §5). It owns no platform APIs directly.
   - If Bluetooth adapter is **off** → set status `bluetoothOff`, stop.
   - Abort if the run is stale (token changed) or the source is no longer present.
   - If `managePairing`: before pairing, wait for any unpair of this device still in flight (a
-    superseded release) and until ~2 s have passed since the last one returned (macOS: the system
+    superseded release) and until `postUnpairSettleMs` (default ~2 s) have passed since the last one returned (macOS: the system
     deletes the key ~1.5 s after the link drops; a pair inside that window collides with it). Then
     **pair**, keeping the pairing link up (don't cancel/close the pairing
     operation after success) → wait up to ~3 s for HID on that link; if it comes up, done →

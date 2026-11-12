@@ -122,6 +122,12 @@ public sealed class AppConfig
     /// pair-retry loop generous per-call headroom.
     public int BtCallTimeoutSecs { get; set; } = 45;
 
+    /// Minimum gap (ms) between an unpair of a device returning and the next pair of it (spec §3
+    /// "a pair waits for a recent unpair"). Only a quick KVM bounce pays it. 2000 covers macOS
+    /// (bluetoothd deletes the key ~1.5 s late); on Windows the stale-record window measured
+    /// ~70 ms, so a much smaller value can work there. User-tunable in Settings ▸ General.
+    public int PostUnpairSettleMs { get; set; } = 2000;
+
     // Behavior
     public bool ShowNotifications { get; set; }
     public bool NotifyUnexpectedDisconnect { get; set; }

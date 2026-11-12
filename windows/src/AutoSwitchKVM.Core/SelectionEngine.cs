@@ -93,9 +93,6 @@ public sealed class SelectionEngine
     internal int PostPairHidWaitMs = 3000;
     internal int HidReadyTimeoutMs = 5000;
     internal int HidPollIntervalMs = 250;
-    /// Minimum gap between an engine unpair returning and the next pair of that device (spec §3,
-    /// value matches macOS postUnpairSettleMs).
-    internal int PostUnpairSettleMs = 2000;
     internal Func<DateTime> Clock = () => DateTime.UtcNow;
 
     public SelectionEngine(AppConfig config, IUsbMonitor usb, IBluetoothController bt, ILogSink? log = null)
@@ -1040,7 +1037,7 @@ public sealed class SelectionEngine
     // ---- Unpair bookkeeping (spec §3 "pair waits for a recent unpair") ----
 
     /// Every engine unpair goes through here so a later pair can wait for it (in flight) and keep
-    /// PostUnpairSettleMs after it returned.
+    /// Config.PostUnpairSettleMs after it returned.
     private async Task UnpairTrackedAsync(BTDevice device)
     {
         var task = WithTimeoutAsync(ct => _bt.UnpairAsync(device.Address, ct));
@@ -1061,7 +1058,7 @@ public sealed class SelectionEngine
     }
 
     /// Wait for an unpair of this device still in flight (a superseded release), then until
-    /// PostUnpairSettleMs have passed since the last one returned. Returns the stale reason if the
+    /// Config.PostUnpairSettleMs have passed since the last one returned. Returns the stale reason if the
     /// run was superseded meanwhile, else null.
     private async Task<string?> WaitForUnpairGateAsync(BTDevice device, Run run, bool respectSelection)
     {
@@ -1072,12 +1069,13 @@ public sealed class SelectionEngine
             try { await inFlight; } catch { /* its owner logs the failure */ }
             Info($"{device.Name}: in-flight unpair finished after {Ms(sw)}");
         }
-        if (_lastUnpairReturned.TryGetValue(device.Id, out var last))
+        var settleMs = Math.Max(0, Config.PostUnpairSettleMs);
+        if (settleMs > 0 && _lastUnpairReturned.TryGetValue(device.Id, out var last))
         {
-            var remaining = PostUnpairSettleMs - (int)(Clock() - last).TotalMilliseconds;
+            var remaining = settleMs - (int)(Clock() - last).TotalMilliseconds;
             if (remaining > 0)
             {
-                Info($"{device.Name}: last unpair returned {PostUnpairSettleMs - remaining} ms ago; settling {remaining} ms before pairing");
+                Info($"{device.Name}: last unpair returned {settleMs - remaining} ms ago; settling {remaining} ms before pairing");
                 await SleepHook(remaining);
             }
         }

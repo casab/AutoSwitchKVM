@@ -236,7 +236,7 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
 - **Right after `BluetoothRemoveDevice` returns, WinRT's `IsPaired` is stale** (`True` for tens of
   ms; seen 2026-11-12 22:58:57 during a KVM bounce), so a pair queued behind the unpair "succeeded"
   without pairing. The engine follows spec §3: before pairing it waits for an engine unpair of the
-  device still in flight and keeps `PostUnpairSettleMs` (2 s) after the last one returned.
+  device still in flight and keeps `postUnpairSettleMs` (config, default 2000 ms; Settings ▸ General) after the last one returned.
 - **A pair that lands after a release is undone.** The engine records the latest release and connect
   run per device (plus the suspend release). When a run goes stale after it paired, it unpairs
   again if a newer release, and no newer connect, was requested. This covers a KVM bounce (keep)

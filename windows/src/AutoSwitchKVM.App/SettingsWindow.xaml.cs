@@ -38,7 +38,7 @@ public sealed partial class SettingsWindow : Window
 
     // General tab controls, kept so outside changes (tray pause, import) show up here.
     private bool _refreshingGeneral;
-    private NumberBox? _arrivalBox, _departureBox, _retriesBox, _retryBaseBox, _timeoutBox;
+    private NumberBox? _arrivalBox, _departureBox, _retriesBox, _retryBaseBox, _timeoutBox, _settleBox;
     private ToggleSwitch? _pausedToggle, _notifyToggle, _notifyDropToggle, _autoReconnectToggle, _loginToggle, _hotkeysToggle;
 
     // Log box refresh is throttled: re-rendering the whole buffer on every log line made the window
@@ -567,6 +567,8 @@ public sealed partial class SettingsWindow : Window
         panel.Children.Add(NumberRow("Connect retries", C.Config.ConnectRetryMax, 1, 20, v => C.Mutate(c => c.ConnectRetryMax = v), out _retriesBox));
         panel.Children.Add(NumberRow("Retry base interval (s)", C.Config.ConnectRetrySecs, 1, 30, v => C.Mutate(c => c.ConnectRetrySecs = v), out _retryBaseBox));
         panel.Children.Add(NumberRow("Per-call timeout (s)", C.Config.BtCallTimeoutSecs, 5, 120, v => C.Mutate(c => c.BtCallTimeoutSecs = v), out _timeoutBox));
+        // Only a quick KVM bounce (switching back within a few seconds) pays this pause.
+        panel.Children.Add(NumberRow("Pause after unpair before re-pairing (ms)", C.Config.PostUnpairSettleMs, 0, 5000, v => C.Mutate(c => c.PostUnpairSettleMs = v), out _settleBox));
 
         panel.Children.Add(Header("Behavior"));
         panel.Children.Add(ToggleRow("Pause automation", C.Config.Paused, on => C.Mutate(c => c.Paused = on, reevaluate: true), out _pausedToggle));
@@ -613,6 +615,7 @@ public sealed partial class SettingsWindow : Window
             SetNumber(_retriesBox, c.ConnectRetryMax);
             SetNumber(_retryBaseBox, c.ConnectRetrySecs);
             SetNumber(_timeoutBox, c.BtCallTimeoutSecs);
+            SetNumber(_settleBox, c.PostUnpairSettleMs);
             SetToggle(_pausedToggle, c.Paused);
             SetToggle(_notifyToggle, c.ShowNotifications);
             SetToggle(_notifyDropToggle, c.NotifyUnexpectedDisconnect);
