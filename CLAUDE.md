@@ -24,7 +24,7 @@ This is a **monorepo organized by platform**:
 - `testdata/config-golden.json` — shared config fixture; both test suites read it, so a key
   rename on either side fails CI.
 - `agent-notes/` — **cross-agent handoff** (see below).
-- `website/` — autoswitchkvm.com (Eleventy, Cloudflare Pages; see `website/README.md`). Shared by
+- `website/` — autoswitchkvm.com (Eleventy, Cloudflare Workers static assets; see `website/README.md`). Shared by
   both platforms: it shows the screenshots from `osx/docs/images/` and `windows/docs/images/`.
 - `.github/` — CI: macOS job (`swift build`/`swift test` + blocking lint) and a Windows job
   (`dotnet test` on `AutoSwitchKVM.Core.Tests` + WinUI app build).

@@ -1,0 +1,12 @@
+// Cloudflare Workers (static assets only, no Worker script): serves the Eleventy output.
+// _redirects and _headers in _site are applied by Cloudflare and not served as files.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "autoswitchkvm",
+  "compatibility_date": "2026-11-12",
+  "assets": {
+    "directory": "./_site",
+    "not_found_handling": "404-page",
+    "html_handling": "auto-trailing-slash"
+  }
+}

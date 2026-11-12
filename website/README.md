@@ -13,24 +13,32 @@ npm start       # http://localhost:8080, rebuilds on save
 npm run build   # writes _site/
 ```
 
-## Deploy (Cloudflare Pages)
+## Deploy (Cloudflare Workers, static assets)
 
-Connect the GitHub repo in Cloudflare Pages with:
+The site is a static-assets-only Worker (`wrangler.jsonc`: serves `_site`, `404.html` for
+unknown paths; no Worker script). In the Cloudflare dashboard: **Workers & Pages ▸ Create ▸ Import
+a repository**, pick this repo, and use:
 
 | Setting | Value |
 |---|---|
-| Production branch | `main` |
-| Root directory | `website` |
+| Project name | `autoswitchkvm` (must match `name` in `wrangler.jsonc`) |
+| Path (Advanced settings) | `/website` |
 | Build command | `npm run build` |
-| Build output directory | `_site` |
-| Environment variable (optional) | `NODE_VERSION` = `22` (Eleventy 3 needs Node 18 or newer) |
+| Deploy command | `npx wrangler deploy` |
+| Preview command | `npx wrangler preview` (or `npx wrangler versions upload`) |
 
-Then add `autoswitchkvm.com` (and `www`, if you want it) under **Custom domains**. Every push to
-`main` that touches the site redeploys it; other branches get preview URLs.
+Then attach `autoswitchkvm.com` (and `www`, if you want it) under the Worker's **Settings ▸
+Domains & Routes**. Pushes to `main` redeploy; with preview builds on, other branches get preview
+URLs. `_redirects` (including the external GitHub download links) and `_headers` work the same as
+on Pages. Locally, `npx wrangler deploy --dry-run` checks the config without uploading.
+
+Cloudflare Pages works too, without `wrangler.jsonc`: root directory `website`, build command
+`npm run build`, output directory `_site`.
 
 ## What's where
 
 ```
+wrangler.jsonc          Cloudflare Workers config (static assets from _site)
 src/index.njk           the home page (all sections)
 src/404.njk             "This page switched to the other computer."
 src/_includes/base.njk  layout: head/meta, header, footer
