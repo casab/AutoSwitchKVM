@@ -604,6 +604,7 @@ public sealed class SelectionEngine
                     {
                         Info($"{name}: try {tries}: removing a possibly stale bond before re-pairing");
                         await BestEffortAsync(device, "stale-bond unpair", ct => _bt.UnpairAsync(addr, ct));
+                        freshBond = false;  // once per hard failure; soft retries in between don't repeat it
                     }
                     await Step("pair", ct => _bt.PairAsync(addr, ct));
                     // The connection reported right after pairing is unreliable; drop and reconnect.

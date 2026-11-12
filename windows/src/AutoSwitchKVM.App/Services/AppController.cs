@@ -120,6 +120,8 @@ public sealed class AppController
 
     public void Shutdown()
     {
+        // Logged so an exit is distinguishable from a crash when reading the log afterwards.
+        Log.Info("app", "shutting down (user exit)");
         _pollTimer?.Dispose();
         _hotkeys.Dispose();
         _power.Dispose();

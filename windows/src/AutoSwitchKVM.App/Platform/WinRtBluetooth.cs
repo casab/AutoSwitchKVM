@@ -107,11 +107,15 @@ public sealed class WinRtBluetooth : IBluetoothController
     // Windows until it completes or hits its own ~45-60 s timeout, whatever the caller's token
     // says. Before this was tracked, a timed-out pair released _opLock while Windows was still
     // pairing, and every retry got an instant OperationAlreadyInProgress until the engine gave up
-    // (64 of them in the 2026-10-21 log). Now a timed-out ceremony is kept as an "orphan": the next
-    // pair waits for it, and a watcher logs how it ended and undoes a late success if a release
-    // was requested in the meantime.
+    // (64 of them in the 2026-10-21 log). Now a timed-out ceremony is kept as an "orphan": while it
+    // runs, a new pair fails fast with OperationInProgress (the engine soft-retries without
+    // spending an attempt), and a watcher logs how it ended and undoes a late success if a
+    // release was requested in the meantime.
+    // Observed on hardware (2026-11-12): an orphan ends ~50-55 s after it started, as Canceled
+    // (op.Cancel() only takes effect at Windows' own pairing timeout).
     private Task<DevicePairingResult>? _orphanPair;
     private string? _orphanAddress;
+    private DateTime _orphanSince;
     /// Latest intent per device (digits -> want paired + sequence). Decides whether a pairing that
     /// completes after its caller gave up is kept or removed again, and lets a queued pair notice
     /// that a release was requested after it.
@@ -130,19 +134,26 @@ public sealed class WinRtBluetooth : IBluetoothController
         var digits = Digits(address);
         var mySeq = SetIntent(digits, wantPaired: true);
 
-        // Wait for an orphaned ceremony WITHOUT holding _opLock, so a release (unpair) arriving
-        // meanwhile isn't stuck behind us. Re-check under the lock in case a new orphan appeared.
-        while (true)
-        {
-            await WaitForOrphanAsync(ct);
-            await _opLock.WaitAsync(ct);
-            bool orphanRunning;
-            lock (_gate) orphanRunning = _orphanPair is { IsCompleted: false };
-            if (!orphanRunning) break;
-            _opLock.Release();
-        }
+        await _opLock.WaitAsync(ct);
         try
         {
+            // An orphaned ceremony is still running: fail fast as OperationInProgress (the engine
+            // soft-retries in ~3 s without spending an attempt). Waiting inside this call instead
+            // ate the caller's timeout — on hardware a retry waited 19 s for the orphan and then
+            // had only 13 s left to pair.
+            string? orphanInfo = null;
+            lock (_gate)
+            {
+                if (_orphanPair is { IsCompleted: false })
+                    orphanInfo = $"{_orphanAddress}, started {(DateTime.UtcNow - _orphanSince).TotalSeconds:0} s ago";
+            }
+            if (orphanInfo is not null)
+            {
+                Log.Info("bt", $"pair {address}: a previous pairing is still running in Windows ({orphanInfo}); not starting another");
+                throw new BluetoothException(BluetoothFailureKind.OperationInProgress,
+                    $"a previous pairing is still running in Windows ({orphanInfo})", "orphaned PairAsync");
+            }
+
             // A release requested after this pair was (e.g. the source left while we queued for
             // the radio) wins: pairing now would bond the device to this PC after the handoff.
             if (ReleaseRequestedSince(digits, mySeq))
@@ -217,7 +228,7 @@ public sealed class WinRtBluetooth : IBluetoothController
                     // Still running inside Windows. Hand it to a watcher (keep the handler: the
                     // device may still ask) and make the next pair wait for it.
                     handedOff = true;
-                    lock (_gate) { _orphanPair = task; _orphanAddress = address; }
+                    lock (_gate) { _orphanPair = task; _orphanAddress = address; _orphanSince = DateTime.UtcNow - sw.Elapsed; }
                     _ = WatchOrphanAsync(task, address, dev, custom, handler, sw);
                     var why = Volatile.Read(ref requested) == 1
                         ? "the device started pairing but did not finish"
@@ -320,26 +331,6 @@ public sealed class WinRtBluetooth : IBluetoothController
         }
     }
 
-    /// Called WITHOUT _opLock: a new pair must not start while an orphaned ceremony is still
-    /// running (Windows would answer OperationAlreadyInProgress). Waits up to the caller's timeout.
-    private async Task WaitForOrphanAsync(CancellationToken ct)
-    {
-        Task? orphan;
-        string? orphanAddress;
-        lock (_gate) { orphan = _orphanPair; orphanAddress = _orphanAddress; }
-        if (orphan is null || orphan.IsCompleted) return;
-
-        var sw = Stopwatch.StartNew();
-        Log.Info("bt", $"waiting for the background pairing of {orphanAddress} to finish before pairing again");
-        if (!await CompletesWithinAsync(orphan, ct))
-        {
-            throw new BluetoothException(BluetoothFailureKind.OperationInProgress,
-                $"a previous pairing of {orphanAddress} is still running in Windows (waited {sw.Elapsed.TotalSeconds:0} s)",
-                "orphaned PairAsync");
-        }
-        Log.Info("bt", $"background pairing of {orphanAddress} finished after waiting {sw.ElapsedMilliseconds} ms");
-    }
-
     public async Task UnpairAsync(string address, CancellationToken ct = default)
     {
         ParseAddress(address);   // validate before touching state
@@ -367,11 +358,13 @@ public sealed class WinRtBluetooth : IBluetoothController
         // the Windows side - this also tears down the active ACL link (LMP detach), so the
         // trackpad actually lets go and the other host (Mac) can take it. WinRT unpair alone was
         // leaving the device attached on the radio.
+        // Synchronous and slow (~3.4 s on hardware: it waits for the link teardown). Run it off
+        // the calling thread — the engine calls from the UI thread, which would freeze the tray
+        // and keep the engine's per-call timeout from firing.
         uint? rc = null;
         try
         {
-            var a = addr;
-            rc = BluetoothRemoveDevice(ref a);
+            rc = await Task.Run(() => RemoveDevice(addr), ct);
         }
         catch (Exception ex)
         {
@@ -784,4 +777,10 @@ public sealed class WinRtBluetooth : IBluetoothController
     // Returns ERROR_SUCCESS (0) on success.
     [DllImport("bthprops.cpl", SetLastError = true)]
     private static extern uint BluetoothRemoveDevice(ref ulong pAddress);
+
+    private static uint RemoveDevice(ulong address)
+    {
+        var a = address;
+        return BluetoothRemoveDevice(ref a);
+    }
 }

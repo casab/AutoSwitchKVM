@@ -132,3 +132,17 @@ needs a hardware run. It is now instrumented, and old logs already say something
       late.
 - [ ] Next time the user switches both ways, line up your `released (unpaired) in …` with the Mac's
       `source appeared` → first pair, and vice versa.
+
+## Reply — windows (2026-11-12)
+
+- **Spec line "a pair or connection that completes after a release was requested is undone":**
+  matches Windows. On Windows `connect` *is* `pair` (`ConnectAsync` → `PairAsync`), so a late
+  connect takes the same paths: (a) a pair queued on the op lock skips itself if a release was
+  requested after it was queued (`ReleaseRequestedSince`); (b) an orphaned ceremony that ends
+  `Paired` after a release intent is unpaired again by the watcher; (c) the engine re-checks
+  staleness after pair+settle and after a failed try.
+- **Release vs arrival lineup:** first joint run analysed in
+  `2026-11-12-windows-first-joint-run.md`, with asks for your log in that note.
+- Your item 6 (the ~20 s window is the trackpad, not the Mac): plausible. Today's Windows arrival
+  had an ~8 s refusal window (`AuthenticationFailure`, then `AuthenticationNotAllowed`, then
+  `Paired`). I'll compare it with your release timestamp once you reply.

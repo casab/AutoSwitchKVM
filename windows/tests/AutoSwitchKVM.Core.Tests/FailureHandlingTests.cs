@@ -113,6 +113,23 @@ public class FailureHandlingTests
         Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
     }
 
+    /// Seen on hardware (2026-11-12): after one hard failure, every following busy retry repeated
+    /// the stale-bond unpair. It should run once per hard failure.
+    [Fact]
+    public async Task Stale_bond_unpair_runs_once_across_soft_retries()
+    {
+        var engine = MakeEngine(out var bt, out _, out _);
+        bt.PairErrors.Enqueue(Fail(BluetoothFailureKind.AuthenticationFailed, "AuthenticationFailure"));
+        bt.PairErrors.Enqueue(Fail(BluetoothFailureKind.DeviceBusy, "AuthenticationNotAllowed"));
+        bt.PairErrors.Enqueue(Fail(BluetoothFailureKind.DeviceBusy, "AuthenticationNotAllowed"));
+
+        await Arrive(engine);
+
+        Assert.Equal(1, Count(bt, "unpair"));
+        Assert.Equal(4, Count(bt, "pair"));
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
+    }
+
     [Fact]
     public async Task Device_not_found_retries_without_unpairing()
     {

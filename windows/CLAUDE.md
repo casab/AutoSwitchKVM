@@ -213,9 +213,14 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
 - **WinRT pairing ignores cancellation.** Cancelling `Custom.PairAsync` (incl. via `AsTask(ct)`)
   does not stop the ceremony; it runs inside Windows until its own ~45-60 s timeout. Releasing the
   op lock on our timeout made every retry fail instantly with `OperationAlreadyInProgress` (64 in
-  one day's log). `WinRtBluetooth` now keeps a timed-out ceremony as an *orphan*: the next pair
-  waits for it (without holding the lock, so a release isn't blocked), and a watcher logs its
-  outcome and unpairs again if it completes `Paired` after a release was requested.
+  one day's log). `WinRtBluetooth` now keeps a timed-out ceremony as an *orphan*. While it runs,
+  a new pair fails fast with `OperationInProgress`, and the engine soft-retries every ~3 s.
+  (Waiting inside the call ate the caller's timeout: a retry waited 19 s and had 13 s left to
+  pair.) A watcher logs the orphan's outcome and unpairs again if it completes `Paired` after a
+  release was requested. On hardware an orphan ends ~50-55 s after it started, as `Canceled`.
+- **`BluetoothRemoveDevice` is synchronous and slow (~3.4 s)** because it waits for the link
+  teardown. It runs via `Task.Run`; called inline from the engine it froze the UI thread and kept
+  the engine's timeout from firing.
 - **Classify Bluetooth failures** (`BluetoothException.Kind`, mapped from `DevicePairingResultStatus`
   in `WinRtBluetooth.KindFor`). `AuthenticationNotAllowed` right after a KVM switch means the Mac
   still holds the trackpad: the engine soft-retries it every ~3 s without spending
