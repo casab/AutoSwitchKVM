@@ -83,6 +83,16 @@ final class SelectionEngine: ObservableObject {
     var releaseRetryDelayMs = 1000
     /// Settle time after dropping the transient post-pair connection.
     var postPairSettleMs = 800
+    /// Settle between a stale-bond unpair and the re-pair: the system finishes an unpair up to
+    /// ~2.6 s after `-remove` returns, and a pair started earlier failed (HCI 0x02) on hardware.
+    var postUnpairSettleMs = 2000
+    /// How long a connected link may take to bring up HID before the try counts as failed (on
+    /// hardware HID came up ~0.5 s after the link; a dead link never did).
+    var hidReadyTimeoutMs = 5000
+    var hidPollIntervalMs = 250
+    /// This many "link up but no HID" failures in one connect run end it early: on hardware the
+    /// trackpad stayed wedged (until power-cycled) and more retries only churned it.
+    var maxHidFailures = 2
     /// Every engine delay goes through here (connect delay, settle, backoff, soft retry,
     /// auto-reconnect delay) so tests can run retry paths instantly.
     var sleepHook: @MainActor (Int) async -> Void = { ms in
@@ -584,6 +594,7 @@ final class SelectionEngine: ObservableObject {
         var tries = 0
         var hardFailures = 0
         var softRetries = 0
+        var hidFailures = 0
         var freshBond = false
         var last: Failure?
 
@@ -604,15 +615,22 @@ final class SelectionEngine: ObservableObject {
             var failure: Failure?
 
             do {
-                if !device.managePairing, await bt.isConnected(addr) {
+                if !device.managePairing, await bt.isConnected(addr), await bt.isHIDReady(addr) != false {
                     Log.engine.log("\(name): already connected")
                     setStatus(device.id, .connected)
                     return
                 }
                 if device.managePairing {
                     if freshBond {
+                        freshBond = false  // once per hard failure, not again on each soft retry
                         Log.engine.log("\(name): try \(tries): removing a possibly stale bond before re-pairing")
                         await bestEffort(device, "stale-bond unpair") { try await self.bt.unpair(addr) }
+                        await sleepHook(postUnpairSettleMs)
+                        if let why = staleReason(run, respectSelection: respectSelection) {
+                            Log.engine.log("\(name): connect aborted after the stale-bond unpair: \(why)")
+                            markAborted(device.id)
+                            return
+                        }
                     }
                     step = "pair"
                     try await self.step(name, tries, "pair") { try await self.bt.pair(addr) }
@@ -651,6 +669,12 @@ final class SelectionEngine: ObservableObject {
                 } else {
                     failure = f
                 }
+            }
+
+            // A link alone is not success: on hardware, a 1 ms openConnection on a bare link
+            // reported "connected" while HID never came up (the link idled out 15 s later).
+            if failure == nil, let hidUp = await waitForHID(device, addr), !hidUp {
+                failure = Failure(BTError.hidNotReady(seconds: Double(hidReadyTimeoutMs) / 1000))
             }
 
             guard let f = failure else {
@@ -696,6 +720,10 @@ final class SelectionEngine: ObservableObject {
             }
 
             if f.kind == .invalidAddress { break }  // retrying can never help
+            if f.kind == .hidNotReady {
+                hidFailures += 1
+                if hidFailures >= max(1, maxHidFailures) { break }  // wedged: more tries only churn it
+            }
             if f.kind == .adapterUnavailable { await refreshPower() }  // loop top stops if it's off
 
             if f.kind.isSoft {
@@ -721,13 +749,40 @@ final class SelectionEngine: ObservableObject {
             await sleepHook(backoffMs)
         }
 
-        let cause = last?.message ?? "unknown error"
+        let wedged = hidFailures >= max(1, maxHidFailures)
+        let cause =
+            wedged
+            ? "it paired but never started its HID connection (\(hidFailures) times); it may be stuck. "
+                + "Power-cycle it (switch it off and on), then try again"
+            : (last?.message ?? "unknown error")
         let triesText = "\(tries) \(tries == 1 ? "try" : "tries")"
         Log.engine.error(
             "\(name): gave up after \(triesText) in \(Elapsed.since(start)) "
                 + "(\(hardFailures) hard, \(softRetries) soft); last error: \(last?.summary ?? cause)")
         setStatus(device.id, .error("gave up after \(triesText): \(cause)"))
         onNotice?("Connection failed", "\(name): gave up after \(triesText) — \(cause)")
+    }
+
+    /// Wait (bounded) until the device's HID connection is up. Returns true/false, or nil when the
+    /// backend can't tell (then the link alone counts, as before).
+    private func waitForHID(_ device: BTDevice, _ addr: String) async -> Bool? {
+        let start = ContinuousClock.now
+        let polls = max(1, hidReadyTimeoutMs / max(1, hidPollIntervalMs))
+        for poll in 0...polls {
+            guard let ready = await bt.isHIDReady(addr) else { return nil }
+            if ready {
+                if poll > 0 { Log.engine.log("\(device.name): HID up after \(Elapsed.since(start))") }
+                return true
+            }
+            if poll == polls { break }
+            if !(await bt.isConnected(addr)) {
+                Log.engine.warn("\(device.name): the link dropped before HID came up (\(Elapsed.since(start)))")
+                return false
+            }
+            await sleepHook(hidPollIntervalMs)
+        }
+        Log.engine.warn("\(device.name): link up but no HID after \(Elapsed.since(start))")
+        return false
     }
 
     /// If a release was requested for this device (or the system is going to sleep) while a stale

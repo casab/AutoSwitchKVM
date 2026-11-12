@@ -332,6 +332,9 @@ struct SettingsDeviceCard: View {
                     Text("0.5 s").tag(500)
                     Text("1 s").tag(1000)
                     Text("2 s").tag(2000)
+                    Text("4 s").tag(4000)
+                    Text("6 s").tag(6000)
+                    Text("8 s").tag(8000)
                 }
                 .labelsHidden().frame(width: 92)
             }

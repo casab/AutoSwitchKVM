@@ -194,6 +194,68 @@ final class FailureHandlingTests: XCTestCase {
         XCTAssertTrue(notice?.body.contains("kIOReturnTimeout") == true, "notice: \(String(describing: notice))")
     }
 
+    // MARK: - HID verification and churn (first joint run, 2026-11-12)
+
+    /// Hardware: openConnection returned OK in 1 ms on a bare link, the app said "connected ✓", and
+    /// the link idled out 15 s later — HID never came up. Re-pairing didn't help either; the loop
+    /// only churned a wedged trackpad. A link without HID is a failure, and repeated ones end the
+    /// run early with a hint instead of exhausting every retry.
+    func testLinkWithoutHIDIsNotSuccessAndEndsTheRunEarly() async {
+        let f = make(managePairing: true, retries: 6)
+        f.bt.hidWorks = false
+
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+
+        guard case .error(let message)? = f.status else {
+            return XCTFail("expected .error, got \(String(describing: f.status))")
+        }
+        XCTAssertTrue(message.lowercased().contains("power-cycle"), message)
+        XCTAssertEqual(count(f, "connect:"), f.engine.maxHidFailures, "should stop early, not after 6 tries")
+        XCTAssertEqual(count(f, "unpair:"), 0, "a link without HID is not a stale bond: no re-pair churn")
+        XCTAssertTrue(notices.contains { $0.title == "Connection failed" })
+    }
+
+    func testBackendWithoutAnHIDCheckTrustsTheLink() async {
+        let f = make(managePairing: false)
+        f.bt.hidUnknown = true
+
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+
+        XCTAssertEqual(f.status, .connected)
+    }
+
+    /// Hardware: `-remove` returns at once but the system finishes the unpair up to ~2.6 s later;
+    /// a pair started right away failed with HCI 0x02 every time.
+    func testStaleBondRepairWaitsForTheUnpairToSettle() async {
+        let f = make(managePairing: true)
+        f.bt.connectErrors = [ioTimeout]
+        var sleepsAfter: [(ms: Int, lastCall: String?)] = []
+        f.engine.sleepHook = { ms in sleepsAfter.append((ms, f.bt.calls.last)) }
+
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+
+        XCTAssertTrue(
+            sleepsAfter.contains { $0.ms == f.engine.postUnpairSettleMs && $0.lastCall == "unpair:\(addr)" },
+            "expected a settle between the stale-bond unpair and the re-pair: \(sleepsAfter)")
+        XCTAssertEqual(f.status, .connected)
+    }
+
+    /// The Windows agent found this in its port: after one hard failure, every *soft* retry
+    /// re-ran the stale-bond unpair. It must run once per hard failure.
+    func testSoftRetriesAfterAHardFailureUnpairOnlyOnce() async {
+        let f = make(managePairing: true)
+        f.bt.connectErrors = [ioTimeout, busy, busy]
+
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+
+        XCTAssertEqual(count(f, "unpair:"), 1, "calls: \(f.bt.calls)")
+        XCTAssertEqual(f.status, .connected)
+    }
+
     // MARK: - Races at the edges
 
     /// The source leaves while the pairing ceremony is still running: the release runs first, then

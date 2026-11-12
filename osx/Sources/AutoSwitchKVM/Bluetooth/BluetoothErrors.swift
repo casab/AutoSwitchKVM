@@ -20,6 +20,11 @@ enum BTFailureKind: String, Sendable {
     case adapterUnavailable
     /// The configured address is malformed: retrying can never succeed.
     case invalidAddress
+    /// The link came up but the device never started its HID service (macOS sees no registered
+    /// HID device for it). Seen on hardware 2026-11-12: the trackpad paired while the other host
+    /// was still releasing it, then never opened HID again until power-cycled. Re-pairing did not
+    /// help, so this is hard but not stale-bond, and repeated occurrences end the run early.
+    case hidNotReady
 
     /// Refusal/busy: retried on a short fixed interval, not counted against `connectRetryMax`.
     var isSoft: Bool { self == .deviceBusy || self == .operationInProgress }
@@ -143,6 +148,8 @@ enum BTError: Error, CustomStringConvertible {
     case timeout(seconds: Int)
     /// A failure whose kind was determined without a raw code (also used by test doubles).
     case classified(BTFailureKind, String)
+    /// The link is up but the device's HID connection never came up within the wait.
+    case hidNotReady(seconds: Double)
 
     var kind: BTFailureKind {
         switch self {
@@ -153,6 +160,7 @@ enum BTError: Error, CustomStringConvertible {
         case .unpairUnavailable, .unpairFailed: return .unknown
         case .timeout: return .timeout
         case .classified(let kind, _): return kind
+        case .hidNotReady: return .hidNotReady
         }
     }
 
@@ -168,6 +176,8 @@ enum BTError: Error, CustomStringConvertible {
         case .unpairFailed(let why): return "unpair failed: \(why)"
         case .timeout(let s): return "no response within \(s) s"
         case .classified(_, let message): return message
+        case .hidNotReady(let s):
+            return String(format: "the link is up but the device never started its HID connection (waited %.1f s)", s)
         }
     }
 }

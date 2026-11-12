@@ -13,6 +13,11 @@ struct PairedDeviceInfo: Identifiable, Hashable {
 @MainActor
 protocol BluetoothController: Sendable {
     func isConnected(_ address: String) async -> Bool
+    /// Whether the device's HID connection is actually up (it is usable as an input device), as
+    /// opposed to a bare baseband link: `isConnected` alone reported a link-only state as
+    /// connected on hardware. `nil` when the backend can't tell (the engine then trusts
+    /// `isConnected`).
+    func isHIDReady(_ address: String) async -> Bool?
     func connect(_ address: String) async throws
     func disconnect(_ address: String) async throws
     func pair(_ address: String) async throws

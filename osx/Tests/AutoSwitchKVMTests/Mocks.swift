@@ -50,6 +50,16 @@ final class MockBluetoothController: BluetoothController {
 
     func isConnected(_ address: String) async -> Bool { connectedAddrs.contains(norm(address)) }
 
+    /// HID model: when `hidWorks`, a connected device has HID up. `hidUnknown` makes the backend
+    /// unable to tell (nil), like a platform without an HID check.
+    var hidWorks = true
+    var hidUnknown = false
+
+    func isHIDReady(_ address: String) async -> Bool? {
+        if hidUnknown { return nil }
+        return hidWorks && connectedAddrs.contains(norm(address))
+    }
+
     func connect(_ address: String) async throws {
         if let hook = beforeConnect { await hook() }
         calls.append("connect:\(norm(address))")

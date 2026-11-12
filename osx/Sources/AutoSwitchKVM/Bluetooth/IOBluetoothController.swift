@@ -67,6 +67,48 @@ final class IOBluetoothController: NSObject, BluetoothController {
         return dev.isConnected()
     }
 
+    /// Addresses whose last HID check found nothing (so the diagnostic is logged once per miss).
+    private var hidMissLogged = Set<String>()
+
+    /// HID is up when bluetoothd has published a *registered* IOHIDDevice for the device:
+    /// `Transport = "Bluetooth"`, `SerialNumber = "3C:50:02:BF:22:45"` (seen on hardware; bluetoothd
+    /// creates it as an `IOHIDUserDevice` when the HID channels open). Registry matching only
+    /// returns registered services. That matters: after failed attempts, macOS leaves
+    /// unregistered `IOHIDUserDevice` leftovers with the same serial, which a raw registry walk
+    /// would mistake for a live device.
+    func isHIDReady(_ address: String) async -> Bool? {
+        let want = Self.normalize(address)
+        let matching = IOServiceMatching("IOHIDDevice") as NSMutableDictionary
+        matching[kIOPropertyMatchKey] = ["Transport": "Bluetooth"]
+        var iterator: io_iterator_t = 0
+        let kr = IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator)
+        guard kr == KERN_SUCCESS else {
+            Log.bluetooth.warn(
+                "HID check for \(address): registry query failed (kern_return \(kr)); not verifying HID")
+            return nil
+        }
+        defer { IOObjectRelease(iterator) }
+        var serials: [String] = []
+        while case let service = IOIteratorNext(iterator), service != 0 {
+            defer { IOObjectRelease(service) }
+            let property = IORegistryEntryCreateCFProperty(
+                service, "SerialNumber" as CFString, kCFAllocatorDefault, 0)
+            guard let serial = property?.takeRetainedValue() as? String else { continue }
+            if Self.normalize(serial) == want {
+                hidMissLogged.remove(want)
+                return true
+            }
+            serials.append(serial)
+        }
+        if !hidMissLogged.contains(want) {
+            hidMissLogged.insert(want)
+            let found = serials.isEmpty ? "none" : serials.joined(separator: ", ")
+            Log.bluetooth.log(
+                "HID check for \(address): no registered HID device yet (registered Bluetooth HID serials: \(found))")
+        }
+        return false
+    }
+
     func connect(_ address: String) async throws {
         let dev = try device(address)
         // Deliberately NO early-return on isConnected(): in the managed (post-pair) flow the
@@ -166,7 +208,23 @@ final class IOBluetoothController: NSObject, BluetoothController {
             Log.bluetooth.error("unpair \(address): the bond is still there after remove (\(Elapsed.format(took)))")
             throw BTError.unpairFailed("still paired after -remove")
         }
-        Log.bluetooth.log("unpair \(address) OK (\(Elapsed.format(took)))")
+        // `-remove` returns at once, but bluetoothd *defers* the unpair: it drops the link
+        // ~1 s later and deletes the link key ~1.5 s after that (seen on hardware 2026-11-12).
+        // Wait for the link to go down, so the release is real when this returns and a following
+        // pair doesn't collide with the unpair still in progress (that failed with HCI 0x02).
+        let start = ContinuousClock.now
+        var waits = 0
+        while dev.isConnected(), waits < 40 {  // ≤ 4 s
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            waits += 1
+        }
+        if dev.isConnected() {
+            Log.bluetooth.warn("unpair \(address): bond removed but the link is still up after \(Elapsed.since(start))")
+        } else {
+            Log.bluetooth.log(
+                "unpair \(address) OK (remove \(Elapsed.format(took)), link down after \(Elapsed.since(start)); "
+                    + "the system finishes deleting the key ~1.5 s later)")
+        }
     }
 
     func pairedDevices() async -> [PairedDeviceInfo] {

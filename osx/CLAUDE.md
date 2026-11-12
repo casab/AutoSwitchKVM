@@ -163,6 +163,27 @@ the new profile but does not force-disconnect the previous profile's devices.
   e.g. 4 = page timeout). On this Mac, the stale-bond case appears as `kIOReturnTimeout` from
   `openConnection`, so `timeout` stays re-pair-eligible. Refusals (HCI 0x0D–0x0F, 0x18) are soft
   and must not unpair.
+- **"Connected" must mean HID is up, not just a link** (`isHIDReady`). On hardware, a 1 ms
+  `openConnection` on a bare link reported success while HID never started; the link idled out
+  15 s later. bluetoothd publishes a working trackpad as a *registered* `IOHIDDevice`
+  (`IOHIDUserDevice`, `Transport = "Bluetooth"`, `SerialNumber = "3C:50:02:BF:22:45"`). Match it
+  with `IOServiceGetMatchingServices`, never a raw registry walk: failed attempts leave
+  *unregistered* `IOHIDUserDevice` leftovers with the same serial. "Link up, no HID" is
+  `hidNotReady`; 2 in one run stop early with a power-cycle hint, because the trackpad was wedged
+  and retries only churned it. The positive case of this check still needs hardware confirmation.
+  If the trackpad never counts as connected again, read the log's "registered Bluetooth HID
+  serials" line.
+- **`-[IOBluetoothDevice remove]` is deferred by bluetoothd.** It returns at once, the link drops
+  ~1 s later, and the key is deleted ~1.5 s after that. `unpair` waits for the link to drop. The
+  engine settles `postUnpairSettleMs` (2 s) before re-pairing, because a pair started straight
+  after an unpair failed with HCI 0x02.
+- **Don't pair before the other host has finished releasing** (~8 s after a switch on Windows
+  today). The trackpad accepted a Mac pairing mid-release, never started HID, and needed a power
+  cycle. Until the LAN release-ack exists, the trackpad's `connectDelayMs` is 6 s (picker now
+  offers 4/6/8 s).
+- **`bluetoothd` is the best evidence for a failed handoff.** `log show --predicate
+  'process == "bluetoothd"'` shows ACL up/down (with `incoming`), pairing results, and
+  `HID connection … status` for each app call; see agent-notes/2026-11-12-windows-first-joint-run.md.
 - **A pair can land after a release.** If the source leaves while a stale run is mid-ceremony,
   the engine undoes a pair/connection that completes after the release, and `unpair` cancels a
   ceremony still in flight for that device. Without this the Mac holds the bond while switched away.

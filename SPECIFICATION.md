@@ -198,7 +198,7 @@ controller** (the operations in §5). It owns no platform APIs directly.
 - The Bluetooth controller may classify a failure: `deviceBusy` (device answered but refused —
   for an exclusive-bond device, the other host still holds it), `operationInProgress` (an earlier
   OS operation is still running), `timeout`, `authenticationFailed` (stale/mismatched key),
-  `deviceNotFound`, `adapterUnavailable`, `invalidAddress`, or `unknown`. Unclassified failures
+  `deviceNotFound`, `adapterUnavailable`, `invalidAddress`, `hidNotReady`, or `unknown`. Unclassified failures
   are `unknown`, which gets exactly the generic behavior above — so a backend that doesn't
   classify (currently macOS) behaves as before.
 - **Soft** failures (`deviceBusy`, `operationInProgress`) retry on a short fixed interval (~3 s),
@@ -209,6 +209,18 @@ controller** (the operations in §5). It owns no platform APIs directly.
   only after a hard failure that may mean a stale bond (`authenticationFailed`, `timeout`,
   `unknown`) — not after a refusal or a missing device.
 - `invalidAddress` gives up immediately; `adapterUnavailable` refreshes adapter power first.
+- **`hidNotReady`** (macOS implemented; Windows: consider the `BTHENUM` HID node as the signal): the
+  link came up but the device never started HID. It is hard, does **not** trigger the stale-bond
+  re-pair, and **2 of them end the connect run early** with a "power-cycle the device" message.
+  Seen on hardware 2026-11-12: a 1 ms `openConnection` on a bare link was reported as connected and
+  idled out 15 s later. The trackpad, paired while the other host was still releasing it, never
+  started HID again until power-cycled; the 3 minutes of re-pair churn that followed only made
+  things worse.
+- **Success means the device is usable, not just linked:** after the connect call, wait (bounded,
+  ~5 s) for the HID connection; a platform that can't tell falls back to the link check.
+- After a stale-bond unpair, **settle before re-pairing** (~2 s). macOS finishes an unpair up to
+  ~2.6 s after the call returns; a pair started right away failed. The stale-bond re-pair runs
+  **once per hard failure**, not again on each soft retry.
 - Re-check staleness after the pair step and after a failed try (a release may have started).
 - **A pair or connection that completes after a release was requested is undone** (unpair /
   disconnect again). A stale run can be mid-ceremony when the source leaves; if its pair lands
@@ -267,6 +279,14 @@ natively:
 | `isPoweredOn() → Bool?` | Adapter power state (nil if unknown) |
 | `pairedDevices() → [..]` | Known/paired devices for the "add device" picker |
 | monitoring | Notify the engine of connect/disconnect transitions for given addresses |
+
+**Handoff timing (hardware, 2026-11-12).** (1) After a host releases the trackpad, the trackpad
+keeps trying to reconnect to that host for several seconds before it accepts a new pairing (the Mac
+saw it connect in at the same instant Windows was refused). (2) **The arriving host must not pair
+before the leaving host's release has finished.** Windows needs ~8 s from the switch (detect +3.2 s,
+debounce 1.2 s, `BluetoothRemoveDevice` 3.4 s). When the Mac paired 2.7 s after the switch, pairing
+succeeded but HID never came up and the trackpad wedged. Until a LAN release-ack exists, the arrival
+side waits (macOS: the device's connect delay, now 6 s).
 
 **Important cross-platform discrepancy.** macOS exposes explicit connect/disconnect for a device.
 On Windows, Classic-HID devices (like the Magic Trackpad) effectively **connect on pair and
