@@ -114,10 +114,21 @@ public sealed partial class TrayPanel : Window
         var area = DisplayArea.GetFromPoint(new PointInt32(cursor.X, cursor.Y), DisplayAreaFallback.Primary);
         var work = area.WorkArea;
 
-        var w = (int)Math.Ceiling(PanelWidth * scale);
-        var h = Math.Min((int)Math.Ceiling(contentHeight * scale), work.Height - 2 * (int)(Margin * scale));
         var m = (int)(Margin * scale);
-        AppWindow.MoveAndResize(new RectInt32(work.X + work.Width - w - m, work.Y + work.Height - h - m, w, h));
+        var cw = (int)Math.Ceiling(PanelWidth * scale);
+        var ch = Math.Min((int)Math.Ceiling(contentHeight * scale), work.Height - 2 * m);
+        // Size the client area (the content), not the outer window: the border takes a few pixels,
+        // and sizing the outer frame to the content width clipped the right and bottom edges.
+        AppWindow.ResizeClient(new SizeInt32(cw, ch));
+        // With the title bar hidden, ResizeClient still budgets a caption strip (measured: the client
+        // came out 38 px taller than asked at 125%), leaving empty space under the content. Correct
+        // the outer size by whatever the client area is off by.
+        var dw = AppWindow.ClientSize.Width - cw;
+        var dh = AppWindow.ClientSize.Height - ch;
+        if (dw != 0 || dh != 0)
+            AppWindow.Resize(new SizeInt32(AppWindow.Size.Width - dw, AppWindow.Size.Height - dh));
+        var outer = AppWindow.Size;
+        AppWindow.Move(new PointInt32(work.X + work.Width - outer.Width - m, work.Y + work.Height - outer.Height - m));
     }
 
     private void OnOpenSettings(object sender, RoutedEventArgs e)
