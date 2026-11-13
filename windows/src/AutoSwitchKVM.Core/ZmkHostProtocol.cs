@@ -1,7 +1,7 @@
 namespace AutoSwitchKVM.Core;
 
 /// The AutoSwitch host channel protocol (v1) spoken by the AutoSwitch ZMK module
-/// (firmware/zmk-autoswitch; SPECIFICATION.md §5a type 5). It runs over the keyboard's raw HID
+/// (github.com/casab/zmk-autoswitch; SPECIFICATION.md §5a type 5). It runs over the keyboard's raw HID
 /// interface (zzeneg/zmk-raw-hid: usage page 0xFF60, usage 0x61, 32-byte reports, no report ID).
 ///
 ///   byte 0..1  'A' 'S'   magic      byte 2  version (1)      byte 3  command (reply: | 0x80)

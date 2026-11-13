@@ -213,7 +213,7 @@ Working set with Settings open: ~160 MB. ARM64 Setup.exe: 94.2 to 83.4 MB.
 ## ZMK keyboards: the AutoSwitch firmware module
 
 Built 2026-11-13; compiles in CI, **not yet tried on a keyboard**. ZMK keyboards (spec §5a type 2)
-pick their profile themselves and have no host-side switch, so `firmware/zmk-autoswitch` adds one:
+pick their profile themselves and have no host-side switch, so a ZMK module adds one ([casab/zmk-autoswitch](https://github.com/casab/zmk-autoswitch), MIT):
 a ZMK module over zzeneg/zmk-raw-hid (vendor HID 0xFF60/0x61, Bluetooth and USB) speaking the
 AutoSwitch protocol v1 (spec §5a): GET_INFO (profiles, active, paired bitmask, marks), SELECT,
 SET_MARK. It makes the keyboard type 5, and the engine path is the Logitech one.
@@ -223,8 +223,7 @@ SET_MARK. It makes the keyboard type 5, and the engine path is the Logitech one.
   unpaired profile). Tests: `ZmkHostProtocolTests`.
 - App: `Platform/ZmkHostSwitcher.cs` (any vendor; 33-byte reports with report ID 0; endpoint
   matched to the address like the Logitech one). Settings calls them profiles and flags empty ones.
-- Firmware: `firmware/zmk-autoswitch` (+ `zephyr/module.yml` at the repo root, so a zmk-config
-  pulls this repository as a west project). `ci/build.sh` + `.github/workflows/firmware.yml`
+- Firmware: its own repository (moved out of `firmware/` 2026-11-13). Its `ci/build.sh` and CI
   build a nice!nano Reviung41 with the module.
 - **To test on hardware:** flash, re-pair on both computers (new HID service), check that Add
   device shows "Switches channel on request", then switch the KVM both ways. macOS needs the same

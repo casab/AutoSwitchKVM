@@ -5,7 +5,7 @@ using Xunit;
 
 namespace AutoSwitchKVM.Core.Tests;
 
-/// The AutoSwitch ZMK host channel protocol (firmware/zmk-autoswitch, protocol v1), the composite
+/// The AutoSwitch ZMK host channel protocol (github.com/casab/zmk-autoswitch, protocol v1), the composite
 /// switcher, and the engine's "never to an unpaired profile" rule.
 public class ZmkHostProtocolTests
 {

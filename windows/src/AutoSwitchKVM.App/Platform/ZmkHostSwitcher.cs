@@ -5,7 +5,7 @@ using HidSharp;
 namespace AutoSwitchKVM.App.Platform;
 
 /// IHostSwitcher for ZMK keyboards running the AutoSwitch firmware module
-/// (firmware/zmk-autoswitch; protocol in Core/ZmkHostProtocol.cs; SPECIFICATION.md §5a type 5).
+/// (github.com/casab/zmk-autoswitch; protocol in Core/ZmkHostProtocol.cs; SPECIFICATION.md §5a type 5).
 /// The keyboard's "channels" are its Bluetooth profiles (BT_SEL 0..n).
 ///
 /// Endpoint: the raw HID collection added by zzeneg/zmk-raw-hid (usage page 0xFF60, usage 0x61),

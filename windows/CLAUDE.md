@@ -381,13 +381,13 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   feature index 7, v1, 3 channels; a direct Bluetooth K380 answers any device index (use 0xFF).
   Reference: `reference_flow/` (gitignored; offline Logitech Flow simulator + HID++ docs).
 - **ZMK keyboards switch through the AutoSwitch firmware module** (spec §5a type 5, 2026-11-13,
-  not yet tried on hardware). `Platform/ZmkHostSwitcher.cs` talks to `firmware/zmk-autoswitch`
+  not yet tried on hardware). `Platform/ZmkHostSwitcher.cs` talks to the firmware module (casab/zmk-autoswitch)
   over the raw HID collection (usage page 0xFF60, usage 0x61, any vendor; reports are 32 bytes
   with no report ID, so HidSharp writes 33 bytes with byte 0 = 0 and reads strip it). Protocol:
   `Core/ZmkHostProtocol.cs`. The engine gets `CompositeHostSwitcher(Logitech, Zmk)`; channel names
   (0x1815) are Logitech-only, so `GetChannelNamesAsync` still goes to `LogitechHostSwitcher`. The
   module reports which profiles are paired (`HostChannels.Paired`), and the engine refuses an
-  unpaired target. Firmware build: `firmware/zmk-autoswitch/ci/build.sh` in Docker (see its README).
+  unpaired target. Firmware build: `ci/build.sh` in that repo, in Docker (see its README).
 - **Buttons inside a `SettingsExpander`'s `Items` don't inherit the row's `DataContext`** (the
   toolkit hosts them in its own repeater). Pass the item explicitly (`Tag="{x:Bind}"`) instead of
   reading `DataContext` in a click handler: Devices ▸ Remove silently did nothing because of this.

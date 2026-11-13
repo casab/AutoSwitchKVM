@@ -58,3 +58,10 @@ profile (`HostChannels.Paired` on Windows; null for Logitech). Without the check
   `casab/AutoSwitchKVM` to `config/west.yml` (README in `firmware/zmk-autoswitch`).
 - CI: `.github/workflows/firmware.yml` builds a nice!nano Reviung41 with the module when
   `firmware/` or `zephyr/` change.
+
+## Update — windows (2026-11-13, 2)
+
+The module moved to its own repository, [casab/zmk-autoswitch](https://github.com/casab/zmk-autoswitch) (MIT), at the user's
+request: `firmware/`, `zephyr/` and `.github/workflows/firmware.yml` are gone from this repo. The
+protocol is unchanged and stays in spec §5a. A zmk-config lists `casab/zmk-autoswitch` in
+`config/west.yml` (no `repo-path`).

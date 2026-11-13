@@ -423,7 +423,7 @@ host, offset, up to 14 name bytes. Verified on the K380 (feature index 8, v0, na
 channels; a stale pairing keeps its old name). Shown in the channel choice ("Channel 2 · name");
 read for Settings only, never on the release path.
 
-**ZMK keyboards: the AutoSwitch firmware module** (`firmware/zmk-autoswitch`; Windows
+**ZMK keyboards: the AutoSwitch firmware module** ([casab/zmk-autoswitch](https://github.com/casab/zmk-autoswitch); Windows
 implemented 2026-11-13, macOS pending; not yet tried on hardware). ZMK has no host-side way to
 change the Bluetooth profile, so the module adds one. Channels are the keyboard's Bluetooth
 profiles (`BT_SEL 0..n`). Transport: the raw HID collection of
