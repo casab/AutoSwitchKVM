@@ -3,9 +3,9 @@
 export default {
   name: "AutoSwitch KVM",
   url: "https://autoswitchkvm.com",
-  tagline: "Your Bluetooth trackpad follows your KVM switch.",
+  tagline: "Your Bluetooth keyboard, mouse and trackpad follow your KVM switch.",
   description:
-    "AutoSwitch KVM moves your Bluetooth trackpad, keyboard and mouse to whichever computer your KVM switch picks. Free for macOS and Windows.",
+    "AutoSwitch KVM moves your Bluetooth keyboard, mouse and trackpad to whichever computer your KVM switch picks: Apple Magic accessories, Logitech Easy-Switch devices and more. Free for macOS and Windows.",
   github: "https://github.com/casab/AutoSwitchKVM",
   releases: "https://github.com/casab/AutoSwitchKVM/releases",
   issues: "https://github.com/casab/AutoSwitchKVM/issues",

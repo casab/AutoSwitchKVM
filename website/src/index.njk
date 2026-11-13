@@ -6,10 +6,11 @@ layout: base.njk
   <div class="wrap hero__inner">
     <div class="hero__copy">
       <p class="eyebrow">For one desk, two computers, and a KVM switch</p>
-      <h1><span class="nowrap">Press the KVM button.</span><br><span class="hl nowrap">Your trackpad follows.</span></h1>
+      <h1><span class="nowrap">Press the KVM button.</span><br><span class="hl nowrap">Your devices follow.</span></h1>
       <p class="lead">
-        AutoSwitch KVM moves your Bluetooth trackpad, keyboard and mouse to whichever computer your
-        KVM switch picks. No Bluetooth settings. No re-pairing. You just switch.
+        AutoSwitch KVM moves your Bluetooth keyboard, mouse and trackpad to whichever computer your
+        KVM switch picks. Apple Magic accessories, Logitech Easy-Switch keyboards and mice, and more.
+        No Bluetooth settings. No re-pairing. No channel keys. You just switch.
       </p>
       <div class="cta" data-downloads>
         <a class="btn btn--primary" data-os="mac" href="{{ site.download.mac }}">
@@ -115,6 +116,40 @@ layout: base.njk
   </div>
 </section>
 
+{# ---------- Works with ---------- #}
+<section class="section works" id="works">
+  <div class="wrap">
+    <p class="eyebrow">Works with</p>
+    <h2>Two kinds of devices, switched two ways</h2>
+    <ul class="works__list">
+      <li class="works__item">
+        <h3>Apple Magic Trackpad, Keyboard &amp; Mouse</h3>
+        <p>
+          They only pair with one computer at a time. AutoSwitch removes the pairing on the computer
+          you leave and pairs again on the one you arrive at, in a few seconds.
+        </p>
+        <p class="works__how">Hands off by pairing<br>Mac ✓ · Windows ✓</p>
+      </li>
+      <li class="works__item">
+        <h3>Logitech Easy-Switch keyboards &amp; mice</h3>
+        <p>
+          The K380 and other Easy-Switch devices keep a channel per computer. AutoSwitch tells the
+          device to hop to the other computer's channel, and finds that channel by itself.
+        </p>
+        <p class="works__how">Switches channel on request<br>Mac ✓ · Windows ✓</p>
+      </li>
+      <li class="works__item works__item--other">
+        <h3>Everything else</h3>
+        <p>
+          ZMK keyboards, game controllers, headphones: AutoSwitch tells you what's possible for each
+          one, shows its status, and points you to the easy fixes (like a USB adapter on the KVM).
+        </p>
+        <p class="works__how"><a href="/devices/">See the device guide →</a></p>
+      </li>
+    </ul>
+  </div>
+</section>
+
 {# ---------- The problem ---------- #}
 <section class="section section--tint" id="problem">
   <div class="wrap">
@@ -122,14 +157,15 @@ layout: base.njk
     <h2>The Bluetooth shuffle</h2>
     <p class="section__lead">
       A KVM switch shares your monitor, keyboard and mouse between two computers. Plugged-in things
-      switch along. Bluetooth things <em>don't</em>. And some of them, like Apple's Magic Trackpad,
-      can only be paired with one computer at a time. So every switch goes like this:
+      switch along. Bluetooth things <em>don't</em>. Some only pair with one computer at a time (hello,
+      Magic Trackpad); others want you to press a channel key on every single device. So every
+      switch goes something like this:
     </p>
     <ol class="shuffle">
       <li>
         <span class="shuffle__num">1</span>
         <h3>Open Bluetooth settings</h3>
-        <p>On the computer you're leaving. Find the trackpad in the list.</p>
+        <p>On the computer you're leaving. Find your trackpad, keyboard or mouse in the list.</p>
       </li>
       <li>
         <span class="shuffle__num">2</span>
@@ -173,7 +209,7 @@ layout: base.njk
       <li>
         <span class="steps__badge">3</span>
         <h3>Pick your devices</h3>
-        <p>Trackpad, keyboard, mouse. AutoSwitch tells you which ones it can switch, and you choose the order.</p>
+        <p>Keyboard, mouse, trackpad. AutoSwitch tells you which ones it can switch, and you choose the order.</p>
       </li>
     </ol>
 
@@ -209,12 +245,12 @@ layout: base.njk
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 18h14M7 14h10M9 10h6M11 6h2"/></svg>
         <h3>Brings the whole gang</h3>
-        <p>Trackpad, keyboard, mouse: several devices at once, in your order. It tells you which ones <a href="/devices/">can switch</a>.</p>
+        <p>Keyboard, mouse, trackpad: several devices at once, in your order, with profiles like "Desk" and "Travel".</p>
       </li>
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
-        <h3>Profiles</h3>
-        <p>"Desk", "Travel", "Couch": keep separate setups and flip between them.</p>
+        <h3>Speaks Easy-Switch</h3>
+        <p>Logitech keyboards and mice change channel when AutoSwitch asks. It even reads which computer is on which channel.</p>
       </li>
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
@@ -334,7 +370,7 @@ layout: base.njk
 <section class="finale">
   <div class="wrap finale__inner">
     <h2>Go on. Switch something.</h2>
-    <p>Your trackpad is ready to follow you around.</p>
+    <p>Your keyboard, mouse and trackpad are ready to follow you around.</p>
     <a class="btn btn--primary btn--big" href="#download">Get AutoSwitch KVM</a>
   </div>
 </section>

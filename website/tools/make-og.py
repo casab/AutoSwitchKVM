@@ -25,7 +25,7 @@ d.text((222, 112), 'AutoSwitch KVM', font=ImageFont.truetype(BOLD, 52), fill=(43
 title = ImageFont.truetype(BOLD, 84)
 d.text((80, 262), 'Press the KVM button.', font=title, fill=(43, 37, 64))
 y2 = 362
-line2 = 'Your trackpad follows.'
+line2 = 'Your devices follow.'
 w2 = d.textlength(line2, font=title)
 d.rectangle([76, y2 + 58, 84 + w2, y2 + 92], fill=(255, 207, 74))
 d.text((80, y2), line2, font=title, fill=(43, 37, 64))

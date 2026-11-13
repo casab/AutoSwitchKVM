@@ -1,13 +1,20 @@
 # AutoSwitch KVM
 
-**Your Bluetooth trackpad and keyboard follow your KVM switch.**
+**Your Bluetooth keyboard, mouse and trackpad follow your KVM switch.**
 
 Press the button on your KVM and the other computer gets your monitor, your USB devices *and*
-your Bluetooth trackpad, keyboard or mouse. No trip to Bluetooth settings, no re-pairing by hand.
+your Bluetooth keyboard, mouse or trackpad. No trip to Bluetooth settings, no re-pairing by hand,
+no channel keys to press.
 
 AutoSwitch KVM is a small app that runs in the background on each of your computers (a menu bar
 app on macOS, a tray app on Windows). It notices when the KVM switches to or away from that
-computer and moves your Bluetooth devices along with it.
+computer and moves your Bluetooth devices along with it:
+
+- **Apple Magic Trackpad, Keyboard and Mouse:** it hands the pairing over to the other computer.
+- **Logitech Easy-Switch keyboards and mice** (e.g. K380): it tells the device to switch to the
+  other computer's channel.
+- **Everything else:** it tells you what's possible for the device and shows its status (see
+  [which devices can follow the KVM](#which-bluetooth-devices-can-follow-the-kvm)).
 
 <p align="center">
   <img src="osx/docs/images/menu-bar-panel.png" alt="AutoSwitch KVM menu bar panel on macOS" height="340">
@@ -22,23 +29,27 @@ A KVM switch shares one desk (monitor, keyboard, mouse) between two computers. T
 wired and USB devices, because they're plugged into the KVM. **Bluetooth devices aren't**: they
 stay connected to whichever computer they last paired with.
 
-That's worse for devices like Apple's **Magic Trackpad**, which can only be paired with one
-computer at a time. Getting it from your Mac to your PC normally means:
+So every switch means some manual work, depending on the device:
 
-1. On the Mac: open Bluetooth settings and remove the trackpad.
-2. On the PC: open Bluetooth settings, search, pair.
-3. Switch back later? Do it all again, in the other direction.
+- **One-computer devices** like Apple's **Magic Trackpad** can only be paired with one computer
+  at a time. Moving one means removing it in the first computer's Bluetooth settings, then
+  searching and pairing on the other. Switch back later? All again, the other way.
+- **Multi-channel devices** like Logitech's **Easy-Switch** keyboards and mice remember a
+  channel per computer, but you press the channel key on every device, every time you switch.
 
-AutoSwitch KVM does those steps for you every time the KVM switches.
+AutoSwitch KVM does that work for you every time the KVM switches.
 
 ## What you get
 
 - **Hands-off switching.** Devices connect when your computer is selected and are released when
   it isn't. Nothing to click.
-- **Works with one-host-only devices.** It can unpair on the way out and pair on the way in, so
-  the Magic Trackpad (and devices like it) hand over cleanly.
-- **Several devices.** Trackpad, keyboard, mouse, headphones: choose which follow the KVM and in
-  what order.
+- **Works with one-computer devices.** It unpairs on the way out and pairs on the way in, so the
+  Magic Trackpad, Keyboard and Mouse hand over cleanly.
+- **Speaks Logitech Easy-Switch.** It tells the device to change channel, finds the other
+  computer's channel by itself, and shows which computer is on which channel.
+- **Knows your devices.** Settings shows how each device handles a second computer and whether
+  AutoSwitch can switch it, and suggests the fix when it can't.
+- **Several devices.** Keyboard, mouse, trackpad: choose which follow the KVM and in what order.
 - **Easy setup.** Switch the KVM once and the app learns which USB device tells it which computer
   is selected.
 - **Profiles.** Keep separate setups, for example "Desk" and "Travel", and switch between them.
@@ -59,7 +70,7 @@ warning:
 
 - **macOS:** after the first open is blocked, go to **System Settings ▸ Privacy & Security** and
   click **Open Anyway**. Then allow Bluetooth when the app asks; it can't move your devices
-  without it.
+  without it. For a Logitech Easy-Switch device it also asks once for **Input Monitoring**.
 - **Windows:** on the SmartScreen prompt, click **More info ▸ Run anyway**.
 
 ## Getting started
@@ -68,8 +79,9 @@ warning:
    the KVM switches away from it, so the other computer can pick them up.
 2. **Teach it your KVM.** In Settings, choose *Learn* for the KVM source, then switch the KVM to
    the other computer and back. The app spots the USB device that comes and goes with the switch.
-3. **Add your Bluetooth devices.** For a Magic Trackpad (or anything that only pairs with one
-   computer at a time), turn on **Manage pairing**.
+3. **Add your Bluetooth devices.** AutoSwitch shows how each one switches and sets **Manage
+   pairing** to match: on for a Magic Trackpad (or anything that only pairs with one computer at
+   a time), off for a Logitech Easy-Switch device, which changes channel instead.
 4. **Switch the KVM.** Your devices follow, usually within a few seconds.
 
 Platform guides with more detail: [Windows](windows/README.md) · [macOS](osx/README.md).
@@ -100,8 +112,9 @@ More detail: [autoswitchkvm.com/devices](https://autoswitchkvm.com/devices/).
 
 ## Good to know
 
-- **Which devices work?** Devices that hand off by pairing, like the Apple Magic Trackpad (the
-  hardest case, and the one AutoSwitch is built and tested with). See the table above for the rest.
+- **Which devices work?** Apple Magic accessories (they hand off by pairing) and Logitech
+  Easy-Switch keyboards and mice (they switch channel), on both platforms. The table above covers
+  the rest, and Settings tells you for each device.
 - **Which KVMs work?** Any KVM that switches USB between the computers. Most do, because that's
   how they share your keyboard and mouse.
 - **Why a few seconds?** The computer the KVM switched to has to wait until the other one lets go

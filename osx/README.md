@@ -1,6 +1,6 @@
 # AutoSwitch KVM for macOS
 
-**Your Bluetooth trackpad and keyboard follow your KVM switch to this Mac, and leave with it.**
+**Your Bluetooth keyboard, mouse and trackpad follow your KVM switch to this Mac, and leave with it.**
 
 AutoSwitch KVM lives in the menu bar. When your KVM switches to this Mac it connects your Bluetooth
 devices, pairing them first if needed. When the KVM switches away it releases them, so your other
@@ -11,8 +11,8 @@ the same on your PC. See the [project overview](../README.md) for the bigger pic
   <img src="docs/images/menu-bar-panel.png" alt="Menu bar panel: KVM status, each device with its state and switch, Connect all / Disconnect all" width="300">
 </p>
 
-> **Status: stable.** Used every day to move an Apple Magic Trackpad between a Mac and a Windows
-> PC. Bug reports and ideas are welcome on
+> **Status: stable.** Used every day to move an Apple Magic Trackpad and a Logitech K380 between a
+> Mac and a Windows PC. Bug reports and ideas are welcome on
 > [GitHub Issues](https://github.com/casab/AutoSwitchKVM/issues).
 
 ## Install
@@ -69,7 +69,7 @@ switched by a computer. Each device's card in Settings ▸ Devices names its typ
 | **Switches channel on request** | Easy-Switch channels that the connected computer can change. | Logitech K380 and other Easy-Switch devices | **Yes**, with Manage pairing off (needs Input Monitoring). |
 | **Joins whichever computer connects** | Remembers several computers and goes to the one that asks. | Many headphones and speakers | **Yes**, with Manage pairing off: disconnect on leaving, connect on arriving. |
 | **Picks the computer itself** | A pairing per computer; a key on the device picks one. | ZMK/QMK keyboards | **No.** Use the device's own key, or USB through the KVM. AutoSwitch shows its status. |
-| **Re-pairs by hand** | Remembers one computer; moving it needs pairing mode. | Xbox, PlayStation, Nintendo controllers | **No.** Keep it on one computer, or use a cable through the KVM. |
+| **Re-pairs by hand** | Remembers one computer; moving it needs pairing mode. | Xbox, PlayStation, Nintendo controllers | **No.** Keep it on one computer, use a cable through the KVM, or pair it to a Bluetooth-to-USB adapter (e.g. 8BitDo USB Wireless Adapter 2) plugged into the KVM. |
 
 The type comes from the device's vendor and kind as macOS reports them, so it's marked *likely*
 when it's a good guess rather than a known model. For a device AutoSwitch isn't sure about, test
