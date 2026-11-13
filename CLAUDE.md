@@ -23,6 +23,10 @@ This is a **monorepo organized by platform**:
   platform implements so far are marked (e.g. "Windows implemented; macOS pending").
 - `testdata/config-golden.json` — shared config fixture; both test suites read it, so a key
   rename on either side fails CI.
+- `CHANGELOG.md` — user-facing changes per release, fed into the GitHub release notes. **When you
+  commit something users would notice, add a line under `## Unreleased`** (Both / macOS /
+  Windows). The agent cutting a release renames it to `## vX.Y.Z (date)` before tagging; the
+  rules are at the top of the file.
 - `agent-notes/` — **cross-agent handoff** (see below).
 - `website/` — autoswitchkvm.com (Eleventy, Cloudflare Workers static assets; see `website/README.md`). Shared by
   both platforms: it shows the screenshots from `osx/docs/images/` and `windows/docs/images/`.

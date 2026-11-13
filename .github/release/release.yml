@@ -1,0 +1,257 @@
+# DRAFT (2026-11-13, osx): one release workflow for both platforms, proposed in
+# agent-notes/2026-11-13-osx-single-release-workflow.md. Not active: GitHub only runs workflows
+# in .github/workflows/. To switch over, move this file there and delete windows-release.yml and
+# macos-release.yml in the same commit (otherwise a tag runs both setups). Then try it with a
+# pre-release tag (vX.Y.Z-rc.1) before the next stable release.
+#
+# Push a tag like v0.3.0 to build both apps and publish one GitHub release:
+#
+#   notes            CHANGELOG.md section for the tag (a stable tag without one fails here,
+#                    before anything is built) + .github/release/install-notes.md -> creates the
+#                    release, always as a pre-release first, so no installed app sees it yet.
+#   windows-build    Velopack packages, x64 + arm64 (unchanged from windows-release.yml).
+#   windows-publish  merges the Windows assets into the release.
+#   macos            DMG + Sparkle appcast, attached to the release (unchanged build steps from
+#                    macos-release.yml; no waiting, no body edits).
+#   finalize         restores the body (in case an upload rewrote it) and, for a stable tag,
+#                    turns the pre-release into the latest release. Only now do installed copies
+#                    (Velopack, Sparkle via releases/latest/download/appcast.xml) see the update,
+#                    with both platforms' files in place.
+#
+# A tag with a pre-release suffix stays a GitHub pre-release, which installed apps ignore.
+#
+# Repository secrets (all optional): MACOS_SIGNING_P12 + MACOS_SIGNING_P12_PASSWORD (self-made
+# code-signing certificate; keeps the Mac app's identity, and so its permissions, across updates),
+# SPARKLE_ED_PRIVATE_KEY (without it no appcast, so Macs see no update). See macos-release.yml's
+# old header for details.
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.ref_name }}
+  GH_TOKEN: ${{ github.token }}
+  SPARKLE_VERSION: "2.10.1"
+  SPARKLE_SHA256: "1a856d2a9edb8e628de88121d7be04cf0e2167f8641650b78fca00b14244cf27"
+
+jobs:
+  notes:
+    name: Release notes + create the release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Changelog section for the tag
+        run: |
+          VERSION="${TAG#v}"
+          .github/release/changelog-section.sh "$TAG" > "$RUNNER_TEMP/changes.md"
+          {
+            cat "$RUNNER_TEMP/changes.md"
+            echo ""
+            sed "s/{VERSION}/$VERSION/g" .github/release/install-notes.md
+          } > release-body.md
+          cat release-body.md
+
+      - name: Create the release (as a pre-release until every platform is attached)
+        run: |
+          VERSION="${TAG#v}"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG exists (re-run): updating its notes."
+            gh release edit "$TAG" --notes-file release-body.md
+          else
+            gh release create "$TAG" --verify-tag --prerelease --latest=false \
+              --title "AutoSwitch KVM $VERSION" --notes-file release-body.md
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-body.md
+
+  windows-build:
+    name: Windows build (${{ matrix.arch }})
+    needs: notes
+    runs-on: windows-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: [ x64, arm64 ]
+    defaults:
+      run:
+        working-directory: windows
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Test Core
+        if: matrix.arch == 'x64'
+        run: dotnet test tests/AutoSwitchKVM.Core.Tests/AutoSwitchKVM.Core.Tests.csproj -c Release
+      # TODO (windows): pass the changelog section to `vpk pack --releaseNotes` (release.ps1) so
+      # the in-app "Restart to update" prompt can show what changed.
+      - name: Build release package
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          ./tools/release.ps1 -Version $version -Arch ${{ matrix.arch }} -Download -Token $env:GH_TOKEN `
+            -RepoUrl "${{ github.server_url }}/${{ github.repository }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: windows/releases/${{ matrix.arch }}
+          if-no-files-found: error
+
+  windows-publish:
+    name: Windows assets -> release
+    needs: windows-build
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-x64
+          path: windows/releases/x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-arm64
+          path: windows/releases/arm64
+      - name: Upload to the GitHub release
+        run: |
+          dotnet tool restore
+          $version = $env:TAG.TrimStart('v')
+          $common = @('--repoUrl', "${{ github.server_url }}/${{ github.repository }}", '--token', $env:GH_TOKEN,
+                      '--tag', $env:TAG, '--releaseName', "AutoSwitch KVM $version", '--merge')
+          # The notes job created the release, so both architectures merge into it.
+          # TO VERIFY on an rc tag: --merge into an existing pre-release keeps it a pre-release
+          # and keeps its body (finalize restores the body either way).
+          dotnet vpk upload github -o releases/x64 --channel win @common
+          if ($LASTEXITCODE -ne 0) { throw "x64 upload failed" }
+          dotnet vpk upload github -o releases/arm64 --channel win-arm64 @common
+          if ($LASTEXITCODE -ne 0) { throw "arm64 upload failed" }
+
+  macos:
+    name: macOS build -> release
+    needs: notes
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: osx
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode (Swift 6 toolchain)
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "16.x"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Import the signing certificate
+        env:
+          P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_SIGNING_P12_PASSWORD }}
+        run: |
+          if [ -z "$P12" ]; then
+            echo "No MACOS_SIGNING_P12 secret: ad-hoc signing."
+            echo "SIGN_IDENTITY=-" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/signing.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/signing.p12"
+          # A self-made certificate isn't trusted, so list identities without -v (valid only).
+          IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/\)/ {print $2; exit}')"
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No code-signing identity in MACOS_SIGNING_P12"
+            exit 1
+          fi
+          echo "Signing with $IDENTITY"
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build the DMG
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          OUT_DIR: build/release
+        run: tools/release.sh "$TAG"
+
+      - name: Write the Sparkle appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          if [[ "$TAG" == *-* ]]; then
+            echo "Pre-release: no appcast (installed copies only update to stable releases)."
+            exit 0
+          fi
+          if [ -z "$SPARKLE_ED_PRIVATE_KEY" ]; then
+            echo "::warning::No SPARKLE_ED_PRIVATE_KEY secret: no appcast, so installed copies won't see this update."
+            exit 0
+          fi
+          curl -fsSL -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz"
+          echo "$SPARKLE_SHA256  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+          VERSION="${TAG#v}"
+          SPARKLE_BIN="$RUNNER_TEMP/sparkle/bin" tools/make-appcast.sh "$TAG" \
+            "build/release/AutoSwitchKVM-$VERSION-macos.dmg" "${{ github.run_number }}" build/release/appcast.xml
+
+      - name: Attach the DMG (and appcast) to the release
+        run: |
+          VERSION="${TAG#v}"
+          # Also under a fixed name, for .../releases/latest/download/AutoSwitchKVM-macos.dmg (the
+          # website's Download for Mac). The versioned file is the one the appcast points at.
+          cp "build/release/AutoSwitchKVM-$VERSION-macos.dmg" build/release/AutoSwitchKVM-macos.dmg
+          FILES=("build/release/AutoSwitchKVM-$VERSION-macos.dmg" "build/release/AutoSwitchKVM-$VERSION-macos.dmg.sha256"
+                 "build/release/AutoSwitchKVM-macos.dmg")
+          [ -f build/release/appcast.xml ] && FILES+=("build/release/appcast.xml")
+          gh release upload "$TAG" "${FILES[@]}" --clobber
+
+      - name: Keep the DMG as a run artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: osx/build/release/
+          if-no-files-found: ignore
+
+  finalize:
+    name: Publish (stable tags become the latest release)
+    needs: [ windows-publish, macos ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+      - name: Restore the notes and publish
+        run: |
+          gh release edit "$TAG" --repo "${{ github.repository }}" --notes-file release-body.md
+          if [[ "$TAG" == *-* ]]; then
+            echo "Pre-release tag: stays a pre-release."
+          else
+            gh release edit "$TAG" --repo "${{ github.repository }}" --prerelease=false --latest
+            echo "Published $TAG as the latest release."
+          fi
