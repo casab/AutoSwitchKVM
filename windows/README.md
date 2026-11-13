@@ -57,7 +57,8 @@ is (**How it switches**) and what that means.
 | Kind | Examples | On Windows |
 |---|---|---|
 | **Hands off by pairing** | Apple Magic Trackpad, Magic Keyboard, Magic Mouse | **Switches automatically.** AutoSwitch unpairs it when the KVM leaves and pairs it when the KVM comes back (Manage pairing on). |
-| **Picks the computer itself** | ZMK/QMK wireless keyboards, Logitech Easy-Switch | **Can't switch.** The device's own key picks the computer. Use that key, or a USB cable through the KVM. Leave Manage pairing off: unpairing would make you pair the device again. |
+| **Switches channel on request** | Logitech Easy-Switch keyboards and mice (e.g. K380) | **Switches automatically.** When the KVM leaves, AutoSwitch tells the device to go to the other computer's channel (set **Other computer's channel** in its settings, or leave it on Automatic when AutoSwitch runs on both computers). Its pairings stay. |
+| **Picks the computer itself** | ZMK/QMK wireless keyboards | **Can't switch.** The device's own key picks the computer. Use that key, or a USB cable through the KVM. Leave Manage pairing off: unpairing would make you pair the device again. |
 | **Re-pairs by hand** | Xbox, PlayStation, Nintendo controllers | **Can't switch.** It remembers one computer and moves only in pairing mode. Keep it on one computer, or use a cable through the KVM. |
 | **Joins whichever computer connects** | Many headphones and speakers | **Not yet.** Windows has no way to disconnect a Bluetooth device without unpairing it. The Mac app can switch these. |
 

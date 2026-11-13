@@ -30,6 +30,7 @@ public class GoldenConfigTests
         Assert.Equal("3c-50-02-bf-22-45", device.Address);
         Assert.True(device.ManagePairing);
         Assert.Equal(250, device.ConnectDelayMs);
+        Assert.Null(device.ReleaseToChannel);   // automatic
         Assert.Equal(900, cfg.DebounceMs);
         Assert.Equal(300, cfg.ArrivalDebounceMs);
         Assert.Equal(4, cfg.ConnectRetryMax);

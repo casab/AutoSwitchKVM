@@ -28,11 +28,32 @@ public sealed class DeviceViewModel : ObservableObject
     public string HandoffDescription => _handoff is { } h ? HandoffText.WhatHappens(h.Type) : "Checking this device…";
     public string HandoffGlyph => HandoffText.Glyph(HandoffType);
 
+    // Channel switching (type 5): which channel the device goes to when the KVM leaves this PC.
+    private HostChannels? _channels;
+    public Visibility ChannelSettingVisibility => HandoffType == HandoffType.ChannelSwitch ? Visibility.Visible : Visibility.Collapsed;
+    public string ChannelSettingDescription => _channels is { } c
+        ? $"Where the device goes when the KVM leaves this PC. This PC is channel {c.Current + 1} of {c.Count}. Automatic uses the channel AutoSwitch marked on the other computer."
+        : "Where the device goes when the KVM leaves this PC. Automatic uses the channel AutoSwitch marked on the other computer.";
+    public IReadOnlyList<string> ChannelChoices { get; } = new[] { "Automatic", "Channel 1", "Channel 2", "Channel 3" };
+
+    /// 0 = automatic, n = channel n.
+    public int ReleaseChannelIndex
+    {
+        get => Model.ReleaseToChannel is int n && n >= 1 && n <= 3 ? n : 0;
+        set
+        {
+            if (value < 0 || value == ReleaseChannelIndex) return;
+            _app.Controller.Mutate(_ => Model.ReleaseToChannel = value == 0 ? null : value);
+        }
+    }
+
     private async Task LoadHandoffAsync()
     {
         try
         {
             _handoff = await _app.Controller.ClassifyAsync(Model.Address, Model.Name);
+            if (_handoff?.Type == HandoffType.ChannelSwitch)
+                _channels = await _app.Controller.GetChannelsAsync(Model.Address);
         }
         catch (Exception ex)
         {
@@ -43,6 +64,8 @@ public sealed class DeviceViewModel : ObservableObject
         OnPropertyChanged(nameof(HandoffDescription));
         OnPropertyChanged(nameof(HandoffGlyph));
         OnPropertyChanged(nameof(HandoffType));
+        OnPropertyChanged(nameof(ChannelSettingVisibility));
+        OnPropertyChanged(nameof(ChannelSettingDescription));
     }
 
     public BTDevice Model { get; private set; }

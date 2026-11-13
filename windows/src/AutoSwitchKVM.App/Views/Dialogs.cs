@@ -189,6 +189,15 @@ internal static class Dialogs
         var handoffTitle = new TextBlock { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
         var handoffText = Paragraph("");
         var handoffLink = new HyperlinkButton { Content = "Which devices can switch?", NavigateUri = new Uri(HandoffText.LearnMoreUrl), Padding = new Thickness(0) };
+        // Channel-switching devices (type 5): the channel to send the device to on release.
+        var channel = new ComboBox
+        {
+            Header = "Other computer's channel (where the device goes when the KVM leaves this PC)",
+            ItemsSource = new[] { "Automatic (found when AutoSwitch runs there)", "Channel 1", "Channel 2", "Channel 3" },
+            SelectedIndex = 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Visibility = Visibility.Collapsed,
+        };
         var handoffPanel = new StackPanel { Spacing = 4, Visibility = Visibility.Collapsed };
         handoffPanel.Children.Add(handoffTitle);
         handoffPanel.Children.Add(handoffText);
@@ -211,8 +220,11 @@ internal static class Dialogs
                 var a = await Vm.Controller.ClassifyAsync(picked.Address, picked.Name);
                 if (version != pickVersion) return;   // another device was picked meanwhile
                 handoffTitle.Text = HandoffText.Title(a.Type) + HandoffText.Confidence(a);
-                handoffText.Text = HandoffText.WhatHappens(a.Type);
+                handoffText.Text = a.Type == HandoffType.ChannelSwitch
+                    ? HandoffText.WhatHappens(a.Type) + " " + a.Reason
+                    : HandoffText.WhatHappens(a.Type);
                 managePairing.IsChecked = a.DefaultManagePairing(picked.IsLowEnergy);
+                channel.Visibility = a.Type == HandoffType.ChannelSwitch ? Visibility.Visible : Visibility.Collapsed;
             }
             catch (Exception ex)
             {
@@ -228,6 +240,7 @@ internal static class Dialogs
         body.Children.Add(name);
         body.Children.Add(addr);
         body.Children.Add(handoffPanel);
+        body.Children.Add(channel);
         body.Children.Add(managePairing);
         body.Children.Add(error);
 
@@ -249,6 +262,7 @@ internal static class Dialogs
             Name = string.IsNullOrWhiteSpace(name.Text) ? addr.Text.Trim() : name.Text.Trim(),
             Address = addr.Text.Trim(),
             ManagePairing = managePairing.IsChecked == true,
+            ReleaseToChannel = channel.Visibility == Visibility.Visible && channel.SelectedIndex > 0 ? channel.SelectedIndex : null,
         });
     }
 

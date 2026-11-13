@@ -50,6 +50,8 @@
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
     <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.9" />
     <PackageReference Include="Velopack" Version="1.2.161" />
+    <!-- HID access for Logitech HID++ "Change Host" (Platform/LogitechHostSwitcher.cs). MIT. -->
+    <PackageReference Include="HidSharp" Version="2.1.0" />
     <!-- The Microsoft.WindowsAppSDK metapackage also pulls the AI/ML components (onnxruntime.dll +
          DirectML.dll, ~40 MB) and Widgets, none of which the app uses. A direct reference with
          ExcludeAssets="all" drops their files. Keep these versions in step with the metapackage's

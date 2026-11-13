@@ -364,6 +364,17 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   default) and as the first card of each device row (`HandoffText` has the wording). Engine behavior
   is unchanged: types 2/3 still get a connect attempt on arrival (a "status only" mode needs a
   config field; not added).
+- **Logitech Easy-Switch channel switching (spec §5a type 5).** `Platform/LogitechHostSwitcher.cs`
+  speaks HID++ 2.0 feature 0x1814 (Change Host) via HidSharp: vendor collection (usage page
+  0xFF00, 20-byte report 0x11, device index 0xFF for direct Bluetooth), matched to the Bluetooth
+  address through the device tree (LE: address in the HID path; Classic: the HID collection's
+  parent is the BTHENUM HID node ending with the address, via CfgMgr32). The engine
+  (`IHostSwitcher`, `TrySwitchChannelAsync`) sends the device to `releaseToChannel` (or the single
+  other channel marked with cookie 0xA5) on release, marks this PC's channel when it connects while
+  selected, and sends it on if it connects while switched away (asleep at the switch). Only the
+  host it's connected to can talk to it, so each host releases its own way. Verified on a K380:
+  feature index 7, v1, 3 channels; a direct Bluetooth K380 answers any device index (use 0xFF).
+  Reference: `reference_flow/` (gitignored; offline Logitech Flow simulator + HID++ docs).
 - **Buttons inside a `SettingsExpander`'s `Items` don't inherit the row's `DataContext`** (the
   toolkit hosts them in its own repeater). Pass the item explicitly (`Tag="{x:Bind}"`) instead of
   reading `DataContext` in a click handler: Devices ▸ Remove silently did nothing because of this.

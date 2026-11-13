@@ -60,6 +60,12 @@
                                     </toolkit:SettingsCard.HeaderIcon>
                                     <HyperlinkButton Content="Which devices can switch?" NavigateUri="https://autoswitchkvm.com/devices/" />
                                 </toolkit:SettingsCard>
+                                <toolkit:SettingsCard Header="Other computer's channel"
+                                                      Description="{x:Bind ChannelSettingDescription, Mode=OneWay}"
+                                                      Visibility="{x:Bind ChannelSettingVisibility, Mode=OneWay}">
+                                    <ComboBox ItemsSource="{x:Bind ChannelChoices}" MinWidth="140"
+                                              SelectedIndex="{x:Bind ReleaseChannelIndex, Mode=TwoWay}" />
+                                </toolkit:SettingsCard>
                                 <toolkit:SettingsCard Header="Follow the KVM"
                                                       Description="Connect and release this device automatically when the KVM switches.">
                                     <ToggleSwitch IsOn="{x:Bind Enabled, Mode=TwoWay}" />

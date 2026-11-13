@@ -13,6 +13,7 @@ public static class HandoffText
         HandoffType.DevicePicksHost => "Picks the computer itself",
         HandoffType.RepairByHand => "Re-pairs by hand",
         HandoffType.HostConnects => "Joins whichever computer connects",
+        HandoffType.ChannelSwitch => "Switches channel on request",
         _ => "Not sure how this device switches",
     };
 
@@ -27,6 +28,8 @@ public static class HandoffText
             "AutoSwitch can't switch it: it remembers one computer and only moves in pairing mode. Keep it on one computer, or connect it by cable through the KVM. AutoSwitch shows its status. Keep Manage pairing off.",
         HandoffType.HostConnects =>
             "Not on Windows yet: Windows can't disconnect a Bluetooth device without unpairing it. The Mac app can switch these. AutoSwitch shows its status here.",
+        HandoffType.ChannelSwitch =>
+            "AutoSwitch can switch it: when the KVM leaves this PC, it tells the device to go to the other computer's channel. Its pairings stay as they are. Keep Manage pairing off.",
         _ =>
             "Test it: remove it in this PC's Bluetooth settings. If your other computer can then pair it right away, without pressing anything on the device, it hands off by pairing: turn Manage pairing on.",
     };
@@ -40,7 +43,7 @@ public static class HandoffText
     };
 
     /// Segoe Fluent glyph: check for a supported handoff, info otherwise.
-    public static string Glyph(HandoffType t) => t == HandoffType.PairingHandoff ? "" : t == HandoffType.Unknown ? "" : "";
+    public static string Glyph(HandoffType t) => CanSwitch(t) ? "" : t == HandoffType.Unknown ? "" : "";
 
-    public static bool CanSwitch(HandoffType t) => t == HandoffType.PairingHandoff;
+    public static bool CanSwitch(HandoffType t) => t is HandoffType.PairingHandoff or HandoffType.ChannelSwitch;
 }

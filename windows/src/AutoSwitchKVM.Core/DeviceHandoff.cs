@@ -14,6 +14,9 @@ public enum HandoffType
     RepairByHand,
     /// 4. Remembers several hosts and joins whichever one connects (many headphones).
     HostConnects,
+    /// 5. A pairing per host slot, and the connected host can tell it to switch slot (Logitech
+    ///    Easy-Switch with HID++ 0x1814 "Change Host"). Detected live, not by the catalog.
+    ChannelSwitch,
 }
 
 public enum HandoffConfidence { Unsure, Likely, Known }

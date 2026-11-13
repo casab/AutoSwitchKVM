@@ -9,7 +9,7 @@ description: "Bluetooth devices handle more than one computer in four different 
     <p class="eyebrow">Device guide</p>
     <h1>Which devices can switch?</h1>
     <p class="lead">
-      Bluetooth devices handle "more than one computer" in four different ways, and an app can only
+      Bluetooth devices handle "more than one computer" in a few different ways, and an app can only
       move some of them. Here's how to tell which kind you have, and what to do with each.
       AutoSwitch shows the kind for you when you add a device.
     </p>
@@ -38,8 +38,19 @@ description: "Bluetooth devices handle more than one computer in four different 
           chooses which one it talks to. No computer can change that slot. Removing the pairing on
           one computer breaks its slot, and you'd have to pair it again from the device.
         </p>
-        <p class="kind__examples"><strong>Examples:</strong> ZMK and QMK wireless keyboards, Logitech Easy-Switch keyboards and mice.</p>
+        <p class="kind__examples"><strong>Examples:</strong> ZMK and QMK wireless keyboards. (Most Logitech Easy-Switch devices can be switched: see the next card.)</p>
         <p class="kind__tip"><strong>What to do:</strong> use the device's own switch key. Or plug it into the KVM with a USB cable: many of these keyboards prefer USB when it's connected, and the KVM switches it like any wired keyboard. Leave <strong>Manage pairing</strong> off.</p>
+      </li>
+      <li class="kind kind--yes">
+        <p class="kind__verdict">Switches automatically</p>
+        <h2>Switches channel on request</h2>
+        <p>
+          Like the previous kind, it remembers a computer per channel, but the computer it's
+          connected to can tell it to change channel. When the KVM leaves, AutoSwitch sends the
+          device to the other computer's channel. Its pairings stay exactly as they are.
+        </p>
+        <p class="kind__examples"><strong>Examples:</strong> Logitech Easy-Switch keyboards and mice, like the K380 (they support Logitech's "Change Host" command). AutoSwitch checks the device to be sure.</p>
+        <p class="kind__platforms">Windows ✓ · Mac: coming</p>
       </li>
       <li class="kind kind--no">
         <p class="kind__verdict">Can't be switched by an app</p>

@@ -95,12 +95,95 @@ public sealed class SelectionEngine
     internal int HidPollIntervalMs = 250;
     internal Func<DateTime> Clock = () => DateTime.UtcNow;
 
-    public SelectionEngine(AppConfig config, IUsbMonitor usb, IBluetoothController bt, ILogSink? log = null)
+    public SelectionEngine(AppConfig config, IUsbMonitor usb, IBluetoothController bt, ILogSink? log = null,
+                           IHostSwitcher? hostSwitcher = null)
     {
         Config = config;
         _usb = usb;
         _bt = bt;
         _log = log ?? NullLogSink.Instance;
+        _hostSwitcher = hostSwitcher;
+    }
+
+    private readonly IHostSwitcher? _hostSwitcher;
+
+    // MARK: - Channel switching (spec §5a type 5)
+
+    private bool _presenceEvaluated;                                   // Selected reflects a real evaluation
+    private readonly HashSet<Guid> _channelMarked = new();             // marked our channel this session
+    private readonly Dictionary<Guid, DateTime> _lastLateRelease = new();
+    internal const int LateReleaseMinIntervalSecs = 10;
+
+    /// A device that switches channel on request is sent to the other computer's channel instead
+    /// of being unpaired. True when it was sent; false when it doesn't support it, isn't
+    /// connected here, or the target channel is unknown (the caller then releases it as usual).
+    private async Task<bool> TrySwitchChannelAsync(BTDevice device, string why)
+    {
+        if (_hostSwitcher is null) return false;
+        HostChannels? ch;
+        try { ch = await WithTimeoutAsync(ct => _hostSwitcher.GetChannelsAsync(device.Address, ct)); }
+        catch (Exception ex)
+        {
+            Debug($"{device.Name}: channel query failed: {Classify(ex).Summary}");
+            return false;
+        }
+        if (ch is null) return false;   // no channel switching, or not connected to this PC
+
+        int? target = device.ReleaseToChannel is int n && n >= 1 && n <= ch.Count ? n - 1 : ch.MarkedOtherChannel;
+        if (target is null)
+        {
+            Warn($"{device.Name}: it can switch channels, but the other computer's channel isn't known " +
+                 "(set it in the device's settings, or run AutoSwitch on the other computer)");
+            return false;
+        }
+        if (target == ch.Current)
+        {
+            Warn($"{device.Name}: the other computer's channel is set to {target + 1}, but that's this PC's channel; check the setting");
+            return false;
+        }
+        try { await WithTimeoutAsync(ct => _hostSwitcher.SwitchToAsync(device.Address, target.Value, ct)); }
+        catch (Exception ex)
+        {
+            Warn($"{device.Name}: switching to channel {target + 1} failed: {Classify(ex).Summary}");
+            return false;
+        }
+        Info($"{device.Name}: sent to channel {target + 1} ({why})");
+        return true;
+    }
+
+    /// A device became connected. Selected: mark our channel (once per session) so the other
+    /// computer can find it. Not selected (the KVM is elsewhere, e.g. the keyboard was asleep at
+    /// the switch and woke up on its old channel): send it on, rate-limited.
+    private void OnBecameConnected(Guid id)
+    {
+        if (_hostSwitcher is null) return;
+        var device = Config.Devices.FirstOrDefault(d => d.Id == id);
+        if (device is null || !device.Enabled || device.ManagePairing) return;
+        if (Selected)
+        {
+            if (!_channelMarked.Add(id)) return;
+            _ = RunLoggedAsync(async () =>
+            {
+                try { await WithTimeoutAsync(ct => _hostSwitcher.MarkCurrentChannelAsync(device.Address, ct)); }
+                catch (Exception ex)
+                {
+                    _channelMarked.Remove(id);
+                    Debug($"{device.Name}: could not mark this PC's channel: {Classify(ex).Summary}");
+                }
+            }, $"{device.Name}: mark channel");
+            return;
+        }
+        if (!_presenceEvaluated || Config.Paused || _suspended || IsBusy(id)) return;
+        var now = DateTime.UtcNow;
+        if (_lastLateRelease.TryGetValue(id, out var last) && (now - last).TotalSeconds < LateReleaseMinIntervalSecs) return;
+        _lastLateRelease[id] = now;
+        Info($"{device.Name}: connected while the KVM is on the other computer -> sending it there");
+        _ = RunLoggedAsync(async () =>
+        {
+            MarkBusy(id);
+            try { await TrySwitchChannelAsync(device, "it connected here while the KVM is elsewhere"); }
+            finally { ClearBusy(id); }
+        }, $"{device.Name}: late release");
     }
 
     /// A unit of engine work: the run token it belongs to plus what started it (for the log).
@@ -385,6 +468,7 @@ public sealed class SelectionEngine
     {
         var present = _presentProductIDs.Count > 0;
         Selected = present;                 // always reflect real presence for the UI
+        _presenceEvaluated = true;
         RaiseChanged();
 
         var wouldAct = present != _automationActed || (!present && _seedReconcilePending);
@@ -908,6 +992,15 @@ public sealed class SelectionEngine
         Debug($"{name}: release started (run #{run.Token}, {run.Trigger}; managePairing={device.ManagePairing})");
         NoteIntent(_releaseRequestedToken, device.Id, run.Token);
 
+        // Spec §5a type 5: send a channel-switching device to the other computer's channel; its
+        // pairings stay as they are. Falls through to the usual release when that isn't possible.
+        if (!device.ManagePairing && await TrySwitchChannelAsync(device, "the KVM left this PC"))
+        {
+            SetStatus(device.Id, DeviceStatus.Disconnected);
+            if (notify) OnNotice?.Invoke("Switched", $"{name} went to the other computer");
+            return;
+        }
+
         Failure? disconnectError = null;
         try { await WithTimeoutAsync(ct => _bt.DisconnectAsync(addr, ct)); }
         catch (Exception ex)
@@ -1249,9 +1342,11 @@ public sealed class SelectionEngine
 
     private void SetStatus(Guid id, DeviceStatus status)
     {
-        if (_statuses.TryGetValue(id, out var existing) && existing == status) return;
+        var had = _statuses.TryGetValue(id, out var existing);
+        if (had && existing == status) return;
         _statuses[id] = status;
         RaiseChanged();
+        if (status == DeviceStatus.Connected && (!had || existing != DeviceStatus.Connected)) OnBecameConnected(id);
     }
 
     private void RaiseChanged() => Changed?.Invoke();

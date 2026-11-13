@@ -16,7 +16,8 @@
           "address": "3c-50-02-bf-22-45",
           "enabled": true,
           "managePairing": true,
-          "connectDelayMs": 250
+          "connectDelayMs": 250,
+          "releaseToChannel": null
         }
       ]
     },

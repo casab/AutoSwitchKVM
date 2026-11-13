@@ -17,6 +17,7 @@ public sealed class AppController
     private readonly ConfigStore _store;
     private readonly PnpUsbMonitor _usb;
     private readonly WinRtBluetooth _bt;
+    private readonly LogitechHostSwitcher _hostSwitcher = new();
     private readonly PowerMonitor _power = new();
     private readonly HotKeyService _hotkeys = new();
     private readonly ToastNotifier _toasts = new();
@@ -51,7 +52,7 @@ public sealed class AppController
         Log.Info("app", $"config loaded from {_store.Path}: profile='{Config.ActiveProfileName}', " +
             $"source={(Config.Source is null ? "(none)" : Config.Source.DisplayVidPid)}, devices={Config.Devices.Count}, paused={Config.Paused}");
 
-        Engine = new SelectionEngine(Config, _usb, _bt, new AppLogSink());
+        Engine = new SelectionEngine(Config, _usb, _bt, new AppLogSink(), _hostSwitcher);
         Engine.Changed += () => StateChanged?.Invoke();
         Engine.OnNotice = (title, body) =>
         {
@@ -77,6 +78,17 @@ public sealed class AppController
     {
         if (IsPreview) return;
         Fire(() => Engine.ConnectAddedDeviceAsync(deviceId), "connect added device");
+    }
+
+    /// A channel-switching device's channels (null when unsupported or not connected here).
+    public async Task<HostChannels?> GetChannelsAsync(string address)
+    {
+        try { return await _hostSwitcher.GetChannelsAsync(address); }
+        catch (Exception ex)
+        {
+            Log.Debug("hidpp", $"{address}: channel query failed ({ex.Message})");
+            return null;
+        }
     }
 
     /// A device was removed: drop its status. Leaves the device as it is right now.
@@ -421,8 +433,24 @@ public sealed class AppController
         if (_handoff.TryGetValue(key, out var cached)) return cached;
         var identity = await _bt.GetIdentityAsync(address, name);
         var result = HandoffCatalog.Classify(identity);
+        var cache = identity.VendorId is not null || identity.Kind != DeviceKind.Unknown;
+
+        // Logitech multi-host devices may support HID++ "Change Host" (spec §5a type 5): ask the
+        // device. It only answers while connected to this PC, so a "no answer" isn't cached.
+        if (identity.VendorId == HandoffCatalog.Logitech || result.Type == HandoffType.DevicePicksHost)
+        {
+            HostChannels? channels = null;
+            try { channels = await _hostSwitcher.GetChannelsAsync(address); }
+            catch (Exception ex) { Log.Debug("hidpp", $"{name}: channel query failed ({ex.Message})"); }
+            if (channels is not null)
+                result = new HandoffAssessment(HandoffType.ChannelSwitch, HandoffConfidence.Known,
+                    $"{channels.Count} channels; this PC is channel {channels.Current + 1}.");
+            else if (identity.VendorId == HandoffCatalog.Logitech)
+                cache = false;   // maybe just not connected right now: ask again next time
+        }
+
         // Only cache an answer backed by device data; a name-only guess may improve once paired.
-        if (identity.VendorId is not null || identity.Kind != DeviceKind.Unknown) _handoff[key] = result;
+        if (cache) _handoff[key] = result;
         Log.Debug("bt", $"handoff type {name} ({address}): {result.Type}, {result.Confidence} " +
             $"(vendor {identity.VendorId:X4}, product {identity.ProductId:X4}, {identity.Kind}, {(identity.IsLowEnergy ? "LE" : "Classic")})");
         return result;

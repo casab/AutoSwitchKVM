@@ -49,6 +49,7 @@ A managed Bluetooth device.
 | `enabled` | bool | `true` | Participates in automatic handoff |
 | `managePairing` | bool | `false` | Pair on connect / unpair on disconnect |
 | `connectDelayMs` | int | `0` | Per-device stagger before connecting |
+| `releaseToChannel` | int? | `null` | §5a type 5 only: the device channel (1-based, as printed on it) to send it to when the KVM leaves this host; `null` = automatic (the channel the other host's AutoSwitch marked). Added 2026-11-13 (Windows). |
 
 Connect **order** = position in the profile's device list (user-reorderable).
 
@@ -175,7 +176,17 @@ controller** (the operations in §5). It owns no platform APIs directly.
 - On giving up after `connectRetryMax`, set status `error`.
 
 ### Disconnect flow (per enabled device)
+- **Channel switch first** (§5a type 5; Windows implemented 2026-11-13, macOS pending): if
+  `managePairing` is off and the device is connected here and supports host-initiated channel
+  switching, send it to the target channel (`releaseToChannel`, else the single other channel
+  marked by AutoSwitch) and stop: no disconnect, no unpair. If the target is unknown or the switch
+  fails, warn and fall through to the usual release.
 - **Disconnect**; if `managePairing`, then **unpair** (remove the bond). Set status `disconnected`.
+- **Marking** (type 5): whenever such a device becomes connected while this host is selected, mark
+  this host's channel (once per session) so the other host can find it.
+- **Late release** (type 5): if such a device becomes connected while the source is absent
+  (presence already evaluated, not paused; e.g. it was asleep at the switch and woke up on its
+  old channel), send it on to the target channel. At most once per 10 s per device.
 
 ### Manual actions (ignore selection/source; act on all configured devices)
 - **Connect all now**, **Disconnect all now**.
@@ -336,8 +347,9 @@ against real hardware in Milestone 0 (`windows/PLAN.md` "spike findings").
 
 ## 5a. Device handoff types (2026-11-13)
 
-Bluetooth devices handle "more than one computer" in four different ways, and a host can only
-switch some of them. Both apps describe devices with these four types (same names), show the type
+Bluetooth devices handle "more than one computer" in a few different ways (four basic kinds,
+plus type 5, a type 2 device that the connected host can switch), and a host can only switch
+some of them. Both apps describe devices with these four types (same names), show the type
 in Add device and in each device's settings, and say plainly what AutoSwitch can and can't do.
 
 | # | Type (UI name) | How the device behaves | What AutoSwitch can do |
@@ -345,6 +357,7 @@ in Add device and in each device's settings, and say plainly what AutoSwitch can
 | 1 | **Hands off by pairing** | One pairing. Once the current host removes it, the next host can pair with no button press. | **Supported** (macOS, Windows): `managePairing` on; unpair on leave, pair on arrive. |
 | 2 | **Picks the computer itself** | A pairing per host slot (ZMK/QMK profiles, Logitech Easy-Switch); a key on the device chooses the host. | **Not possible** from any host: a host can't change the device's slot, and unpairing breaks that slot (re-pair from the device). Status only. Workarounds: the device's own switch key, or USB through the KVM. |
 | 3 | **Re-pairs by hand** | Remembers one Bluetooth host; changing hosts needs pairing mode on the device (Xbox, PlayStation, Nintendo controllers). | **Not possible** automatically: after an unpair the device still points at the old host, and the new host can't pair until the user enters pairing mode. Status only. Workarounds: keep it on one computer, or connect it by cable through the KVM. |
+| 5 | **Switches channel on request** | A type 2 device whose connected host can tell it to change slot: Logitech Easy-Switch devices with HID++ 2.0 feature **0x1814 "Change Host"** (`getHostInfo`, `setCurrentHost(n)`, `getCookies`, `setCookie(n, b)`). | **Supported on release** (Windows implemented 2026-11-13; macOS pending): the leaving host sends it to the other host's channel; pairings untouched; `managePairing` off. Only the host it's connected to can send the command, so each host does its own release. See the Disconnect flow. |
 | 4 | **Joins whichever computer connects** | Remembers several hosts and connects to the one that asks (many headphones/speakers, some mice). | **macOS: supported** with `managePairing` off (disconnect on leave, connect on arrive). **Windows: not yet**: there is no public API to disconnect a Bluetooth device without unpairing it (a future option for Classic devices: toggling the device's services with `BluetoothSetServiceState`). |
 
 **Classification** (best effort, shown with its confidence: *known* model, *likely* from vendor or
@@ -362,6 +375,14 @@ device or LE appearance: input, game controller, audio). Rules, first match wins
 6. Bluetooth LE keyboard or mouse → type 2, unsure (most remember each host themselves).
 7. Anything else → unknown: the UI asks the user to test it (remove it on one computer; if the
    other can pair right away without a button press, it is type 1).
+
+Type 5 is detected live, not by these rules: for a Logitech device (or any type 2 device), ask it
+over HID++ for feature 0x1814 while it's connected. A device that answers is type 5, *known*. The
+HID++ endpoint is the device's vendor collection (usage page `0xFF00`, 20-byte long report `0x11`,
+device index `0xFF` for a direct Bluetooth connection). Verified on a Logitech K380 (Classic):
+feature index 7, version 1, 3 channels. **Channel marks:** each AutoSwitch writes cookie `0xA5` on
+its own channel (the firmware clears a channel's cookie when a new host pairs there), so the
+leaving host can find the other host's channel without configuration.
 
 The type sets the **Manage pairing default** when a device is added (on for type 1 and for unknown
 Classic devices, off otherwise); the user can still change it. Windows: classification is

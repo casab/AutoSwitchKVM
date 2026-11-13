@@ -16,6 +16,9 @@ desktop.ini
 # Local reference checkouts (not part of this repo)
 # Magic Trackpad 2 Windows driver: vitoplantamura/MagicTrackpad2ForWindows + signed package/PDBs
 reference_win_driver/
+# Offline Logitech Flow simulator (ctpahhik/offline_logitech_flow_simulator) + HID++ 2.0 docs:
+# reference for host-initiated channel switching (feature 0x1814 Change Host)
+reference_flow/
 
 # Signing material must never be committed (certificates, update-signing keys).
 *.p12

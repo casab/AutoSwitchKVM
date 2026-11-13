@@ -48,6 +48,12 @@ public sealed class BTDevice
     /// position in the profile's device list.
     public int ConnectDelayMs { get; set; }
 
+    /// For a device that switches channel on request (spec §5a type 5, Logitech Easy-Switch with
+    /// HID++ Change Host): the channel (1-based, as printed on the device) to send it to when the
+    /// KVM leaves this computer. null = automatic: the channel the other computer's AutoSwitch
+    /// marked. JSON key `releaseToChannel`.
+    public int? ReleaseToChannel { get; set; }
+
     /// Colon-less uppercase hex digits, e.g. "3C5002BF2245" (handy for PnP/BTHENUM matching).
     [JsonIgnore]
     public string AddressDigits =>
