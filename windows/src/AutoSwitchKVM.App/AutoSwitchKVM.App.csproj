@@ -41,7 +41,10 @@
          when a matching H.NotifyIcon release exists. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.2.0" />
+    <!-- 2.6.5+: AppNotificationManager.Register() works self-contained. Up to 2.3.1 it failed with
+         0x8007007E (the runtime's IsSelfContained() loads Microsoft.WindowsAppRuntime.Insights.Resource.dll,
+         which the NuGet payload doesn't ship), so released builds never showed notifications. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
     <PackageReference Include="H.NotifyIcon.WinUI" Version="2.1.0" />
     <!-- WMI: Win32_PnPEntity enumeration + Win32_DeviceChangeEvent watch (PnpUsbMonitor). -->
     <PackageReference Include="System.Management" Version="10.0.9" />
@@ -53,13 +56,14 @@
     <!-- HID access for Logitech HID++ "Change Host" (Platform/LogitechHostSwitcher.cs). MIT. -->
     <PackageReference Include="HidSharp" Version="2.1.0" />
     <!-- The Microsoft.WindowsAppSDK metapackage also pulls the AI/ML components (onnxruntime.dll +
-         DirectML.dll, ~40 MB) and Widgets, none of which the app uses. A direct reference with
+         DirectML.dll, ~40 MB), Widgets and (2.6+) Search, none of which the app uses. A direct reference with
          ExcludeAssets="all" drops their files. Keep these versions in step with the metapackage's
          dependencies when bumping it (a mismatch shows up as restore warning NU1605 / NU1608). -->
-    <PackageReference Include="Microsoft.WindowsAppSDK.AI" Version="2.2.3" ExcludeAssets="all" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.ML" Version="2.1.70" ExcludeAssets="all" />
-    <PackageReference Include="Microsoft.Windows.AI.MachineLearning" Version="2.1.70" ExcludeAssets="all" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.Widgets" Version="2.0.5" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.AI" Version="2.6.5" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.ML" Version="2.6.5" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.Windows.AI.MachineLearning" Version="2.4.89" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Widgets" Version="2.6.5" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Search" Version="2.6.5" ExcludeAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

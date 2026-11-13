@@ -388,6 +388,13 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   (0x1815) are Logitech-only, so `GetChannelNamesAsync` still goes to `LogitechHostSwitcher`. The
   module reports which profiles are paired (`HostChannels.Paired`), and the engine refuses an
   unpaired target. Firmware build: `firmware/zmk-autoswitch/ci/build.sh` in Docker (see its README).
+- **Toasts need Windows App SDK 2.6.5+ in the installed (self-contained) build.** Up to 2.3.1,
+  `AppNotificationManager.Register()` failed with 0x8007007E in every Velopack build (v0.1.1-v0.3.1)
+  while dev builds (framework-dependent) worked: the runtime's `IsSelfContained()` loads
+  `Microsoft.WindowsAppRuntime.Insights.Resource.dll`, which the NuGet payload doesn't ship. Found
+  with `cdb -c "!gflag +sls; g; q"` on a minimal harness. Test toasts from a published folder, not
+  a dev build. A stale `obj/` after an SDK bump gives CS0759 on `_XamlGeneratedCreateApplicationInstance`:
+  delete `obj/x64/<config>` and rebuild.
 - **Buttons inside a `SettingsExpander`'s `Items` don't inherit the row's `DataContext`** (the
   toolkit hosts them in its own repeater). Pass the item explicitly (`Tag="{x:Bind}"`) instead of
   reading `DataContext` in a click handler: Devices ▸ Remove silently did nothing because of this.
