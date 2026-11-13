@@ -16,6 +16,8 @@ GitHub release (and from there into the in-app update notes).
 
 ## Unreleased
 
+## v0.3.0 (2026-11-13)
+
 ### Both
 
 - Logitech Easy-Switch keyboards and mice (e.g. K380) follow the KVM: when the KVM leaves a
@@ -31,6 +33,7 @@ GitHub release (and from there into the in-app update notes).
 - Headphones and speakers with Manage pairing off connect and disconnect with the KVM (they
   were counted as failed connections before).
 - The website's Download for Mac link always gets the newest version.
+- The Mac asks once for **Input Monitoring** permission: it needs it to switch Logitech devices.
 
 ### Windows
 
