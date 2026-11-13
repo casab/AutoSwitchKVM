@@ -158,10 +158,11 @@ controller** (the operations in §5). It owns no platform APIs directly.
   it (connected + HID up) for up to ~20 s, with no connect calls and no retries. If it doesn't
   come, leave it `disconnected` (not an error) and say why (AutoSwitch not running on the other
   computer → press the device's channel key). "Known" = it answered the channel query this
-  session, or `releaseToChannel` is set. Windows' connect for such a device doesn't call it, so
-  this is about doing nothing there either. These waits run **alongside** the other devices'
+  session, or `releaseToChannel` is set. These waits run **alongside** the other devices'
   connects, not in list order: in a fast switch-back a trackpad pair took 17 s, and the keyboard
-  never got its turn.
+  never got its turn. (Windows implemented too, 2026-11-13: `WaitForArrivalAsync`, 20 s, 0.5 s
+  polls; before, its connect "verified" a device still on the other channel and retried with
+  warnings.)
 - Retry loop up to `connectRetryMax`:
   - If Bluetooth adapter is **off** → set status `bluetoothOff`, stop.
   - Abort if the run is stale (token changed) or the source is no longer present.
@@ -190,7 +191,11 @@ controller** (the operations in §5). It owns no platform APIs directly.
   as the source is present again, checked before it starts, before the channel switch, and between
   its steps. Before the arrival debounce supersedes the run, a fast switch-back otherwise still sent
   a K380 to the other computer's channel after the KVM had returned. That computer then had no KVM
-  and didn't send it back. Manual and sleep releases always finish.
+  and didn't send it back. Manual and sleep releases always finish. (Windows implemented too,
+  2026-11-13: presence from the latest USB event/snapshot, ahead of the debounce.)
+- **Release order** (Windows 2026-11-13; optional on macOS): devices without `managePairing` first
+  (a channel switch takes ~0.5 s), then the rest in list order. A Windows trackpad unpair takes
+  ~3.4 s, and in list order it held the K380 back ~8 s on the Mac's side.
 - **Channel switch first** (§5a type 5; Windows and macOS implemented 2026-11-13): if
   `managePairing` is off and the device is connected here and supports host-initiated channel
   switching, send it to the target channel (`releaseToChannel`, else the single other channel
@@ -201,7 +206,10 @@ controller** (the operations in §5). It owns no platform APIs directly.
   this host's channel (once per session) so the other host can find it.
 - **Late release** (type 5): if such a device becomes connected while the source is absent
   (presence already evaluated, not paused; e.g. it was asleep at the switch and woke up on its
-  old channel), send it on to the target channel. At most once per 10 s per device.
+  old channel), send it on to the target channel. At most once per 10 s per device. **Don't give
+  up on a busy device:** in a fast bounce it lands while a run is still busy with it. Remember it,
+  and when the device is free, send it on if it's still connected here and the KVM is still
+  elsewhere (Windows 2026-11-13).
 
 ### Manual actions (ignore selection/source; act on all configured devices)
 - **Connect all now**, **Disconnect all now**.

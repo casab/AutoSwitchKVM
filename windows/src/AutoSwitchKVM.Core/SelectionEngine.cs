@@ -111,13 +111,29 @@ public sealed class SelectionEngine
 
     private bool _presenceEvaluated;                                   // Selected reflects a real evaluation
     private readonly HashSet<Guid> _channelMarked = new();             // marked our channel this session
+    private readonly HashSet<Guid> _channelCapable = new();            // answered the channel query this session
+    private readonly HashSet<Guid> _lateReleasePending = new();        // waiting for the device to stop being busy
+
+    /// How long the arrival side waits for a type 5 device the other host is sending over (spec §3
+    /// Connect flow), and how often it looks.
+    internal int ArrivalWaitMs { get; set; } = 20_000;
+    internal const int ArrivalPollMs = 500;
+
+    /// The source as the latest USB event/snapshot saw it, ahead of the debounce. An automatic
+    /// release stops as soon as this turns true again (spec §3 Disconnect flow).
+    private bool SourcePresentNow => _presentProductIDs.Count > 0;
+
+    /// "Known" type 5 (spec §3 Connect flow): answered the channel query this session, or the user
+    /// set its target channel.
+    private bool IsKnownChannelSwitcher(BTDevice d) =>
+        !d.ManagePairing && (_channelCapable.Contains(d.Id) || d.ReleaseToChannel is not null);
     private readonly Dictionary<Guid, DateTime> _lastLateRelease = new();
     internal const int LateReleaseMinIntervalSecs = 10;
 
     /// A device that switches channel on request is sent to the other computer's channel instead
     /// of being unpaired. True when it was sent; false when it doesn't support it, isn't
     /// connected here, or the target channel is unknown (the caller then releases it as usual).
-    private async Task<bool> TrySwitchChannelAsync(BTDevice device, string why)
+    private async Task<bool> TrySwitchChannelAsync(BTDevice device, string why, bool stopIfSourceBack = false)
     {
         if (_hostSwitcher is null) return false;
         HostChannels? ch;
@@ -128,6 +144,12 @@ public sealed class SelectionEngine
             return false;
         }
         if (ch is null) return false;   // no channel switching, or not connected to this PC
+        _channelCapable.Add(device.Id);
+        if (stopIfSourceBack && SourcePresentNow)
+        {
+            Debug($"{device.Name}: channel switch skipped: the KVM came back");
+            return true;   // handled: the device stays here, where the KVM is again
+        }
 
         int? target = device.ReleaseToChannel is int n && n >= 1 && n <= ch.Count ? n - 1 : ch.MarkedOtherChannel;
         if (target is null)
@@ -164,7 +186,12 @@ public sealed class SelectionEngine
             if (!_channelMarked.Add(id)) return;
             _ = RunLoggedAsync(async () =>
             {
-                try { await WithTimeoutAsync(ct => _hostSwitcher.MarkCurrentChannelAsync(device.Address, ct)); }
+                try
+                {
+                    await WithTimeoutAsync(ct => _hostSwitcher.MarkCurrentChannelAsync(device.Address, ct));
+                    if (await WithTimeoutAsync(ct => _hostSwitcher.GetChannelsAsync(device.Address, ct)) is not null)
+                        _channelCapable.Add(id);
+                }
                 catch (Exception ex)
                 {
                     _channelMarked.Remove(id);
@@ -173,17 +200,40 @@ public sealed class SelectionEngine
             }, $"{device.Name}: mark channel");
             return;
         }
-        if (!_presenceEvaluated || Config.Paused || _suspended || IsBusy(id)) return;
-        var now = DateTime.UtcNow;
-        if (_lastLateRelease.TryGetValue(id, out var last) && (now - last).TotalSeconds < LateReleaseMinIntervalSecs) return;
-        _lastLateRelease[id] = now;
-        Info($"{device.Name}: connected while the KVM is on the other computer -> sending it there");
-        _ = RunLoggedAsync(async () =>
+        if (!_presenceEvaluated || Config.Paused || _suspended) return;
+        if (IsBusy(id))
         {
-            MarkBusy(id);
-            try { await TrySwitchChannelAsync(device, "it connected here while the KVM is elsewhere"); }
-            finally { ClearBusy(id); }
-        }, $"{device.Name}: late release");
+            // In a fast bounce the device lands here while a run is still busy with it. Try again
+            // the moment it's free (ClearBusy), instead of leaving it stranded on this PC.
+            if (_lateReleasePending.Add(id))
+                Debug($"{device.Name}: connected while switched away, but busy; sending it on once free");
+            return;
+        }
+        _ = RunLoggedAsync(() => SendOnAsync(device), $"{device.Name}: late release");
+    }
+
+    /// Late release: the device is connected here while the KVM is elsewhere; send it to the other
+    /// computer's channel (rate-limited).
+    private async Task SendOnAsync(BTDevice device)
+    {
+        if (Selected || Config.Paused || _suspended || IsBusy(device.Id)) return;
+        var now = DateTime.UtcNow;
+        if (_lastLateRelease.TryGetValue(device.Id, out var last) && (now - last).TotalSeconds < LateReleaseMinIntervalSecs) return;
+        _lastLateRelease[device.Id] = now;
+        Info($"{device.Name}: connected while the KVM is on the other computer -> sending it there");
+        MarkBusy(device.Id);
+        try { await TrySwitchChannelAsync(device, "it connected here while the KVM is elsewhere"); }
+        finally { ClearBusy(device.Id); }
+    }
+
+    /// A deferred late release, once the device is free: only if it's still connected here and
+    /// the KVM is still elsewhere.
+    private async Task SendOnIfStillHereAsync(Guid id)
+    {
+        var device = Config.Devices.FirstOrDefault(d => d.Id == id);
+        if (device is null || Selected) return;
+        if (!await SafeIsConnectedAsync(device)) return;
+        await SendOnAsync(device);
     }
 
     /// A unit of engine work: the run token it belongs to plus what started it (for the log).
@@ -214,7 +264,15 @@ public sealed class SelectionEngine
     {
         var device = Config.Devices.FirstOrDefault(d => d.AddressDigits == change.Address);
         if (device is null) return;
-        if (IsBusy(device.Id)) return;
+        if (IsBusy(device.Id))
+        {
+            // A type 5 device landing here while a run is still busy with it and the KVM has
+            // already left (fast bounce): send it on once it's free (ClearBusy).
+            if (change.IsConnected && !Selected && _presenceEvaluated && _hostSwitcher is not null
+                && !device.ManagePairing && device.Enabled && _lateReleasePending.Add(device.Id))
+                Debug($"{device.Name}: connected while switched away, but busy; sending it on once free");
+            return;
+        }
         UpdateStatus(device, change.IsConnected, "event");
     }
 
@@ -566,6 +624,7 @@ public sealed class SelectionEngine
         var device = Config.Devices.FirstOrDefault(d => d.Id == deviceId);
         if (device is null || !device.Enabled) return;
         string? skip = !Selected ? "this PC is not selected"
+            : !_automationActed ? "a re-evaluation is pending"
             : Config.Paused ? "automation paused"
             : _suspended ? "system is suspending"
             : !BluetoothPowered ? "Bluetooth is off"
@@ -694,18 +753,57 @@ public sealed class SelectionEngine
 
     private async Task ConnectAllAsync(Run run)
     {
-        foreach (var device in Config.Devices.ToList())
+        // Spec §3 Connect flow: a known type 5 device is waited for (the other computer sends it
+        // over), not connected, and the waits run alongside the others' connects.
+        var devices = Config.Devices.Where(d => d.Enabled).ToList();
+        var waits = devices.Where(IsKnownChannelSwitcher).Select(d => WaitForArrivalAsync(d, run)).ToList();
+        foreach (var device in devices.Where(d => !IsKnownChannelSwitcher(d)))
         {
-            if (!device.Enabled) continue;
             if (StaleReason(run, respectSelection: false) is { } why)
             {
                 Debug($"run #{run.Token}: connect run stopped: {why}");
-                return;
+                break;
             }
             MarkBusy(device.Id);
             try { await ConnectOneAsync(device, run, respectSelection: true); }
             finally { ClearBusy(device.Id); }
         }
+        await Task.WhenAll(waits);
+    }
+
+    /// Wait for a type 5 device to arrive by itself (connected, HID not down) for up to
+    /// ArrivalWaitMs: no connect calls, no retries. If it doesn't come, it's `Disconnected` (not an
+    /// error), with the reason.
+    private async Task WaitForArrivalAsync(BTDevice device, Run run)
+    {
+        MarkBusy(device.Id);
+        try
+        {
+            var waited = 0;
+            var sw = Stopwatch.StartNew();
+            while (true)
+            {
+                if (StaleReason(run, respectSelection: true) is { } stale)
+                {
+                    Debug($"{device.Name}: arrival wait stopped: {stale}");
+                    return;
+                }
+                if (await SafeIsConnectedAsync(device) && await SafeHidReadyAsync(device) != false)
+                {
+                    Info(waited == 0 ? $"{device.Name}: already connected"
+                                     : $"{device.Name}: arrived from the other computer after {Ms(sw)}");
+                    SetStatus(device.Id, DeviceStatus.Connected);
+                    return;
+                }
+                if (waited >= ArrivalWaitMs) break;
+                await SleepHook(ArrivalPollMs);
+                waited += ArrivalPollMs;
+            }
+            Info($"{device.Name}: didn't arrive within {ArrivalWaitMs / 1000} s. If AutoSwitch isn't running on the " +
+                 "other computer, press the device's channel key for this PC.");
+            SetStatus(device.Id, DeviceStatus.Disconnected);
+        }
+        finally { ClearBusy(device.Id); }
     }
 
     /// The connect flow for one device (SPECIFICATION.md §3), with failure classification:
@@ -946,9 +1044,14 @@ public sealed class SelectionEngine
     /// no "Disconnected" notice unless the device was actually connected.
     private async Task ReleaseHeldAsync(Run run)
     {
-        foreach (var device in Config.Devices.ToList())
+        foreach (var device in ReleaseOrder())
         {
             if (!device.Enabled) continue;
+            if (SourcePresentNow)
+            {
+                Debug($"run #{run.Token}: reconcile stopped: the KVM came back");
+                return;
+            }
             if (StaleReason(run, respectSelection: false) is { } why)
             {
                 Debug($"run #{run.Token}: reconcile stopped: {why}");
@@ -957,14 +1060,14 @@ public sealed class SelectionEngine
             var connected = await SafeIsConnectedAsync(device);
             if (!device.ManagePairing && !connected) continue;   // nothing held
             MarkBusy(device.Id);
-            try { await DisconnectOneAsync(device, run, notify: connected); }
+            try { await DisconnectOneAsync(device, run, notify: connected, automatic: true); }
             finally { ClearBusy(device.Id); }
         }
     }
 
     private async Task DisconnectAllAsync(Run run)
     {
-        foreach (var device in Config.Devices.ToList())
+        foreach (var device in ReleaseOrder())
         {
             if (!device.Enabled) continue;
             if (StaleReason(run, respectSelection: false) is { } why)  // e.g. the source came back
@@ -972,11 +1075,21 @@ public sealed class SelectionEngine
                 Debug($"run #{run.Token}: release run stopped: {why}");
                 return;
             }
+            if (SourcePresentNow)
+            {
+                Debug($"run #{run.Token}: release run stopped: the KVM came back");
+                return;
+            }
             MarkBusy(device.Id);
-            try { await DisconnectOneAsync(device, run); }
+            try { await DisconnectOneAsync(device, run, automatic: true); }
             finally { ClearBusy(device.Id); }
         }
     }
+
+    /// Release order: devices without managePairing first (a channel switch takes ~0.5 s), then
+    /// the rest in list order (a Magic Trackpad unpair takes ~3.4 s on Windows). Spec §3.
+    private List<BTDevice> ReleaseOrder() =>
+        Config.Devices.Where(d => !d.ManagePairing).Concat(Config.Devices.Where(d => d.ManagePairing)).ToList();
 
     /// Tear down one device: disconnect, then (managePairing) unpair. Staleness is re-checked
     /// after every await — a newer run owns the devices once it starts, and a stale release must
@@ -984,7 +1097,7 @@ public sealed class SelectionEngine
     /// the bond is what blocks the other host, so a silent release failure strands the device.
     /// notify=false: the quiet reconcile-on-seed release (spec §3 Evaluate step 5) — no
     /// "Disconnected" notice for a device that wasn't actually connected.
-    private async Task DisconnectOneAsync(BTDevice device, Run run, bool notify = true)
+    private async Task DisconnectOneAsync(BTDevice device, Run run, bool notify = true, bool automatic = false)
     {
         var addr = device.Address;
         var name = device.Name;
@@ -992,10 +1105,19 @@ public sealed class SelectionEngine
         Debug($"{name}: release started (run #{run.Token}, {run.Trigger}; managePairing={device.ManagePairing})");
         NoteIntent(_releaseRequestedToken, device.Id, run.Token);
 
+        // Spec §3: an automatic release stops as soon as the KVM is back (checked before it starts,
+        // before the channel switch, and between steps). Manual and sleep releases always finish.
+        if (automatic && SourcePresentNow)
+        {
+            Debug($"{name}: release skipped: the KVM came back");
+            return;
+        }
+
         // Spec §5a type 5: send a channel-switching device to the other computer's channel; its
         // pairings stay as they are. Falls through to the usual release when that isn't possible.
-        if (!device.ManagePairing && await TrySwitchChannelAsync(device, "the KVM left this PC"))
+        if (!device.ManagePairing && await TrySwitchChannelAsync(device, "the KVM left this PC", stopIfSourceBack: automatic))
         {
+            if (automatic && SourcePresentNow) return;   // the KVM came back: it stays here
             SetStatus(device.Id, DeviceStatus.Disconnected);
             if (notify) OnNotice?.Invoke("Switched", $"{name} went to the other computer");
             return;
@@ -1012,6 +1134,12 @@ public sealed class SelectionEngine
         if (StaleReason(run, respectSelection: false) is { } stale)
         {
             Debug($"{name}: release abandoned after disconnect: {stale}");
+            return;
+        }
+
+        if (automatic && SourcePresentNow)
+        {
+            Debug($"{name}: release stopped after disconnect: the KVM came back");
             return;
         }
 
@@ -1326,7 +1454,13 @@ public sealed class SelectionEngine
         if (!_busyDevices.TryGetValue(id, out var n)) return;
         if (n <= 1) _busyDevices.Remove(id);
         else _busyDevices[id] = n - 1;
+        // A late release deferred because the device was busy (spec §3 Disconnect flow, late release).
+        if (!_busyDevices.ContainsKey(id) && _lateReleasePending.Remove(id) && !Selected)
+            _ = RunLoggedAsync(() => SendOnIfStillHereAsync(id), "late release once free");
     }
+
+    internal void MarkBusyForTest(Guid id) => MarkBusy(id);
+    internal void ClearBusyForTest(Guid id) => ClearBusy(id);
 
     private bool IsBusy(Guid id) => _busyDevices.ContainsKey(id);
 

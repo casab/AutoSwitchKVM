@@ -372,7 +372,12 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   (`IHostSwitcher`, `TrySwitchChannelAsync`) sends the device to `releaseToChannel` (or the single
   other channel marked with cookie 0xA5) on release, marks this PC's channel when it connects while
   selected, and sends it on if it connects while switched away (asleep at the switch). Only the
-  host it's connected to can talk to it, so each host releases its own way. Verified on a K380:
+  host it's connected to can talk to it, so each host releases its own way. Timing rules (from the
+  joint K380 tests with macOS, spec §3): automatic releases go channel-switch devices first
+  (`ReleaseOrder`), stop as soon as the KVM is back (`SourcePresentNow`, ahead of the debounce),
+  a known type 5 device is waited for on arrival, not connected (`WaitForArrivalAsync`, 20 s), and
+  a late release for a busy device is retried when it's freed (`_lateReleasePending`, `ClearBusy`).
+  Verified both ways with the Mac 2026-11-13. Verified on a K380:
   feature index 7, v1, 3 channels; a direct Bluetooth K380 answers any device index (use 0xFF).
   Reference: `reference_flow/` (gitignored; offline Logitech Flow simulator + HID++ docs).
 - **Buttons inside a `SettingsExpander`'s `Items` don't inherit the row's `DataContext`** (the

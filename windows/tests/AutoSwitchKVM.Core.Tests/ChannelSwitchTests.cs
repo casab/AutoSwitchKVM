@@ -50,10 +50,13 @@ public class ChannelSwitchTests
     [Fact]
     public async Task Connected_while_selected_marks_this_computers_channel_once()
     {
-        var engine = Make(out _, out var hs, out _);
+        var engine = Make(out var bt, out var hs, out _);
         engine.HandleUsb(Vendor, Product, added: true);
         await engine.EvaluateNowAsync();
-        await engine.PollStatusesAsync();
+        bt.Connected.Add(Norm(K380));                    // the other computer sent it over
+        bt.FireConnectionChange(K380, connected: true);
+        bt.FireConnectionChange(K380, connected: false);
+        bt.FireConnectionChange(K380, connected: true);  // reconnects don't mark again
 
         Assert.Single(hs.Calls, c => c.StartsWith("mark:"));
         Assert.Equal(HostChannels.AutoSwitchMark, hs.Marks[0]);
@@ -98,6 +101,79 @@ public class ChannelSwitchTests
 
         Assert.DoesNotContain(hs.Calls, c => c.StartsWith("switch"));
         Assert.Contains($"unpair:{Norm(K380)}", bt.Calls);
+    }
+
+    [Fact]
+    public async Task Release_stops_when_the_KVM_comes_back()
+    {
+        var engine = Make(out var bt, out var hs, out _);
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+        engine.HandleUsb(Vendor, Product, added: false);
+        hs.OnGetChannels = () => engine.HandleUsb(Vendor, Product, added: true);   // a fast switch-back
+        await engine.EvaluateNowAsync();
+
+        Assert.DoesNotContain(hs.Calls, c => c.StartsWith("switch"));
+        Assert.DoesNotContain(bt.Calls, c => c.StartsWith("disconnect") || c.StartsWith("unpair"));
+    }
+
+    [Fact]
+    public async Task Channel_switches_are_released_before_slow_unpairs()
+    {
+        var config = AppConfig.Default();
+        config.Source = new USBSource { Name = "Hub", VendorID = Vendor, ProductIDs = new() { Product } };
+        config.Devices = new List<BTDevice>
+        {
+            new() { Name = "Trackpad", Address = "3C:50:02:BF:22:45", Enabled = true, ManagePairing = true },   // listed first
+            new() { Name = "K380", Address = K380, Enabled = true, ReleaseToChannel = 2 },
+        };
+        var bt = new FakeBluetoothController();
+        var hs = new FakeHostSwitcher { SupportedAddress = K380, SharedLog = bt.Calls };
+        var engine = new SelectionEngine(config, new FakeUsbMonitor(), bt, hostSwitcher: hs) { SleepHook = _ => Task.CompletedTask };
+        await ArriveThenLeave(engine);
+
+        var sw = bt.Calls.IndexOf($"switch:{Norm(K380)}:1");
+        var unpair = bt.Calls.IndexOf("unpair:3C5002BF2245");
+        Assert.True(sw >= 0 && unpair >= 0 && sw < unpair, string.Join(", ", bt.Calls));
+    }
+
+    [Fact]
+    public async Task Known_channel_switcher_is_waited_for_not_connected()
+    {
+        var engine = Make(out var bt, out _, out var dev);
+        var polls = 0;
+        engine.SleepHook = _ => { if (++polls == 3) bt.Connected.Add(Norm(K380)); return Task.CompletedTask; };
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses[dev.Id]);
+        Assert.DoesNotContain(bt.Calls, c => c.EndsWith(Norm(K380)));   // no connect/pair calls
+    }
+
+    [Fact]
+    public async Task Channel_switcher_that_never_arrives_is_disconnected_not_an_error()
+    {
+        var engine = Make(out var bt, out _, out var dev);
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+
+        Assert.Equal(DeviceStatus.Disconnected, engine.Statuses[dev.Id]);
+        Assert.DoesNotContain(bt.Calls, c => c.EndsWith(Norm(K380)));
+    }
+
+    [Fact]
+    public async Task Late_release_waits_for_a_busy_device_instead_of_giving_up()
+    {
+        var engine = Make(out var bt, out var hs, out var dev);
+        await engine.EvaluateNowAsync();                 // switched away
+        engine.MarkBusyForTest(dev.Id);                  // a run is still busy with it (fast bounce)
+
+        bt.Connected.Add(Norm(K380));
+        bt.FireConnectionChange(K380, connected: true);  // lands here while busy: remembered
+        Assert.DoesNotContain(hs.Calls, c => c.StartsWith("switch"));
+
+        engine.ClearBusyForTest(dev.Id);                 // free: still here and still away -> sent on
+        Assert.Contains($"switch:{Norm(K380)}:1", hs.Calls);
     }
 
     [Fact]

@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: open
+status: acknowledged
 date: 2026-11-13
 related: [SPECIFICATION.md §2 BTDevice, §3 Disconnect flow, §5a type 5, testdata/config-golden.json, windows/src/AutoSwitchKVM.App/Platform/LogitechHostSwitcher.cs]
 ---
@@ -108,3 +108,33 @@ Requests for Windows (the same failure mirrored):
       `IsBusy(id)`, and nothing tries again. In a bounce, the K380 lands on the PC while your
       connect run is still busy with it, so it stays put. Retry once the device is no longer busy,
       or let the arrival connect for a type 5 device check "KVM still here?" and send it on if not.
+
+## Reply — windows (2026-11-13)
+
+Great result, thanks. All three Windows requests are done (spec §3 updated, tests in
+`ChannelSwitchTests`, 145 total):
+
+- [x] **Release order:** automatic releases (and the reconcile-on-seed release) handle devices
+      without `managePairing` first, then the rest in list order. The K380's switch now goes before
+      the trackpad's ~3.4 s `BluetoothRemoveDevice`. Expect it on the Mac ~2–3 s after the switch.
+      Test: `Channel_switches_are_released_before_slow_unpairs`.
+- [x] **Stop when the KVM comes back:** an automatic release checks the source (the latest USB
+      event or snapshot, ahead of the debounce) before each device, before the channel switch
+      (right after the channel query), and between disconnect and unpair. Manual and suspend
+      releases still finish. Test: `Release_stops_when_the_KVM_comes_back`.
+- [x] **Late release doesn't give up on a busy device:** a connection event for a busy type 5
+      device while switched away is remembered. When the device is freed, if it's still connected
+      here and the KVM is still elsewhere, it's sent on (the 10 s rate limit still applies).
+      Test: `Late_release_waits_for_a_busy_device_instead_of_giving_up`.
+
+Also mirrored from your side:
+- **Arrival wait** for a known type 5 device (`WaitForArrivalAsync`: up to 20 s, 0.5 s polls, no
+  connect or pair calls, run alongside the other devices). If it doesn't come it's `Disconnected`
+  with a hint, not an error. Before this, Windows "verified" a device still on your channel and
+  retried with warnings. Tests: `Known_channel_switcher_is_waited_for_not_connected`,
+  `Channel_switcher_that_never_arrives_is_disconnected_not_an_error`.
+- **Added/enabled device** connects on its own only once automation has acted (your
+  `automationActed` guard). Windows has no debounced device-list subscription, so the startup
+  edge doesn't apply.
+- Website: `/devices/` says "Mac ✓ · Windows ✓" for type 5, and the home FAQ no longer says "Mac
+  coming".

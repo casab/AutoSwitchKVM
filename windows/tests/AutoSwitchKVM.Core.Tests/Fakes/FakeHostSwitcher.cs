@@ -11,16 +11,24 @@ public sealed class FakeHostSwitcher : IHostSwitcher
     public int Current { get; set; }
     public byte[] Marks { get; set; } = new byte[3];
     public List<string> Calls { get; } = new();
+    /// Also record calls here (e.g. the Bluetooth fake's Calls, to check ordering across both).
+    public List<string>? SharedLog { get; set; }
+    /// Runs inside GetChannelsAsync (e.g. to make the KVM come back mid-release).
+    public Action? OnGetChannels { get; set; }
 
     private static string Norm(string a) => a.Replace(":", "").Replace("-", "").ToUpperInvariant();
     private bool Mine(string address) => SupportedAddress is not null && Norm(address) == Norm(SupportedAddress);
 
-    public Task<HostChannels?> GetChannelsAsync(string address, CancellationToken ct = default) =>
-        Task.FromResult(Mine(address) && Reachable ? new HostChannels(Count, Current, Marks.ToArray()) : null);
+    public Task<HostChannels?> GetChannelsAsync(string address, CancellationToken ct = default)
+    {
+        OnGetChannels?.Invoke();
+        return Task.FromResult(Mine(address) && Reachable ? new HostChannels(Count, Current, Marks.ToArray()) : null);
+    }
 
     public Task SwitchToAsync(string address, int channel, CancellationToken ct = default)
     {
         Calls.Add($"switch:{Norm(address)}:{channel}");
+        SharedLog?.Add($"switch:{Norm(address)}:{channel}");
         Current = channel;
         return Task.CompletedTask;
     }
