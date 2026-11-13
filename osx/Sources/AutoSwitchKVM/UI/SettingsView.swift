@@ -244,6 +244,7 @@ struct DevicesTab: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $showAdd) { AddDeviceSheet() }
+        .task { controller.refreshChannelInfo() }
     }
 
     @ViewBuilder
@@ -342,6 +343,8 @@ struct SettingsDeviceCard: View {
                 .labelsHidden().frame(width: 92)
             }
 
+            if let ch = controller.channelInfo[device.id] { channelRow(ch) }
+
             HStack(spacing: 8) {
                 Button("Connect") { controller.testConnect(device) }
                 Button("Disconnect") { controller.testDisconnect(device) }
@@ -373,6 +376,42 @@ struct SettingsDeviceCard: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary, lineWidth: 0.5))
         .opacity(device.enabled ? 1 : 0.7)
+    }
+
+    /// Spec §5a type 5: the device switches channel on request (Logitech Easy-Switch). On release
+    /// it's sent to the other computer's channel instead of being disconnected.
+    @ViewBuilder
+    private func channelRow(_ ch: HostChannels) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Label(
+                    "Switches channel on request · this Mac is on channel \(ch.current + 1) of \(ch.count)",
+                    systemImage: "arrow.left.arrow.right"
+                )
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer()
+                Text("Other computer's channel").font(.system(size: 11)).foregroundStyle(.secondary)
+                Picker("", selection: $device.releaseToChannel) {
+                    Text(ch.markedOtherChannel.map { "Automatic (\($0 + 1))" } ?? "Automatic (not found)")
+                        .tag(Int?.none)
+                    ForEach(1...max(1, ch.count), id: \.self) { n in Text("\(n)").tag(Int?.some(n)) }
+                }
+                .labelsHidden().frame(width: 150)
+                .help(
+                    "Where the device goes when the KVM leaves this Mac. Automatic uses the channel the other "
+                        + "computer's AutoSwitch marked.")
+            }
+            if device.managePairing {
+                Text("Turn off Manage pairing to switch its channel instead of unpairing it.")
+                    .font(.system(size: 11)).foregroundStyle(.orange)
+            } else if device.releaseToChannel == ch.current + 1 {
+                Text("That's this Mac's channel; pick the other computer's.")
+                    .font(.system(size: 11)).foregroundStyle(.orange)
+            } else if device.releaseToChannel == nil, ch.markedOtherChannel == nil {
+                Text("Run AutoSwitch on the other computer, or pick its channel here.")
+                    .font(.system(size: 11)).foregroundStyle(.orange)
+            }
+        }
     }
 
     private var tint: Color { device.enabled ? .accentColor : .gray }

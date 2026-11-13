@@ -41,6 +41,11 @@ Click the AutoSwitch KVM icon in the menu bar and choose **Settings**.
 2. **Add your devices.** In the **Devices** tab, click **Add** and pick your trackpad, keyboard or
    mouse from the devices this Mac knows. For the **Magic Trackpad**, or any device that only
    pairs with one computer at a time, turn on **Manage pairing**.
+   For a **Logitech Easy-Switch** keyboard or mouse (e.g. K380), leave Manage pairing **off**:
+   AutoSwitch tells it to change channel instead. Its card then shows "Switches channel on
+   request" and which channel this Mac is on. The other computer's channel is found
+   automatically; you can also set it there. macOS asks once for the **Input Monitoring**
+   permission, which AutoSwitch needs to talk to the keyboard.
 3. **Install it on your other computer too** and set it up the same way, so that computer
    releases the devices when the KVM leaves it.
 
@@ -85,6 +90,9 @@ AutoSwitch also releases your devices when the Mac goes to sleep, and catches up
   to the other computer and back, or turn the trackpad off and on.
 - **The Mac thinks the KVM is here when it isn't.** Some docks contain the same USB hubs as the
   KVM. Run **Learn source…** again: it pins the source to the KVM's own port.
+- **A Logitech keyboard doesn't change channel.** Check **System Settings ▸ Privacy & Security ▸
+  Input Monitoring** and make sure AutoSwitch KVM is allowed, and that Manage pairing is off for it.
+  It also needs AutoSwitch on the other computer to send it back.
 - **Nothing happens at all.** Check **System Settings ▸ Privacy & Security ▸ Bluetooth** and make
   sure AutoSwitch KVM is allowed.
 - **"AutoSwitch KVM is already running."** Only one copy can manage your devices at a time; use

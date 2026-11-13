@@ -114,10 +114,11 @@ final class SelectionEngine: ObservableObject {
     /// When each device's last unpair returned (its link was down; the key deletion still pending).
     private var lastUnpairAt: [UUID: ContinuousClock.Instant] = [:]
 
-    init(store: ConfigStore, usb: USBMonitoring, bt: BluetoothController) {
+    init(store: ConfigStore, usb: USBMonitoring, bt: BluetoothController, hostSwitcher: HostSwitcher? = nil) {
         self.store = store
         self.usb = usb
         self.bt = bt
+        self.hostSwitcher = hostSwitcher
 
         // Events are delivered on the main queue (USBMonitor dispatches there), so assumeIsolated
         // is safe and lets us call the @MainActor handler from the Combine closure.
@@ -126,16 +127,89 @@ final class SelectionEngine: ObservableObject {
             .store(in: &cancellables)
 
         // Re-register Bluetooth observers whenever the device list changes (debounced so rapid
-        // settings edits don't thrash). dropFirst avoids double-registering at startup.
+        // settings edits don't thrash). dropFirst skips the current value (startup registers it).
         // DispatchQueue.main, not RunLoop.main: the run-loop scheduler stalls in tracking mode
         // (menu open / modal panel), which would freeze automation while the UI is interacted with.
+        //
+        // Spec §3 Evaluate step 6: a device list edit is not a seed. Only the added or re-enabled
+        // device connects (`deviceListChanged`); the others are left alone.
+        lastDeviceList = DeviceListSnapshot(profileID: store.config.activeProfileID, devices: store.config.devices)
         store.$config
-            .map(\.devices)
+            .map { DeviceListSnapshot(profileID: $0.activeProfileID, devices: $0.devices) }
             .removeDuplicates()
-            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            // Drop the current value *before* debouncing: after the debounce, an edit made within
+            // 300 ms of startup would merge with it and be dropped too.
             .dropFirst()
-            .sink { [weak self] _ in MainActor.assumeIsolated { self?.refreshMonitoring() } }
+            .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+            .sink { [weak self] snapshot in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.refreshMonitoring()
+                    let previous = self.lastDeviceList
+                    self.lastDeviceList = snapshot
+                    Task { @MainActor in await self.deviceListChanged(from: previous, to: snapshot) }
+                }
+            }
             .store(in: &cancellables)
+    }
+
+    /// The device list as the engine last saw it, with the profile it belongs to.
+    struct DeviceListSnapshot: Equatable {
+        let profileID: UUID
+        let devices: [BTDevice]
+    }
+
+    private var lastDeviceList: DeviceListSnapshot?
+
+    /// Spec §3 Evaluate step 6. A device that was added or re-enabled while this Mac is selected
+    /// (and the automation has acted on that) connects on its own, joining the current run. A
+    /// removed device is forgotten and left as it is. Nothing else runs again: a full pass would
+    /// put every managed device through pair + HID check and show working devices "Connecting…".
+    ///
+    /// A profile switch or an import also changes the list, but those re-seed the engine, which
+    /// connects everything itself; so this only acts within the same profile and while
+    /// `automationActed` holds (a pending re-evaluation clears it). Internal for tests.
+    func deviceListChanged(from old: DeviceListSnapshot?, to new: DeviceListSnapshot) async {
+        guard let old, old.profileID == new.profileID else { return }
+        let oldByID = Dictionary(uniqueKeysWithValues: old.devices.map { ($0.id, $0) })
+        let newIDs = Set(new.devices.map(\.id))
+
+        for removed in old.devices where !newIDs.contains(removed.id) {
+            statuses[removed.id] = nil
+            lastAutoReconnect[removed.id] = nil
+            Log.engine.log("\(removed.name): removed from the device list; left as it is")
+        }
+
+        let joined = new.devices.filter { device in
+            device.enabled && !(oldByID[device.id]?.enabled ?? false)
+        }
+        for device in joined {
+            await connectJoinedDevice(device, added: oldByID[device.id] == nil)
+        }
+    }
+
+    private func connectJoinedDevice(_ device: BTDevice, added: Bool) async {
+        let what = added ? "added" : "re-enabled"
+        let skip: String? =
+            !selected
+            ? "the KVM is on another computer"
+            : !automationActed
+                ? "a re-evaluation will connect it"
+                : store.config.paused
+                    ? "automation is paused"
+                    : suspended
+                        ? "the system is going to sleep"
+                        : !bluetoothPowered
+                            ? "Bluetooth is off" : isBusy(device.id) ? "another operation is in flight" : nil
+        if let skip {
+            Log.engine.debug("\(device.name): \(what); not connecting now (\(skip))")
+            return
+        }
+        Log.engine.log("\(device.name): \(what) while the KVM is on this Mac → connecting")
+        let run = currentRun("device \(what)")
+        markBusy(device.id)
+        defer { clearBusy(device.id) }
+        await connectOne(device, run: run, respectSelection: true)
     }
 
     // MARK: - Runs
@@ -156,6 +230,16 @@ final class SelectionEngine: ObservableObject {
 
     private func currentRun(_ trigger: String) -> Run {
         Run(token: runToken, trigger: trigger)
+    }
+
+    /// Like `staleReason`, for a release: an automatic release also stops when the source is back
+    /// (a fast switch-back while it was still running). Before the arrival debounce supersedes the
+    /// run, the Mac would otherwise still send a keyboard to the other computer's channel, or unpair
+    /// the trackpad, after the KVM had already returned. Manual and sleep releases always finish.
+    private func releaseStaleReason(_ run: Run) -> String? {
+        if let why = staleReason(run, respectSelection: false) { return why }
+        if run.since != nil, !run.sleepRelease, !presentKeys.isEmpty { return "the KVM came back" }
+        return nil
     }
 
     /// Why in-flight work for this run must stop, or nil if it may continue.
@@ -434,6 +518,7 @@ final class SelectionEngine: ObservableObject {
             if wouldAct { Log.engine.debug("evaluate: automation paused; not acting on '\(lastReason)'") }
             return
         }
+        presenceEvaluated = true
 
         // `automationActed` latches the presence the automation last acted on, so resuming from
         // pause reconciles to the current state.
@@ -615,15 +700,30 @@ final class SelectionEngine: ObservableObject {
     // MARK: - Connect
 
     private func connectAll(run: Run) async {
-        for device in store.config.devices where device.enabled {
+        let devices = store.config.devices.filter(\.enabled)
+        // A channel-switching device comes over by itself and its wait uses no radio, so it runs
+        // alongside the others: a slow pair (17 s on hardware, in a fast switch-back) mustn't keep
+        // it waiting in line.
+        var waits: [Task<Void, Never>] = []
+        for device in devices where switchesChannels(device) {
+            markBusy(device.id)
+            waits.append(
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    defer { self.clearBusy(device.id) }
+                    await self.connectOne(device, run: run, respectSelection: true)
+                })
+        }
+        for device in devices where !switchesChannels(device) {
             if let why = staleReason(run, respectSelection: false) {
                 Log.engine.debug("run #\(run.token): connect run stopped: \(why)")
-                return
+                break
             }
             markBusy(device.id)
             defer { clearBusy(device.id) }
             await connectOne(device, run: run, respectSelection: true)
         }
+        for wait in waits { await wait.value }
     }
 
     /// The connect flow for one device (SPECIFICATION.md §3), with failure classification:
@@ -656,6 +756,14 @@ final class SelectionEngine: ObservableObject {
                 markAborted(device.id)
                 return
             }
+        }
+
+        // Spec §5a type 5: a device that switches channel on request comes over by itself when the
+        // other computer sends it here. Calling it meanwhile only gets in its way (seen on
+        // hardware: three page timeouts kept a K380 out for ~20 s), so wait for it instead.
+        if switchesChannels(device) {
+            await waitForChannelArrival(device, run: run, respectSelection: respectSelection, start: start)
+            return
         }
 
         var tries = 0
@@ -948,7 +1056,7 @@ final class SelectionEngine: ObservableObject {
 
     private func disconnectAll(run: Run) async {
         for device in store.config.devices where device.enabled {
-            if let why = staleReason(run, respectSelection: false) {  // e.g. the source came back
+            if let why = releaseStaleReason(run) {  // e.g. the source came back
                 Log.engine.debug("run #\(run.token): release run stopped: \(why)")
                 return
             }
@@ -970,6 +1078,19 @@ final class SelectionEngine: ObservableObject {
         Log.engine.debug(
             "\(name): release started (run #\(run.token), \(run.trigger); managePairing=\(device.managePairing))")
 
+        if let why = releaseStaleReason(run) {
+            Log.engine.log("\(name): release abandoned before it started: \(why)")
+            return
+        }
+
+        // Spec §5a type 5: send a channel-switching device to the other computer's channel; its
+        // pairings stay as they are. Falls through to the usual release when that isn't possible.
+        if !device.managePairing, await trySwitchChannel(device, why: "the KVM left this Mac") {
+            setStatus(device.id, .disconnected)
+            if notify { onNotice?("Switched", "\(name) went to the other computer") }
+            return
+        }
+
         var disconnectFailure: Failure?
         do {
             try await step(name, nil, "disconnect") { try await self.bt.disconnect(addr) }
@@ -979,7 +1100,7 @@ final class SelectionEngine: ObservableObject {
                 "\(name): disconnect failed: \(disconnectFailure!.summary)"
                     + (device.managePairing ? "; unpairing anyway" : ""))
         }
-        if let why = staleReason(run, respectSelection: false) {
+        if let why = releaseStaleReason(run) {
             Log.engine.debug("\(name): release abandoned after disconnect: \(why)")
             return
         }
@@ -1001,20 +1122,20 @@ final class SelectionEngine: ObservableObject {
                 } catch {
                     let f = Failure(error)
                     unpairFailure = f
-                    if let why = staleReason(run, respectSelection: false) {
+                    if let why = releaseStaleReason(run) {
                         Log.engine.debug("\(name): release abandoned after a failed unpair (\(f.summary)): \(why)")
                         return
                     }
                     guard attempt == 1, f.kind != .invalidAddress else { break }
                     Log.engine.warn("\(name): unpair failed: \(f.summary); retrying once in \(releaseRetryDelayMs) ms")
                     await sleepHook(releaseRetryDelayMs)
-                    if let why = staleReason(run, respectSelection: false) {
+                    if let why = releaseStaleReason(run) {
                         Log.engine.debug("\(name): release abandoned before the unpair retry: \(why)")
                         return
                     }
                 }
             }
-            if let why = staleReason(run, respectSelection: false) {
+            if let why = releaseStaleReason(run) {
                 Log.engine.debug("\(name): release abandoned after unpair: \(why)")
                 return
             }
@@ -1112,6 +1233,158 @@ final class SelectionEngine: ObservableObject {
     }
 
     private func setStatus(_ id: UUID, _ status: DeviceStatus) {
-        if statuses[id] != status { statuses[id] = status }
+        let old = statuses[id]
+        guard old != status else { return }
+        statuses[id] = status
+        if status == .connected { becameConnected(id) }
+    }
+
+    // MARK: - Channel switching (spec §5a type 5)
+
+    private let hostSwitcher: HostSwitcher?
+    /// True once an evaluation acted on real presence, so `selected` can be trusted.
+    private var presenceEvaluated = false
+    /// Devices whose channel was marked this session.
+    private var channelMarked = Set<UUID>()
+    private var lastLateRelease: [UUID: Date] = [:]
+    /// A device that keeps waking up here while the KVM is away is sent on at most this often.
+    var lateReleaseMinInterval: TimeInterval = 10
+    /// Devices seen answering the channel query this session (type 5).
+    private var channelSwitchers = Set<UUID>()
+    /// How long a channel-switching device is given to come over after the KVM arrives.
+    var channelArrivalWaitMs = 20_000
+
+    /// Whether the device is known to switch channels: it answered here this session, or the user
+    /// picked the other computer's channel for it. Pairing-managed devices never are.
+    func switchesChannels(_ device: BTDevice) -> Bool {
+        guard hostSwitcher != nil, !device.managePairing else { return false }
+        return channelSwitchers.contains(device.id) || device.releaseToChannel != nil
+    }
+
+    /// Settings learned it switches channels (it answered the query while connected).
+    func noteSwitchesChannels(_ id: UUID) { channelSwitchers.insert(id) }
+
+    /// Wait (without calling it) for a channel-switching device to arrive. The other computer's
+    /// AutoSwitch sends it here when the KVM leaves that computer.
+    private func waitForChannelArrival(
+        _ device: BTDevice, run: Run, respectSelection: Bool, start: ContinuousClock.Instant
+    ) async {
+        let addr = device.normalizedAddress
+        let polls = max(1, channelArrivalWaitMs / max(1, hidPollIntervalMs))
+        Log.engine.debug(
+            "\(device.name): switches channels; waiting for it to come over (up to \(channelArrivalWaitMs) ms)")
+        for _ in 0...polls {
+            if let why = staleReason(run, respectSelection: respectSelection) {
+                Log.engine.debug("\(device.name): stopped waiting for it to come over: \(why)")
+                markAborted(device.id)
+                return
+            }
+            if await bt.isConnected(addr), await bt.isHIDReady(addr) != false {
+                let timeline = run.since.map { "; \(Elapsed.since($0)) after the source appeared" } ?? ""
+                Log.engine.log(
+                    "\(device.name): connected ✓ (came over from the other computer) in \(Elapsed.since(start))\(timeline)"
+                )
+                setStatus(device.id, .connected)
+                return
+            }
+            await sleepHook(hidPollIntervalMs)
+        }
+        Log.engine.log(
+            "\(device.name): didn't come over within \(channelArrivalWaitMs / 1000) s. The other computer's AutoSwitch "
+                + "sends it here; if that one isn't running, press the device's channel key")
+        setStatus(device.id, .disconnected)
+    }
+
+    /// A device that switches channel on request is sent to the other computer's channel instead
+    /// of being disconnected. True when it was sent; false when it doesn't support that, isn't
+    /// connected here, or the target channel is unknown (the caller then releases it as usual).
+    private func trySwitchChannel(_ device: BTDevice, why: String) async -> Bool {
+        guard let hostSwitcher else { return false }
+        let addr = device.normalizedAddress
+        let channels: HostChannels?
+        do {
+            channels = try await withTimeout(store.config.btCallTimeoutSecs) { try await hostSwitcher.channels(addr) }
+        } catch {
+            Log.engine.debug("\(device.name): channel query failed: \(Failure(error).summary)")
+            return false
+        }
+        guard let ch = channels else { return false }  // no channel switching, or not connected here
+        channelSwitchers.insert(device.id)
+
+        let target: Int?
+        if let n = device.releaseToChannel, n >= 1, n <= ch.count {
+            target = n - 1
+        } else {
+            target = ch.markedOtherChannel
+        }
+        guard let target else {
+            Log.engine.warn(
+                "\(device.name): it can switch channels, but the other computer's channel isn't known (set it in "
+                    + "the device's settings, or run AutoSwitch on the other computer)")
+            return false
+        }
+        guard target != ch.current else {
+            Log.engine.warn(
+                "\(device.name): the other computer's channel is set to \(target + 1), but that's this Mac's "
+                    + "channel; check the setting")
+            return false
+        }
+        do {
+            try await withTimeout(store.config.btCallTimeoutSecs) {
+                try await hostSwitcher.switchTo(addr, channel: target)
+            }
+        } catch {
+            Log.engine.warn("\(device.name): switching to channel \(target + 1) failed: \(Failure(error).summary)")
+            return false
+        }
+        Log.engine.log("\(device.name): sent to channel \(target + 1) (\(why))")
+        return true
+    }
+
+    /// A device became connected. KVM here: mark our channel (once per session) so the other
+    /// computer can find it. KVM elsewhere (the device was asleep at the switch and woke up on its
+    /// old channel): send it on, rate-limited.
+    private func becameConnected(_ id: UUID) {
+        guard let hostSwitcher,
+            let device = store.config.devices.first(where: { $0.id == id }),
+            device.enabled, !device.managePairing
+        else { return }
+        if selected {
+            guard channelMarked.insert(id).inserted else { return }
+            let addr = device.normalizedAddress
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                do {
+                    let marked = try await withTimeout(self.store.config.btCallTimeoutSecs) {
+                        try await hostSwitcher.markCurrentChannel(addr)
+                    }
+                    if let marked {
+                        self.channelSwitchers.insert(id)
+                        Log.engine.log(
+                            "\(device.name): marked channel \(marked + 1) as this Mac's (for the other computer's AutoSwitch)"
+                        )
+                    } else if try await hostSwitcher.channels(addr) != nil {
+                        self.channelSwitchers.insert(id)  // already marked: still a channel switcher
+                    }
+                } catch {
+                    self.channelMarked.remove(id)
+                    Log.engine.debug("\(device.name): could not mark this Mac's channel: \(Failure(error).summary)")
+                }
+            }
+            return
+        }
+        guard presenceEvaluated, !store.config.paused, !suspended, !isBusy(id) else { return }
+        let now = Date()
+        if let last = lastLateRelease[id], now.timeIntervalSince(last) < lateReleaseMinInterval { return }
+        lastLateRelease[id] = now
+        Log.engine.log("\(device.name): connected while the KVM is on the other computer → sending it there")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.markBusy(id)
+            defer { self.clearBusy(id) }
+            if await self.trySwitchChannel(device, why: "it connected here while the KVM is elsewhere") {
+                self.setStatus(id, .disconnected)
+            }
+        }
     }
 }

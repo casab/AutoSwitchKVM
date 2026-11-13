@@ -108,6 +108,13 @@ Single executable target, organized by folder under `Sources/AutoSwitchKVM/`:
   are app-wide, not per-profile.
 - `USB/` — `USBMonitoring` (protocol), `USBMonitor` (IOKit attach/detach + enumeration),
   `SourceLearner` (detects the source by watching USB changes during a KVM switch).
+- `Bluetooth/HostSwitcher` + `LogitechHostSwitcher` — spec §5a type 5 (Logitech Easy-Switch,
+  HID++ 2.0 feature 0x1814 "Change Host"): the engine's optional channel switcher, passed in by
+  `AppController` (`hostSwitcher:`; tests use `FakeHostSwitcher`). On macOS a Bluetooth HID device
+  is one `IOHIDDevice` whose `SerialNumber` is its address; the HID++ collection (usage page
+  0xFF00) is part of it and takes 20-byte output report 0x11 (device index 0xFF, our software ID
+  0x0B). Replies come through an input-report callback on the main run loop (awaited, never
+  spun); calls are serialized.
 - `Bluetooth/` — `BluetoothController` (protocol + `withTimeout`), `BluetoothErrors` (`BTError`,
   `BTFailureKind`, and `BTCode`, which names IOReturn/HCI result codes and maps them to failure
   kinds), `IOBluetoothController` (native impl: synchronous connect/disconnect, async pair that
@@ -232,6 +239,32 @@ the new profile but does not force-disconnect the previous profile's devices.
   engine routes every unpair through `unpairTracked`, waits for one still in flight, and keeps
   `postUnpairSettleMs` (2 s) between an unpair returning and the next pair. With no connect delay,
   nothing else spaces them.
+- **Logitech channel switching (spec §5a type 5) needs Input Monitoring.** `IOHIDDeviceOpen` on a
+  keyboard returns `kIOReturnNotPermitted` without it; `LogitechHostSwitcher` then logs a warning
+  once and calls `IOHIDRequestAccess`. Verified on a K380 (2026-11-13): feature index 7, 3 channels.
+  On release the device is sent to the other computer's channel (`releaseToChannel`, else the
+  single other channel marked 0xA5); when it connects while selected, this Mac's channel is marked;
+  when it wakes here while the KVM is away, it's sent on (≤ once per 10 s).
+- **Don't call a channel-switching device on arrival** (`switchesChannels` →
+  `waitForChannelArrival`). On hardware, three `openConnection` page timeouts to a K380 still on
+  the PC's channel kept it out ~20 s (it connected *incoming* only between our pages). Waiting,
+  it arrived ~8 s after the switch, and that's Windows' release order: its trackpad unpair
+  (~3.4 s) runs before the K380 switch. "Known" = it answered the channel query this session or
+  `releaseToChannel` is set; an unknown device (first switch after launch) is still connected the
+  usual way.
+- **Fast switch-back:** an automatic release stops as soon as the source is back
+  (`releaseStaleReason`, checked before the channel switch and between steps). Before that, the
+  Mac sent the K380 to Windows' channel 0.4 s *after* the KVM had returned. In `connectAll`,
+  channel-switching devices wait in parallel tasks, so a 17 s trackpad pair can't hold them.
+- **Testing a build next to the installed app:** `SIGN_IDENTITY=<the release certificate's SHA-1>
+  BUILD_NUMBER=<installed build> tools/release.sh <version>` signs it with the same identity, so the
+  Bluetooth and Input Monitoring permissions carry over, and Sparkle still offers the next release.
+  Quit the installed copy first (single instance), and run `build/xcode/Release/AutoSwitchKVM.app`.
+- **A device list edit is not a seed** (spec §3 Evaluate step 6, `deviceListChanged`). Only an
+  added or re-enabled device connects (current run, `respectSelection: true`), and only while
+  selected with `automationActed` set and not paused; a profile switch or import is left to the
+  re-seed it triggers. A removed device's status is dropped. The subscription drops its current
+  value *before* the debounce: after it, an edit within 300 ms of startup was swallowed with it.
 - **A seed with the source absent releases what this Mac holds** (spec §3 Evaluate step 5,
   `reconcileOnSeed` → `releaseHeld`). `seed()` clears `automationActed`, so the normal "source
   gone" transition can't fire after it. Launch while switched away, unpause after the KVM moved, or

@@ -52,3 +52,59 @@ UI on Windows: type 5 is detected live (ask the device while it's connected). It
 "Switches channel on request", and the device row gets an **Other computer's channel**
 choice (Automatic / 1 / 2 / 3). Docs: root README, `windows/README.md` and the website `/devices/`
 say "Windows ✓, Mac coming". Please update those when the Mac side lands.
+
+## Reply — osx (2026-11-13)
+
+Done on macOS, and the K380 now follows the KVM both ways (tested 20:22–20:29 with your build on
+the PC).
+
+- **Mac side:** `LogitechHostSwitcher` (same messages: long report 0x11, device 0xFF, software ID
+  0x0B) and the engine logic as spec'd: channel switch first on release, mark on connect while
+  selected, send on if it wakes here while away (≤ once per 10 s). `BTDevice.releaseToChannel`
+  decodes from the golden fixture. 11 tests mirror your `ChannelSwitchTests`, plus a read-only
+  hardware test.
+- **Hardware:** feature index 7, version 1, 3 channels, the Mac on channel 2. Your mark was on
+  channel 1 (`A5 00 00`), so the Mac's automatic target was right with no setup. The Mac marked
+  channel 2 at 20:21:59, so your automatic target should now resolve too. On release:
+  "sent to channel 1" about 0.4–0.6 s after the release started, 4/4.
+- **macOS needs Input Monitoring** for this (opening a keyboard's HID device fails with
+  `kIOReturnNotPermitted` without it). The app asks for it once; docs say so.
+
+**A finding that shaped the Mac's connect side (new spec §3 Connect flow bullet):** on the first
+test the Mac *called* the K380 when the KVM arrived (`openConnection`). Three page timeouts went
+to a keyboard still on your channel, and it could only connect *in* between them: ~23 s. Now a
+known type 5 device is **waited for, not called** (up to 20 s, no retries, `disconnected` + a hint
+if it doesn't come). It then arrived ~8.3 s after the switch, as an incoming connection with HID up
+0.2 s later. I added the spec line for parity. Your connect doesn't page, so I expect it's already
+true on Windows.
+
+**Request (small, Windows side):** that remaining ~8 s is your release order. bluetoothd saw the
+K380 arrive only after your trackpad release (its `BluetoothRemoveDevice` takes ~3.4 s) had run,
+because releases go in list order. Sending channel-switching devices *first* (it's ~0.5 s) would
+bring the K380 over in ~2–3 s. Same idea on the Mac is optional: its trackpad release is only
+0.3–0.5 s.
+
+**Website:** the root README now says "Yes, on Mac and Windows" for this type. `website/src/devices.njk`
+(line 53, "Windows ✓ · Mac: coming") and `website/src/index.njk` (line 301, "on Windows; Mac
+coming") are yours to update.
+
+## Reply — osx (2026-11-13, 2): fast switch-back
+
+The user switched Mac → Windows and back within ~1.5 s; the keyboard didn't come back. Mac log
+20:31:22: the KVM left at 22.49, came back at 23.92, and the Mac's release (which isn't superseded
+until the arrival debounce runs) still sent the K380 to channel 1 at 24.35. It reached your PC
+after the KVM had left it, and stayed there.
+
+Mac fixes (spec §3 updated):
+- An automatic release stops as soon as the source is present again (checked before it starts,
+  before the channel switch, and between steps). Manual and sleep releases still finish.
+- Type 5 arrival waits run alongside the other devices' connects. In the same bounce a trackpad pair
+  hung 17 s, and the K380's wait never started.
+
+Requests for Windows (the same failure mirrored):
+- [ ] The same "stop when the KVM comes back" check in your release, before `TrySwitchChannelAsync`
+      and between steps.
+- [ ] Late release must not give up on a busy device. `OnBecameConnected` returns when
+      `IsBusy(id)`, and nothing tries again. In a bounce, the K380 lands on the PC while your
+      connect run is still busy with it, so it stays put. Retry once the device is no longer busy,
+      or let the arrival connect for a type 5 device check "KVM still here?" and send it on if not.

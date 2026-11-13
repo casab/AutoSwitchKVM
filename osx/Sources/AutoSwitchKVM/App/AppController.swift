@@ -12,6 +12,8 @@ final class AppController: ObservableObject {
     let store: ConfigStore
     let usb: USBMonitor
     let bt: BluetoothController
+    /// Logitech Easy-Switch channel switching (spec §5a type 5); also asked by Settings.
+    let hostSwitcher: HostSwitcher
     let engine: SelectionEngine
     let learner: SourceLearner
     private let sleepWake = SleepWakeMonitor()
@@ -44,7 +46,9 @@ final class AppController: ObservableObject {
         self.store = store
         self.usb = usb
         self.bt = bt
-        self.engine = SelectionEngine(store: store, usb: usb, bt: bt)
+        let hostSwitcher = LogitechHostSwitcher()
+        self.hostSwitcher = hostSwitcher
+        self.engine = SelectionEngine(store: store, usb: usb, bt: bt, hostSwitcher: hostSwitcher)
         self.learner = SourceLearner(usb: usb)
 
         // DispatchQueue.main, not RunLoop.main: run-loop delivery stalls while a menu/modal is
@@ -395,6 +399,32 @@ final class AppController: ObservableObject {
             append("disconnect \(device.name)…", level: .debug)
             let error = await engine.disconnectDeviceNow(device)
             append("disconnect \(device.name): \(error ?? "ok")", level: .debug)
+        }
+    }
+
+    // MARK: - Channel switching info (spec §5a type 5)
+
+    /// Live channel info of devices that switch channel on request, for Settings ▸ Devices. Kept
+    /// after the device leaves (it can only answer while connected here), so the setting stays
+    /// visible while the KVM is on the other computer.
+    @Published private(set) var channelInfo: [UUID: HostChannels] = [:]
+
+    /// Ask each enabled device that isn't pairing-managed whether it switches channel on request.
+    /// Read-only HID++ queries; a device that isn't connected here simply doesn't answer.
+    func refreshChannelInfo() {
+        let devices = store.config.devices.filter { $0.enabled }
+        Task { @MainActor in
+            for device in devices {
+                do {
+                    let ch = try await withTimeout(5) { try await self.hostSwitcher.channels(device.normalizedAddress) }
+                    if let ch {
+                        channelInfo[device.id] = ch
+                        engine.noteSwitchesChannels(device.id)
+                    }
+                } catch {
+                    Log.app.debug("\(device.name): channel query failed: \(error)")
+                }
+            }
         }
     }
 

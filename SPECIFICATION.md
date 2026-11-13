@@ -147,11 +147,21 @@ controller** (the operations in §5). It owns no platform APIs directly.
    every `managePairing` device through pair + HID check again, and the user sees working devices
    go "Connecting…". Refresh monitoring only. A device that is **added or re-enabled** while this
    host is selected (and not paused) is connected on its own, joining the current run (Windows
-   implemented; macOS refreshes monitoring only, so it connects on the next switch). A removed
-   device is forgotten and left as it is.
+   and macOS implemented). A removed device is forgotten and left as it is.
 
 ### Connect flow (per enabled device, in list order)
 - Apply `connectDelayMs` first (stagger), re-checking cancellation after the wait.
+- **A known type 5 device is waited for, not connected** (§5a; macOS 2026-11-13). The other
+  host's AutoSwitch sends it here, and it connects by itself. A host that calls it meanwhile gets
+  in its way. On macOS, three page timeouts to a K380 still on the other channel kept it from
+  connecting for ~20 s; waiting, it arrived as soon as the other host released it. So: poll for
+  it (connected + HID up) for up to ~20 s, with no connect calls and no retries. If it doesn't
+  come, leave it `disconnected` (not an error) and say why (AutoSwitch not running on the other
+  computer → press the device's channel key). "Known" = it answered the channel query this
+  session, or `releaseToChannel` is set. Windows' connect for such a device doesn't call it, so
+  this is about doing nothing there either. These waits run **alongside** the other devices'
+  connects, not in list order: in a fast switch-back a trackpad pair took 17 s, and the keyboard
+  never got its turn.
 - Retry loop up to `connectRetryMax`:
   - If Bluetooth adapter is **off** → set status `bluetoothOff`, stop.
   - Abort if the run is stale (token changed) or the source is no longer present.
@@ -176,7 +186,12 @@ controller** (the operations in §5). It owns no platform APIs directly.
 - On giving up after `connectRetryMax`, set status `error`.
 
 ### Disconnect flow (per enabled device)
-- **Channel switch first** (§5a type 5; Windows implemented 2026-11-13, macOS pending): if
+- **Stop when the KVM comes back** (macOS 2026-11-13): an *automatic* release is abandoned as soon
+  as the source is present again, checked before it starts, before the channel switch, and between
+  its steps. Before the arrival debounce supersedes the run, a fast switch-back otherwise still sent
+  a K380 to the other computer's channel after the KVM had returned. That computer then had no KVM
+  and didn't send it back. Manual and sleep releases always finish.
+- **Channel switch first** (§5a type 5; Windows and macOS implemented 2026-11-13): if
   `managePairing` is off and the device is connected here and supports host-initiated channel
   switching, send it to the target channel (`releaseToChannel`, else the single other channel
   marked by AutoSwitch) and stop: no disconnect, no unpair. If the target is unknown or the switch
@@ -357,7 +372,7 @@ in Add device and in each device's settings, and say plainly what AutoSwitch can
 | 1 | **Hands off by pairing** | One pairing. Once the current host removes it, the next host can pair with no button press. | **Supported** (macOS, Windows): `managePairing` on; unpair on leave, pair on arrive. |
 | 2 | **Picks the computer itself** | A pairing per host slot (ZMK/QMK profiles, Logitech Easy-Switch); a key on the device chooses the host. | **Not possible** from any host: a host can't change the device's slot, and unpairing breaks that slot (re-pair from the device). Status only. Workarounds: the device's own switch key, or USB through the KVM. |
 | 3 | **Re-pairs by hand** | Remembers one Bluetooth host; changing hosts needs pairing mode on the device (Xbox, PlayStation, Nintendo controllers). | **Not possible** automatically: after an unpair the device still points at the old host, and the new host can't pair until the user enters pairing mode. Status only. Workarounds: keep it on one computer, or connect it by cable through the KVM. |
-| 5 | **Switches channel on request** | A type 2 device whose connected host can tell it to change slot: Logitech Easy-Switch devices with HID++ 2.0 feature **0x1814 "Change Host"** (`getHostInfo`, `setCurrentHost(n)`, `getCookies`, `setCookie(n, b)`). | **Supported on release** (Windows implemented 2026-11-13; macOS pending): the leaving host sends it to the other host's channel; pairings untouched; `managePairing` off. Only the host it's connected to can send the command, so each host does its own release. See the Disconnect flow. |
+| 5 | **Switches channel on request** | A type 2 device whose connected host can tell it to change slot: Logitech Easy-Switch devices with HID++ 2.0 feature **0x1814 "Change Host"** (`getHostInfo`, `setCurrentHost(n)`, `getCookies`, `setCookie(n, b)`). | **Supported on release** (Windows and macOS implemented 2026-11-13): the leaving host sends it to the other host's channel; pairings untouched; `managePairing` off. Only the host it's connected to can send the command, so each host does its own release. See the Disconnect flow. |
 | 4 | **Joins whichever computer connects** | Remembers several hosts and connects to the one that asks (many headphones/speakers, some mice). | **macOS: supported** with `managePairing` off (disconnect on leave, connect on arrive). **Windows: not yet**: there is no public API to disconnect a Bluetooth device without unpairing it (a future option for Classic devices: toggling the device's services with `BluetoothSetServiceState`). |
 
 **Classification** (best effort, shown with its confidence: *known* model, *likely* from vendor or

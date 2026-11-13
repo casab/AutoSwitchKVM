@@ -121,6 +121,12 @@ final class MockBluetoothController: BluetoothController {
         monitoringOnChange?(norm(address), false)
     }
 
+    /// Simulate the device connecting on its own (e.g. it woke up on this host's channel).
+    func simulateConnection(_ address: String) {
+        connectedAddrs.insert(norm(address))
+        monitoringOnChange?(norm(address), true)
+    }
+
     /// Test setup: the device is already bonded/connected (not recorded in `calls`).
     func preset(paired: Bool = false, connected: Bool = false, _ address: String) {
         if paired { pairedAddrs.insert(norm(address)) }
@@ -146,5 +152,42 @@ final class Gate {
     func open() {
         continuation?.resume()
         continuation = nil
+    }
+}
+
+/// HostSwitcher fake: one channel-switching device (a K380-like keyboard with 3 channels).
+/// Mirrors windows/tests FakeHostSwitcher.
+@MainActor
+final class FakeHostSwitcher: HostSwitcher {
+    var supportedAddress: String?
+    var reachable = true
+    var count = 3
+    var current = 0
+    var marks: [UInt8] = [0, 0, 0]
+    private(set) var calls: [String] = []
+
+    private func norm(_ a: String) -> String {
+        a.replacingOccurrences(of: ":", with: "").replacingOccurrences(of: "-", with: "").uppercased()
+    }
+    private func mine(_ address: String) -> Bool {
+        supportedAddress.map { norm($0) == norm(address) } ?? false
+    }
+
+    func channels(_ address: String) async throws -> HostChannels? {
+        mine(address) && reachable ? HostChannels(count: count, current: current, marks: marks) : nil
+    }
+
+    func switchTo(_ address: String, channel: Int) async throws {
+        calls.append("switch:\(norm(address)):\(channel)")
+        current = channel
+    }
+
+    @discardableResult
+    func markCurrentChannel(_ address: String) async throws -> Int? {
+        guard mine(address), reachable else { return nil }  // like the real one: nothing to talk to
+        calls.append("mark:\(norm(address)):\(current)")
+        guard marks[current] != HostChannels.autoSwitchMark else { return nil }
+        marks[current] = HostChannels.autoSwitchMark
+        return current
     }
 }

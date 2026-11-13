@@ -66,6 +66,10 @@ struct BTDevice: Codable, Identifiable, Hashable {
     /// Delay (ms) before connecting this device, to stagger a handoff. Connect order is the
     /// position in the profile's device list.
     var connectDelayMs: Int = 0
+    /// §5a type 5 only: the device channel (1-based, as printed on the device) to send it to when
+    /// the KVM leaves this Mac. nil = automatic (the channel the other computer's AutoSwitch
+    /// marked). JSON key `releaseToChannel`, shared with Windows.
+    var releaseToChannel: Int? = nil
 
     /// Normalize to the dash-separated lowercase form IOBluetooth prefers.
     var normalizedAddress: String {
@@ -75,7 +79,7 @@ struct BTDevice: Codable, Identifiable, Hashable {
 
 extension BTDevice {
     enum CodingKeys: String, CodingKey {
-        case id, name, address, enabled, managePairing, connectDelayMs
+        case id, name, address, enabled, managePairing, connectDelayMs, releaseToChannel
     }
 
     /// Backward-compatible decoding: missing keys fall back to defaults (Swift's synthesized
@@ -88,6 +92,7 @@ extension BTDevice {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         managePairing = try c.decodeIfPresent(Bool.self, forKey: .managePairing) ?? false
         connectDelayMs = try c.decodeIfPresent(Int.self, forKey: .connectDelayMs) ?? 0
+        releaseToChannel = try c.decodeIfPresent(Int.self, forKey: .releaseToChannel)
     }
 }
 

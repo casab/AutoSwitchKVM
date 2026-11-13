@@ -85,7 +85,7 @@ you add it, and what it can do with it.
 | **Hands off by pairing** | Holds one pairing. Once a computer lets go, the next one can pair without you touching the device. | Apple Magic Trackpad, Magic Keyboard, Magic Mouse | **Yes**, on Mac and Windows. This is what AutoSwitch was built for. |
 | **Picks the computer itself** | Remembers several computers, and a key on the device chooses one. | ZMK and QMK wireless keyboards | **No.** Only the device can choose. Use its switch key, or plug it into the KVM by USB. |
 | **Re-pairs by hand** | Remembers one Bluetooth computer. Moving it needs its pairing button. | Xbox, PlayStation and Nintendo controllers | **No.** Keep it on one computer, or connect it by cable through the KVM. |
-| **Switches channel on request** | Like the previous kind, but the computer it's connected to can tell it to change channel. | Logitech Easy-Switch keyboards and mice (e.g. K380) | **Yes, on Windows** (Mac coming): when the KVM leaves, AutoSwitch sends it to the other computer's channel. |
+| **Switches channel on request** | Like the previous kind, but the computer it's connected to can tell it to change channel. | Logitech Easy-Switch keyboards and mice (e.g. K380) | **Yes**, on Mac and Windows: when the KVM leaves, AutoSwitch sends it to the other computer's channel. |
 | **Joins whichever computer connects** | Remembers several computers and goes to the one that asks. | Many headphones and speakers | **On Mac, yes.** On Windows not yet: Windows can't disconnect a Bluetooth device without unpairing it. |
 
 **Using a USB receiver?** Logitech Unifying, Logi Bolt and Lightspeed receivers are faster than
