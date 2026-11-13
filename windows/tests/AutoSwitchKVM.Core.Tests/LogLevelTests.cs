@@ -66,6 +66,32 @@ public class LogLevelTests
         Assert.DoesNotContain(info, m => m.Contains("pair OK"));
         Assert.DoesNotContain(info, m => m.Contains("connect started"));
         Assert.True(info.Count <= 6, string.Join("\n", info));
+
+        // Same guard as macOS (osx LogLevelTests): debug adds the step detail, warning stays silent.
+        Assert.True(AtOrAbove(log, LogLevel.Debug).Count > info.Count, log.Dump());
+        Assert.Empty(AtOrAbove(log, LogLevel.Warn));
+    }
+
+    [Fact]
+    public async Task Channel_switch_handoff_logs_a_short_story_and_no_warnings()
+    {
+        var config = AppConfig.Default();
+        config.Source = new USBSource { Name = "Hub", VendorID = Vendor, ProductIDs = new() { Product } };
+        config.Devices = new List<BTDevice> { new() { Name = "K380", Address = "34:88:5D:49:88:AF", Enabled = true, ReleaseToChannel = 2 } };
+        var bt = new FakeBluetoothController();
+        var log = new ListLogSink();
+        var hs = new FakeHostSwitcher { SupportedAddress = "34:88:5D:49:88:AF" };
+        var engine = new SelectionEngine(config, new FakeUsbMonitor(), bt, log, hs) { SleepHook = _ => Task.CompletedTask };
+
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+        engine.HandleUsb(Vendor, Product, added: false);
+        await engine.EvaluateNowAsync();
+
+        var info = AtOrAbove(log, LogLevel.Info);
+        Assert.Contains(info, m => m.Contains("sent to channel 2"));
+        Assert.True(info.Count <= 6, string.Join("\n", info));
+        Assert.Empty(AtOrAbove(log, LogLevel.Warn));
     }
 
     [Fact]

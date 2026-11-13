@@ -88,6 +88,11 @@ you add it, and what it can do with it.
 | **Switches channel on request** | Like the previous kind, but the computer it's connected to can tell it to change channel. | Logitech Easy-Switch keyboards and mice (e.g. K380) | **Yes, on Windows** (Mac coming): when the KVM leaves, AutoSwitch sends it to the other computer's channel. |
 | **Joins whichever computer connects** | Remembers several computers and goes to the one that asks. | Many headphones and speakers | **On Mac, yes.** On Windows not yet: Windows can't disconnect a Bluetooth device without unpairing it. |
 
+**Using a USB receiver?** Logitech Unifying, Logi Bolt and Lightspeed receivers are faster than
+Bluetooth, and they need no software to follow the KVM: plug the receiver into the KVM's USB hub,
+and it switches like a wired keyboard. Use the KVM's plain USB (hub) port, not a
+"keyboard/mouse emulation" port, which often doesn't pass receivers through properly.
+
 For the kinds it can't switch, AutoSwitch still shows whether the device is connected. Not sure
 about a device? Remove it in one computer's Bluetooth settings. If the other computer can then
 pair it right away, without a button press on the device, it hands off by pairing.

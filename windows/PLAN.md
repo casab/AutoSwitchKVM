@@ -210,6 +210,26 @@ Working set with Settings open: ~160 MB. ARM64 Setup.exe: 94.2 to 83.4 MB.
 6. **Idle memory**: a tray app sits idle most of the day. Measure the working set with no windows
    open after a few hours. If high, release the Settings window and its pages on close.
 
+## Planned: Logitech receivers (Unifying / Bolt)
+
+Recorded 2026-11-13; not scheduled (Bluetooth channel switching, spec §5a type 5, comes first and
+needs the Mac side to work both ways).
+
+- **Receiver on the KVM's USB hub: nothing to build.** The KVM switches it like a wired device, at
+  receiver latency. Documented as the recommended setup (READMEs, website `/devices/`): use the
+  KVM's plain hub port, not an emulated keyboard/mouse port.
+- **A receiver in each computer (or receiver on one, Bluetooth on the other):** switching is the
+  same HID++ 0x1814 Change Host, sent through the receiver's HID++ interface (Bolt PID `C548`,
+  Unifying `C52B`) with the device's receiver slot (1-6) as the device index instead of `0xFF`.
+  `reference_flow/` does exactly this. The work is the **device identity**: a device behind a
+  receiver has no Bluetooth address, and `BTDevice.address` keys everything (config, monitoring,
+  status). It needs a second identity (receiver + slot, or the device's unit ID / wireless PID), a
+  picker from the receiver's paired list, and connection status from the receiver's notifications.
+  That is a config-model change, so agree on it with macOS first (agent-note + spec §2).
+- Mixed setup today: receiver on the PC, Bluetooth on the Mac. Mac → PC already works (the Mac
+  sends Change Host over Bluetooth); PC → Mac needs the receiver path.
+- Lightspeed (G series) devices are mostly single-host: the KVM-hub setup is the answer.
+
 ## Milestone 0 — spike findings
 
 **Spike 1 (read-state, `spikes/Spike1-ReadState.ps1`) — DONE, validated on the real Magic Trackpad

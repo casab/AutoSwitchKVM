@@ -62,6 +62,11 @@ is (**How it switches**) and what that means.
 | **Re-pairs by hand** | Xbox, PlayStation, Nintendo controllers | **Can't switch.** It remembers one computer and moves only in pairing mode. Keep it on one computer, or use a cable through the KVM. |
 | **Joins whichever computer connects** | Many headphones and speakers | **Not yet.** Windows has no way to disconnect a Bluetooth device without unpairing it. The Mac app can switch these. |
 
+**Using a USB receiver?** Logitech Unifying, Logi Bolt and Lightspeed receivers are faster than
+Bluetooth, and they need no software to follow the KVM: plug the receiver into the KVM's USB hub,
+and it switches like a wired keyboard. Use the KVM's plain USB (hub) port, not a
+"keyboard/mouse emulation" port, which often doesn't pass receivers through properly.
+
 For the kinds it can't switch, AutoSwitch still shows the device's status. The kind is a best
 guess from the device's maker and type, marked *likely* or *probably* when it isn't a known model.
 To test a device yourself: remove it in Windows' Bluetooth settings; if your other computer can

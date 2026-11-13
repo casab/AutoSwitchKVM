@@ -345,3 +345,7 @@ p { margin: 0 0 1em; }
 .steps--list li { display: grid; grid-template-columns: 48px 1fr; column-gap: 18px; align-items: start; padding: 20px 22px; }
 .steps--list .steps__badge { grid-row: span 2; margin-bottom: 0; }
 .steps--list h3 { margin: 4px 0 .3em; }
+
+.receiver-tip { margin-top: 24px; background: var(--card); border-radius: var(--radius); padding: 24px 26px; box-shadow: var(--shadow); border-left: 6px solid var(--blue); }
+.receiver-tip h2 { font-size: 1.25rem; margin-bottom: .4em; }
+.receiver-tip p { color: var(--ink-soft); margin: 0; }
