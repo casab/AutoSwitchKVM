@@ -141,6 +141,13 @@ controller** (the operations in §5). It owns no platform APIs directly.
    switch to the other host → unpause", or the app starting while switched away (crash, reboot),
    left the device bonded here and the other host locked out. Consequence: a manual connect made
    while switched away is released by the next seed (the KVM decides).
+6. **Device list edits are not a seed** (2026-11-13). Adding, removing, enabling, disabling or
+   reordering a device must not re-run the connect flow for the other devices: a full pass puts
+   every `managePairing` device through pair + HID check again, and the user sees working devices
+   go "Connecting…". Refresh monitoring only. A device that is **added or re-enabled** while this
+   host is selected (and not paused) is connected on its own, joining the current run (Windows
+   implemented; macOS refreshes monitoring only, so it connects on the next switch). A removed
+   device is forgotten and left as it is.
 
 ### Connect flow (per enabled device, in list order)
 - Apply `connectDelayMs` first (stagger), re-checking cancellation after the wait.

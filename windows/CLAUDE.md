@@ -280,6 +280,12 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   Enqueue through `Support/DispatcherExtensions.Enqueue(what, …)` (logs and carries on), never bare
   `TryEnqueue`. `async void` exceptions take the same route via the SynchronizationContext, so
   `Program.cs` installs `Support/SafeSynchronizationContext` (startup warns if it isn't active).
+- **Update `AppViewModel.Devices` item by item, never `Clear()` + re-add.** A reset makes every
+  `ItemsRepeater` recycle all rows, and a recycled row kept its expander state: removing the 3rd
+  device opened the 2nd. `SyncDevices` removes/inserts/moves, and `DeviceViewModel.IsExpanded` is
+  bound two-way so row state belongs to the device, not the control. Device list edits don't
+  re-seed the engine either (spec §3 step 6): `AppController.DeviceAddedOrEnabled` connects just
+  that device via `SelectionEngine.ConnectAddedDeviceAsync`; removal calls `ForgetDevice`.
 - **Bind a shared collection only while the page is on screen.** A page navigated away from stays
   subscribed until it is collected, and its detached `ItemsRepeater` throws E_FAIL (`0x80004005`)
   when the collection's membership changes. On 2026-11-13 adding or removing a device after

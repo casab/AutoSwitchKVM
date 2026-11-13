@@ -472,6 +472,41 @@ public sealed class SelectionEngine
         finally { ClearBusy(device.Id); }
     }
 
+    /// A device was added to the profile or re-enabled. Connect just that device if this PC is
+    /// selected and automation is running; the other devices are left alone. (Re-seeding the
+    /// whole engine here ran a full connect pass, and every managePairing device went through
+    /// pair + HID check again: "Connecting…" on devices that were working.) Joins the current run,
+    /// so a source change still supersedes it.
+    public async Task ConnectAddedDeviceAsync(Guid deviceId)
+    {
+        var device = Config.Devices.FirstOrDefault(d => d.Id == deviceId);
+        if (device is null || !device.Enabled) return;
+        string? skip = !Selected ? "this PC is not selected"
+            : Config.Paused ? "automation paused"
+            : _suspended ? "system is suspending"
+            : !BluetoothPowered ? "Bluetooth is off"
+            : IsBusy(device.Id) ? "another operation is in flight"
+            : null;
+        if (skip is not null)
+        {
+            Debug($"{device.Name}: added/enabled; not connecting now ({skip})");
+            return;
+        }
+        Info($"{device.Name}: added/enabled while this PC is selected -> connecting");
+        var run = CurrentRun("device added/enabled");
+        MarkBusy(device.Id);
+        try { await ConnectOneAsync(device, run, respectSelection: true); }
+        finally { ClearBusy(device.Id); }
+    }
+
+    /// A device was removed from the profile: forget its status. Nothing is connected or
+    /// released (macOS behaves the same); the caller refreshes monitoring.
+    public void ForgetDevice(Guid deviceId)
+    {
+        _statuses.Remove(deviceId);
+        _lastAutoReconnect.Remove(deviceId);
+    }
+
     /// Per-device manual release: disconnect, plus unpair for managePairing devices.
     public async Task ReleaseDeviceNowAsync(BTDevice device)
     {

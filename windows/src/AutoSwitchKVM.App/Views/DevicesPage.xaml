@@ -35,7 +35,8 @@
                 </ItemsRepeater.Layout>
                 <ItemsRepeater.ItemTemplate>
                     <DataTemplate x:DataType="vm:DeviceViewModel">
-                        <toolkit:SettingsExpander Header="{x:Bind Name, Mode=OneWay}" Description="{x:Bind Detail, Mode=OneWay}">
+                        <toolkit:SettingsExpander Header="{x:Bind Name, Mode=OneWay}" Description="{x:Bind Detail, Mode=OneWay}"
+                                                IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}">
                             <toolkit:SettingsExpander.HeaderIcon>
                                 <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}" />
                             </toolkit:SettingsExpander.HeaderIcon>

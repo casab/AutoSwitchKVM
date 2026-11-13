@@ -70,6 +70,18 @@ public sealed class AppController
     /// only surface, if ever, when the GC finalizes the task — i.e. the error is effectively lost).
     private static void Fire(Func<Task> work, string what) => _ = RunLoggedAsync(work, what);
 
+    // ---- Device list changes (no full re-evaluation: that reconnected every other device) ----
+
+    /// A device was added or re-enabled: connect just it if this PC is selected.
+    public void DeviceAddedOrEnabled(Guid deviceId)
+    {
+        if (IsPreview) return;
+        Fire(() => Engine.ConnectAddedDeviceAsync(deviceId), "connect added device");
+    }
+
+    /// A device was removed: drop its status. Leaves the device as it is right now.
+    public void DeviceRemoved(Guid deviceId) => Engine.ForgetDevice(deviceId);
+
     private static async Task RunLoggedAsync(Func<Task> work, string what)
     {
         try { await work(); }

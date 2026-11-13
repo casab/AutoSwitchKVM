@@ -298,10 +298,18 @@ public sealed class AppViewModel : ObservableObject
         (list[from], list[to]) = (list[to], list[from]);
     }, refreshMonitoring: true);
 
-    public void RemoveDevice(Guid id) =>
-        _c.Mutate(cfg => cfg.Devices.RemoveAll(d => d.Id == id), refreshMonitoring: true, reevaluate: true);
+    // Adding or removing a device touches only that device; the others keep their connections.
+    public void RemoveDevice(Guid id)
+    {
+        _c.DeviceRemoved(id);
+        _c.Mutate(cfg => cfg.Devices.RemoveAll(d => d.Id == id), refreshMonitoring: true);
+    }
 
-    public void AddDevice(BTDevice device) => _c.Mutate(cfg => cfg.Devices.Add(device), refreshMonitoring: true);
+    public void AddDevice(BTDevice device)
+    {
+        _c.Mutate(cfg => cfg.Devices.Add(device), refreshMonitoring: true);
+        _c.DeviceAddedOrEnabled(device.Id);
+    }
 
     public void SetSource(USBSource? source) =>
         _c.Mutate(cfg => cfg.Source = source, refreshMonitoring: true, reevaluate: true);
@@ -324,21 +332,27 @@ public sealed class AppViewModel : ObservableObject
         foreach (var p in _c.Config.Profiles) Profiles.Add(new ProfileItem { Id = p.Id, Name = p.Name });
     }
 
+    /// Bring Devices in line with the config with item-level changes (remove / insert / move),
+    /// never Clear(): a reset makes the ItemsRepeaters recycle every row, and a row's expander
+    /// state then showed up on another device (remove the 3rd device -> the 2nd one opened).
+    /// The rest of a row's state lives in its DeviceViewModel (IsExpanded) for the same reason.
     private void SyncDevices()
     {
         var models = _c.Config.Devices;
-        // Same devices in the same order: update in place (keeps controls, focus and expanders).
-        if (models.Count == Devices.Count && models.Select(m => m.Id).SequenceEqual(Devices.Select(d => d.Id)))
+        for (var i = Devices.Count - 1; i >= 0; i--)
         {
-            for (var i = 0; i < models.Count; i++) Devices[i].Update(models[i], _c.StatusFor(models[i]), i, models.Count);
-            return;
+            var id = Devices[i].Id;
+            if (!models.Any(m => m.Id == id)) Devices.RemoveAt(i);
         }
-        Devices.Clear();
         for (var i = 0; i < models.Count; i++)
         {
-            var vm = new DeviceViewModel(this, models[i]);
-            vm.Update(models[i], _c.StatusFor(models[i]), i, models.Count);
-            Devices.Add(vm);
+            var model = models[i];
+            var at = -1;
+            for (var j = i; j < Devices.Count; j++)
+                if (Devices[j].Id == model.Id) { at = j; break; }
+            if (at < 0) Devices.Insert(i, new DeviceViewModel(this, model));
+            else if (at != i) Devices.Move(at, i);
+            Devices[i].Update(model, _c.StatusFor(model), i, models.Count);
         }
     }
 }

@@ -20,6 +20,15 @@ public sealed class DeviceViewModel : ObservableObject
     }
 
     public BTDevice Model { get; private set; }
+
+    /// Whether this device's row is expanded in Settings ▸ Devices. Kept here, not in the row
+    /// control: the list recycles row controls, and their own state would jump between devices.
+    private bool _isExpanded;
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set => SetProperty(ref _isExpanded, value);
+    }
     public Guid Id => Model.Id;
     public string Name => Model.Name;
     public string Address => Model.Address;
@@ -95,7 +104,13 @@ public sealed class DeviceViewModel : ObservableObject
     public bool Enabled
     {
         get => Model.Enabled;
-        set { if (value != Model.Enabled) _app.Controller.Mutate(_ => Model.Enabled = value, reevaluate: true); }
+        set
+        {
+            if (value == Model.Enabled) return;
+            // Only this device: enabling connects it if this PC is selected; disabling leaves it as it is.
+            _app.Controller.Mutate(_ => Model.Enabled = value);
+            if (value) _app.Controller.DeviceAddedOrEnabled(Model.Id);
+        }
     }
 
     public bool ManagePairing
