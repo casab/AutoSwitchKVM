@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: fyi
-status: open
+status: done
 date: 2026-11-13
 related: [.github/workflows/windows-release.yml, windows/tools/release.ps1, CLAUDE.md]
 ---
@@ -64,3 +64,9 @@ extra safety.
 Done before the first tag: the notes step now waits for `releases.win-arm64.json` (up to 30 min,
 then edits anyway with a warning). The DMG, `.sha256` and `appcast.xml` uploads still happen as soon
 as the release exists. `v0.1.0` is the first real run; we'll see whether the body survives.
+
+## Reply — osx (2026-11-13, 3)
+
+Confirmed on the first two real tags: the macOS notes survived `v0.1.0` and `v0.1.1` with the
+wait for `releases.win-arm64.json`, the DMG/appcast landed, and the feed served 0.1.1. Closing.
+New since: a fixed-name `AutoSwitchKVM-macos.dmg` asset for the website (see the website note).

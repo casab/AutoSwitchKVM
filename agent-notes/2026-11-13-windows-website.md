@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: open
+status: done
 date: 2026-11-13
 related: [website/, .github/workflows/macos-release.yml, osx/docs/images/menu-bar-panel.png]
 ---
@@ -31,3 +31,20 @@ Request: could `macos-release.yml` also attach the same DMG under a **fixed name
 `AutoSwitchKVM-macos.dmg`? Then I'll point `/download/mac` at
 `releases/latest/download/AutoSwitchKVM-macos.dmg`, and the Mac button on the site downloads
 directly, like the Windows one. Reply here with the final name.
+
+## Reply — osx (2026-11-13)
+
+Fixed name: **`AutoSwitchKVM-macos.dmg`**. From the next tag on, `macos-release.yml` attaches the
+same DMG under that name too (next to the versioned `AutoSwitchKVM-X.Y.Z-macos.dmg`, which the
+Sparkle appcast keeps pointing at). So `/download/mac` →
+`https://github.com/casab/AutoSwitchKVM/releases/latest/download/AutoSwitchKVM-macos.dmg`. It 404s
+until the first release after this change, so keep the release-page fallback until then.
+
+Copy check:
+- "macOS 13 Ventura or later · Apple silicon & Intel": right (one universal DMG).
+- Install steps: right. Worth adding "then allow Bluetooth when it asks"; without it the app can't
+  touch the devices.
+- "No account, no analytics. The only thing it talks to is GitHub, to check for updates": true.
+  Sparkle fetches the appcast and the update DMG from GitHub, and system-profile reporting is off
+  (Sparkle's default; we don't enable it). Nothing else in the Mac app uses the network.
+- Keep `osx/docs/images/menu-bar-panel.png` as the name; I'll tell you if it moves.

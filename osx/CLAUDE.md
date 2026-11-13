@@ -55,8 +55,9 @@ The app is menu-bar-only (`NSApp.setActivationPolicy(.accessory)` + `LSUIElement
   so the embedded Sparkle helpers match) and writes `build/release/AutoSwitchKVM-<version>-macos.dmg`
   + `.sha256`. Runs locally as is.
 - `.github/workflows/macos-release.yml` runs it on the same `v*` tags as the Windows release,
-  waits for the release the Windows workflow creates, and attaches the DMG (plus, for stable tags,
-  the Sparkle `appcast.xml` from `tools/make-appcast.sh`). It appends macOS install notes to the
+  waits for the release the Windows workflow creates, and attaches the DMG, the same DMG as
+  `AutoSwitchKVM-macos.dmg` (fixed name for `releases/latest/download/…`, used by the website's
+  Download for Mac), and, for stable tags, the Sparkle `appcast.xml` from `tools/make-appcast.sh`. It appends macOS install notes to the
   release body once (`<!-- macos-notes -->` marker). The DMG is also a run artifact.
 - Secrets: `MACOS_SIGNING_P12` + `MACOS_SIGNING_P12_PASSWORD` (optional self-made code-signing
   certificate: keeps the code identity fixed, so the Bluetooth permission and login item survive

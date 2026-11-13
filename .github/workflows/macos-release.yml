@@ -118,7 +118,12 @@ jobs:
       - name: Attach the DMG (and appcast) to the release
         run: |
           VERSION="${TAG#v}"
-          FILES=("build/release/AutoSwitchKVM-$VERSION-macos.dmg" "build/release/AutoSwitchKVM-$VERSION-macos.dmg.sha256")
+          # The same DMG also goes up under a fixed name, so a permanent link always gets the
+          # newest stable build: .../releases/latest/download/AutoSwitchKVM-macos.dmg (the website's
+          # Download for Mac button). The versioned file stays the one the appcast points at.
+          cp "build/release/AutoSwitchKVM-$VERSION-macos.dmg" build/release/AutoSwitchKVM-macos.dmg
+          FILES=("build/release/AutoSwitchKVM-$VERSION-macos.dmg" "build/release/AutoSwitchKVM-$VERSION-macos.dmg.sha256"
+                 "build/release/AutoSwitchKVM-macos.dmg")
           [ -f build/release/appcast.xml ] && FILES+=("build/release/appcast.xml")
           gh release upload "$TAG" "${FILES[@]}" --clobber
 
