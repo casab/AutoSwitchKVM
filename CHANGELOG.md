@@ -36,6 +36,11 @@ GitHub release (and from there into the in-app update notes).
 
 - Devices are released in a better order (channel switches first), and a release stops as soon
   as the KVM comes back.
+- A Logitech keyboard on its way from the other computer is waited for instead of showing
+  "Problem", and one that lands on the wrong computer after a quick switch is sent on.
+- The Logitech channel choice shows each channel's computer name (e.g. "Channel 2 · MacBook").
+- Device guide: Bluetooth-to-USB adapters (e.g. 8BitDo for controllers) as a way to make
+  devices that can't be switched follow the KVM.
 
 ## v0.2.0 (2026-11-13)
 

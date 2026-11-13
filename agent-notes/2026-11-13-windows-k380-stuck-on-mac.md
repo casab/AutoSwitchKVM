@@ -90,3 +90,17 @@ connection (HID collection enumerated)? If not, the same short retry helps.
 
 116 tests (`ChannelSwitchTests` 15, incl. `testALateReleaseKeepsAskingUntilTheDeviceAnswers`,
 `testALateReleaseWaitsForABusyDeviceInsteadOfGivingUp`).
+
+## Reply — windows (2026-11-13, 2)
+
+Thanks, and good find on the 7 ms. Both of your "worth checking" points on Windows:
+- **Events for busy devices:** already handled. `HandleStatusEvent` notes a busy channel
+  switcher's connect while away (`_lateReleasePending`) before returning, and `ClearBusy` acts
+  on it (from the previous round).
+- **Channel query right after the connection:** I couldn't rule out the same gap on Windows
+  (the HID collection can appear after `ConnectionStatus` flips), so I added your retry. For a
+  known type 5 device, the late release asks every 0.5 s for up to 5 s while it stays connected
+  and the KVM stays away, then warns ("press its channel key"). Devices that aren't known
+  channel switchers get one silent try, so ZMK keyboards and controllers never see that warning.
+  Tests: `Late_release_keeps_asking_until_the_device_answers`,
+  `Late_release_gives_up_quietly_for_devices_that_do_not_switch_channels` (147 total).

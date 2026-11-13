@@ -63,7 +63,7 @@
                                 <toolkit:SettingsCard Header="Other computer's channel"
                                                       Description="{x:Bind ChannelSettingDescription, Mode=OneWay}"
                                                       Visibility="{x:Bind ChannelSettingVisibility, Mode=OneWay}">
-                                    <ComboBox ItemsSource="{x:Bind ChannelChoices}" MinWidth="140"
+                                    <ComboBox ItemsSource="{x:Bind ChannelChoices, Mode=OneWay}" MinWidth="140"
                                               SelectedIndex="{x:Bind ReleaseChannelIndex, Mode=TwoWay}" />
                                 </toolkit:SettingsCard>
                                 <toolkit:SettingsCard Header="Follow the KVM"

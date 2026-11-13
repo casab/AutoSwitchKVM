@@ -9,7 +9,7 @@
     AutoSwitchKVM.App-<ver>-full.nupkg  the update package
     releases.win.json, RELEASES         the update feed
 
-  The GitHub release workflow (.github/workflows/windows-release.yml) runs this script for a v* tag
+  The GitHub release workflow (.github/workflows/release.yml) runs this script for a v* tag
   and uploads the result. Run it locally to test an installer:
     pwsh windows/tools/release.ps1 -Version 0.1.0
   Add -Download to fetch the previous GitHub release first, so a delta package is generated.
@@ -26,6 +26,7 @@ param(
     [ValidateSet('x64', 'arm64')] [string] $Arch = 'x64',
     [switch] $Download,
     [string] $Token,
+    [string] $ReleaseNotes,      # markdown file (the CHANGELOG section); shown by the in-app updater
     [string] $RepoUrl = 'https://github.com/casab/AutoSwitchKVM'
 )
 $ErrorActionPreference = 'Stop'
@@ -72,10 +73,15 @@ try {
         if ($LASTEXITCODE -ne 0) { Write-Warning "no previous release downloaded; building a full package only" }
     }
 
+    $notesArgs = @()
+    if ($ReleaseNotes) {
+        if (-not (Test-Path $ReleaseNotes)) { throw "Release notes file not found: $ReleaseNotes" }
+        $notesArgs = @('--releaseNotes', (Resolve-Path $ReleaseNotes).Path)
+    }
     Invoke-Step "Pack with Velopack (channel $channel)" {
         dotnet vpk pack --packId AutoSwitchKVM.App --packVersion $Version --packDir $publishDir `
             --mainExe AutoSwitchKVM.App.exe --packTitle 'AutoSwitch KVM' --packAuthors 'AutoSwitch KVM' `
-            --icon $icon --channel $channel --runtime "win-$Arch" --shortcuts StartMenuRoot -o $outDir
+            --icon $icon --channel $channel --runtime "win-$Arch" --shortcuts StartMenuRoot -o $outDir @notesArgs
     }
 
     Write-Host "Done: $outDir" -ForegroundColor Green

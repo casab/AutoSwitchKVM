@@ -158,7 +158,7 @@ blocking lint jobs). Runtime Bluetooth/USB behavior is still validated on-device
 8. **Distribution. [DONE, unsigned]** Velopack (2026-11-13): self-contained publish (.NET + Windows
    App SDK bundled), per-user installer, background updates from GitHub Releases (Settings ▸ General
    ▸ About, tray menu "Restart to update", a notification). x64 channel `win`, ARM64 channel
-   `win-arm64` (built, not tested on hardware). `tools/release.ps1` + `.github/workflows/windows-release.yml`
+   `win-arm64` (built, not tested on hardware). `tools/release.ps1` + `.github/workflows/release.yml`
    on a `v*` tag. Still to do: code signing (SmartScreen warns until then). Size and startup:
    see "Distribution: size and startup" below.
 

@@ -61,7 +61,7 @@ description: "Bluetooth devices handle more than one computer in four different 
           one can't pair until you press the button.
         </p>
         <p class="kind__examples"><strong>Examples:</strong> Xbox, PlayStation and Nintendo controllers.</p>
-        <p class="kind__tip"><strong>What to do:</strong> keep it on the computer you play on, or connect it with a cable through the KVM. Leave <strong>Manage pairing</strong> off.</p>
+        <p class="kind__tip"><strong>What to do:</strong> keep it on the computer you play on, or connect it with a cable through the KVM. Or pair it to a <strong>Bluetooth-to-USB adapter</strong> plugged into the KVM (for controllers, e.g. the 8BitDo USB Wireless Adapter 2, which works on Windows and Mac): then the KVM switches it like a wired controller. Leave <strong>Manage pairing</strong> off.</p>
       </li>
       <li class="kind kind--partly">
         <p class="kind__verdict">Mac yes, Windows not yet</p>
@@ -73,9 +73,20 @@ description: "Bluetooth devices handle more than one computer in four different 
           without unpairing it, so the Windows app can't do this yet.
         </p>
         <p class="kind__examples"><strong>Examples:</strong> many headphones and speakers.</p>
-        <p class="kind__platforms">Mac ✓ · Windows: not yet</p>
+        <p class="kind__platforms">Mac: supported, being tested · Windows: not yet</p>
       </li>
     </ul>
+    <div class="receiver-tip">
+      <h2>Make a Bluetooth device "wired" with an adapter</h2>
+      <p>
+        For a device AutoSwitch can't switch, a small Bluetooth-to-USB adapter plugged into the KVM
+        does the job: the device pairs once with the adapter, and the KVM switches the adapter like
+        any USB device. For game controllers, the 8BitDo USB Wireless Adapter 2 pairs Xbox,
+        PlayStation and Switch Pro controllers (Bluetooth ones only). For keyboards and mice there
+        are do-it-yourself bridges such as HID Remapper's Bluetooth build or a Raspberry Pi Pico W
+        keyboard bridge. They don't carry a Magic Trackpad's gestures, so keep AutoSwitch for that.
+      </p>
+    </div>
     <div class="receiver-tip">
       <h2>Using a USB receiver?</h2>
       <p>

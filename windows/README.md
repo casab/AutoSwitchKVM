@@ -59,7 +59,7 @@ is (**How it switches**) and what that means.
 | **Hands off by pairing** | Apple Magic Trackpad, Magic Keyboard, Magic Mouse | **Switches automatically.** AutoSwitch unpairs it when the KVM leaves and pairs it when the KVM comes back (Manage pairing on). |
 | **Switches channel on request** | Logitech Easy-Switch keyboards and mice (e.g. K380) | **Switches automatically.** When the KVM leaves, AutoSwitch tells the device to go to the other computer's channel (set **Other computer's channel** in its settings, or leave it on Automatic when AutoSwitch runs on both computers). Its pairings stay. |
 | **Picks the computer itself** | ZMK/QMK wireless keyboards | **Can't switch.** The device's own key picks the computer. Use that key, or a USB cable through the KVM. Leave Manage pairing off: unpairing would make you pair the device again. |
-| **Re-pairs by hand** | Xbox, PlayStation, Nintendo controllers | **Can't switch.** It remembers one computer and moves only in pairing mode. Keep it on one computer, or use a cable through the KVM. |
+| **Re-pairs by hand** | Xbox, PlayStation, Nintendo controllers | **Can't switch.** It remembers one computer and moves only in pairing mode. Keep it on one computer, use a cable through the KVM, or pair it to a Bluetooth-to-USB adapter (e.g. 8BitDo USB Wireless Adapter 2) plugged into the KVM. |
 | **Joins whichever computer connects** | Many headphones and speakers | **Not yet.** Windows has no way to disconnect a Bluetooth device without unpairing it. The Mac app can switch these. |
 
 **Using a USB receiver?** Logitech Unifying, Logi Bolt and Lightspeed receivers are faster than
@@ -151,8 +151,10 @@ the way.
 
 ### Releasing
 
-Push a version tag. The **Windows release** workflow builds x64 and ARM64, packs them with
-[Velopack](https://velopack.io) and publishes the GitHub release that installed apps update from:
+Add your changes to `CHANGELOG.md` (under **Unreleased**; rename it to the version when
+releasing), then push a version tag. The shared **Release** workflow builds x64 and ARM64, packs
+them with [Velopack](https://velopack.io) (with the changelog section as release notes), builds
+the macOS app, and publishes one GitHub release that installed apps update from:
 
 ```sh
 git tag v0.2.0 && git push origin v0.2.0

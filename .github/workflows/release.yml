@@ -1,18 +1,16 @@
-# DRAFT (2026-11-13, osx): one release workflow for both platforms, proposed in
-# agent-notes/2026-11-13-osx-single-release-workflow.md. Not active: GitHub only runs workflows
-# in .github/workflows/. To switch over, move this file there and delete windows-release.yml and
-# macos-release.yml in the same commit (otherwise a tag runs both setups). Then try it with a
-# pre-release tag (vX.Y.Z-rc.1) before the next stable release.
+# One release workflow for both platforms (2026-11-13; replaced windows-release.yml and
+# macos-release.yml, see agent-notes/2026-11-13-osx-single-release-workflow.md). Try a
+# pre-release tag (vX.Y.Z-rc.1) before the first stable release made with it.
 #
 # Push a tag like v0.3.0 to build both apps and publish one GitHub release:
 #
 #   notes            CHANGELOG.md section for the tag (a stable tag without one fails here,
 #                    before anything is built) + .github/release/install-notes.md -> creates the
 #                    release, always as a pre-release first, so no installed app sees it yet.
-#   windows-build    Velopack packages, x64 + arm64 (unchanged from windows-release.yml).
+#   windows-build    Velopack packages, x64 + arm64 (windows/tools/release.ps1), with the
+#                    changelog section as the package's release notes.
 #   windows-publish  merges the Windows assets into the release.
-#   macos            DMG + Sparkle appcast, attached to the release (unchanged build steps from
-#                    macos-release.yml; no waiting, no body edits).
+#   macos            DMG + Sparkle appcast, attached to the release (no waiting, no body edits).
 #   finalize         restores the body (in case an upload rewrote it) and, for a stable tag,
 #                    turns the pre-release into the latest release. Only now do installed copies
 #                    (Velopack, Sparkle via releases/latest/download/appcast.xml) see the update,
@@ -22,8 +20,8 @@
 #
 # Repository secrets (all optional): MACOS_SIGNING_P12 + MACOS_SIGNING_P12_PASSWORD (self-made
 # code-signing certificate; keeps the Mac app's identity, and so its permissions, across updates),
-# SPARKLE_ED_PRIVATE_KEY (without it no appcast, so Macs see no update). See macos-release.yml's
-# old header for details.
+# SPARKLE_ED_PRIVATE_KEY (without it no appcast, so Macs see no update). More detail in the old
+# macos-release.yml header (git history) and osx/CLAUDE.md.
 name: Release
 
 on:
@@ -97,13 +95,19 @@ jobs:
       - name: Test Core
         if: matrix.arch == 'x64'
         run: dotnet test tests/AutoSwitchKVM.Core.Tests/AutoSwitchKVM.Core.Tests.csproj -c Release
-      # TODO (windows): pass the changelog section to `vpk pack --releaseNotes` (release.ps1) so
-      # the in-app "Restart to update" prompt can show what changed.
+      # The changelog section goes into the package (vpk pack --releaseNotes), so the in-app
+      # updater has the notes too.
+      - name: Changelog section for the package
+        shell: bash
+        working-directory: .
+        run: .github/release/changelog-section.sh "$TAG" > windows/release-notes.md
+      # -Download takes the delta base from the previous *stable* release: vpk download without
+      # --pre skips pre-releases, and also skips releases without assets (this tag's, so far).
       - name: Build release package
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
           ./tools/release.ps1 -Version $version -Arch ${{ matrix.arch }} -Download -Token $env:GH_TOKEN `
-            -RepoUrl "${{ github.server_url }}/${{ github.repository }}"
+            -RepoUrl "${{ github.server_url }}/${{ github.repository }}" -ReleaseNotes release-notes.md
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.arch }}
@@ -137,9 +141,12 @@ jobs:
           $version = $env:TAG.TrimStart('v')
           $common = @('--repoUrl', "${{ github.server_url }}/${{ github.repository }}", '--token', $env:GH_TOKEN,
                       '--tag', $env:TAG, '--releaseName', "AutoSwitch KVM $version", '--merge')
-          # The notes job created the release, so both architectures merge into it.
-          # TO VERIFY on an rc tag: --merge into an existing pre-release keeps it a pre-release
-          # and keeps its body (finalize restores the body either way).
+          # The notes job created the release, so both architectures merge into it. Checked in the
+          # vpk 1.2.161 source (Velopack.Deployment/_GitRelease.cs): --merge finds the release by
+          # tag (hence --tag v...), uploads assets only, and leaves body, name, pre-release and
+          # latest untouched (--pre is ignored when merging; --publish only flips a draft). It
+          # refuses if the channel's releases.<channel>.json already exists: win and win-arm64
+          # are separate channels, so both merges work. finalize restores the body regardless.
           dotnet vpk upload github -o releases/x64 --channel win @common
           if ($LASTEXITCODE -ne 0) { throw "x64 upload failed" }
           dotnet vpk upload github -o releases/arm64 --channel win-arm64 @common

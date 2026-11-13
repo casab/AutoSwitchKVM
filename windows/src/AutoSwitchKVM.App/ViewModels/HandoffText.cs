@@ -25,7 +25,7 @@ public static class HandoffText
         HandoffType.DevicePicksHost =>
             "AutoSwitch can't switch it: the device keeps a pairing for each computer and its own key picks one. Switch with that key, or connect it by USB through the KVM. AutoSwitch shows its status. Keep Manage pairing off, or the device will need pairing again.",
         HandoffType.RepairByHand =>
-            "AutoSwitch can't switch it: it remembers one computer and only moves in pairing mode. Keep it on one computer, or connect it by cable through the KVM. AutoSwitch shows its status. Keep Manage pairing off.",
+            "AutoSwitch can't switch it: it remembers one computer and only moves in pairing mode. Keep it on one computer, connect it by cable through the KVM, or pair it to a Bluetooth-to-USB adapter (for controllers, e.g. 8BitDo) plugged into the KVM. AutoSwitch shows its status. Keep Manage pairing off.",
         HandoffType.HostConnects =>
             "Not on Windows yet: Windows can't disconnect a Bluetooth device without unpairing it. The Mac app can switch these. AutoSwitch shows its status here.",
         HandoffType.ChannelSwitch =>

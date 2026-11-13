@@ -91,6 +91,29 @@ public sealed class AppController
         }
     }
 
+    /// The names a channel-switching device stores per channel (null when unsupported/unreachable).
+    public async Task<IReadOnlyList<string?>?> GetChannelNamesAsync(string address)
+    {
+        try { return await _hostSwitcher.GetChannelNamesAsync(address); }
+        catch (Exception ex)
+        {
+            Log.Debug("hidpp", $"{address}: channel names query failed ({ex.Message})");
+            return null;
+        }
+    }
+
+    /// "Channel 2 · MacBook" style labels for a channel choice: index 0 = automatic.
+    public static IReadOnlyList<string> ChannelChoiceLabels(string automatic, IReadOnlyList<string?>? names, int count = 3)
+    {
+        var labels = new List<string> { automatic };
+        for (var i = 0; i < Math.Max(count, names?.Count ?? 0); i++)
+        {
+            var name = names is not null && i < names.Count ? names[i] : null;
+            labels.Add(name is null ? $"Channel {i + 1}" : $"Channel {i + 1} · {name}");
+        }
+        return labels;
+    }
+
     /// A device was removed: drop its status. Leaves the device as it is right now.
     public void DeviceRemoved(Guid deviceId) => Engine.ForgetDevice(deviceId);
 

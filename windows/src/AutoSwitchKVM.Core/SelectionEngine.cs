@@ -119,6 +119,11 @@ public sealed class SelectionEngine
     internal int ArrivalWaitMs { get; set; } = 20_000;
     internal const int ArrivalPollMs = 500;
 
+    /// Late release: the device's control channel can appear a moment after its connection (on
+    /// macOS 7 ms was too early), so keep asking this long, this often (spec §3 Late release).
+    internal int LateReleaseRetryMs { get; set; } = 5_000;
+    internal const int LateReleasePollMs = 500;
+
     /// The source as the latest USB event/snapshot saw it, ahead of the debounce. An automatic
     /// release stops as soon as this turns true again (spec §3 Disconnect flow).
     private bool SourcePresentNow => _presentProductIDs.Count > 0;
@@ -220,10 +225,47 @@ public sealed class SelectionEngine
         var now = DateTime.UtcNow;
         if (_lastLateRelease.TryGetValue(device.Id, out var last) && (now - last).TotalSeconds < LateReleaseMinIntervalSecs) return;
         _lastLateRelease[device.Id] = now;
-        Info($"{device.Name}: connected while the KVM is on the other computer -> sending it there");
+        var known = IsKnownChannelSwitcher(device);
+        if (known) Info($"{device.Name}: connected while the KVM is on the other computer -> sending it there");
         MarkBusy(device.Id);
-        try { await TrySwitchChannelAsync(device, "it connected here while the KVM is elsewhere"); }
+        try
+        {
+            // A known channel switcher: wait (briefly) until it answers. Anything else gets one
+            // silent try: it may not switch channels at all (ZMK, controllers).
+            if (known && !await WaitForChannelsAsync(device)) return;
+            await TrySwitchChannelAsync(device, "it connected here while the KVM is elsewhere");
+        }
         finally { ClearBusy(device.Id); }
+    }
+
+    /// Ask until the device's channel query answers, for up to LateReleaseRetryMs, while it stays
+    /// connected and the KVM stays away. False (with a warning if it never answered) to give up.
+    private async Task<bool> WaitForChannelsAsync(BTDevice device)
+    {
+        for (var waited = 0; ; waited += LateReleasePollMs)
+        {
+            if (Selected || Config.Paused || _suspended) return false;   // the KVM came back, or paused
+            if (!await SafeIsConnectedAsync(device)) return false;        // it left by itself
+            try
+            {
+                if (await WithTimeoutAsync(ct => _hostSwitcher!.GetChannelsAsync(device.Address, ct)) is not null)
+                {
+                    if (waited > 0) Debug($"{device.Name}: channel query answered after {waited} ms");
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug($"{device.Name}: channel query failed: {Classify(ex).Summary}");
+            }
+            if (waited >= LateReleaseRetryMs)
+            {
+                Warn($"{device.Name}: it's connected here while the KVM is on the other computer, but it doesn't answer " +
+                     "the channel query; press its channel key for the other computer");
+                return false;
+            }
+            await SleepHook(LateReleasePollMs);
+        }
     }
 
     /// A deferred late release, once the device is free: only if it's still connected here and

@@ -51,7 +51,7 @@ and polls the battery every 60 s. `tools/driver-trace.ps1` captures its WPP trac
   `%LOCALAPPDATA%\AutoSwitchKVM` and must survive.
 - `tools/release.ps1 -Version X [-Arch x64|arm64] [-Download]`: self-contained publish
   (`WindowsAppSDKSelfContained`) + `vpk pack` (local tool, `dotnet-tools.json`). Channels: `win`
-  (x64), `win-arm64`. CI: `.github/workflows/windows-release.yml` on a `v*` tag builds both, then
+  (x64), `win-arm64`. CI: `.github/workflows/release.yml` (shared with macOS) on a `v*` tag builds both, then
   uploads with `vpk upload github` (x64 creates the release, arm64 merges). Unsigned for now.
 - The published layout loads XAML fine (verified by screenshot from a published folder); the
   `dotnet build -o` gotcha below is about build output only.

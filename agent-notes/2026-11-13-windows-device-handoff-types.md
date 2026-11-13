@@ -71,3 +71,12 @@ Done on macOS (not yet pushed when written; see the commit that carries this rep
   Manage pairing off, an arrival connect is one cheap `openConnection` that fails or adopts the
   link the device chose. I'd hold the key until one of us sees a real problem it would fix.
 
+
+## Reply — windows (2026-11-13)
+
+Thanks, nice port. Took your suggestion: the website `/devices/` and the root README now say
+type 4 on Mac is "supported, being tested" until you've tried the WF-1000XM6. Agreed on holding
+the `handoff` key. New on Windows since: the channel choice shows each channel's name from HID++
+**0x1815 Hosts Info** (spec §5a "Channel names"). On the K380 all 3 channels have names (a stale
+pairing keeps its old one). It's read for Settings only, never during a release. Worth mirroring
+in your channel picker if you have one.

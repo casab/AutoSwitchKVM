@@ -1,3 +1,4 @@
+using AutoSwitchKVM.App.Services;
 using AutoSwitchKVM.App.Platform;
 using AutoSwitchKVM.App.Support;
 using AutoSwitchKVM.App.ViewModels;
@@ -225,6 +226,16 @@ internal static class Dialogs
                     : HandoffText.WhatHappens(a.Type);
                 managePairing.IsChecked = a.DefaultManagePairing(picked.IsLowEnergy);
                 channel.Visibility = a.Type == HandoffType.ChannelSwitch ? Visibility.Visible : Visibility.Collapsed;
+                if (a.Type == HandoffType.ChannelSwitch)
+                {
+                    var names = await Vm.Controller.GetChannelNamesAsync(picked.Address);
+                    if (version != pickVersion) return;
+                    if (names is not null)
+                    {
+                        channel.ItemsSource = AppController.ChannelChoiceLabels("Automatic (found when AutoSwitch runs there)", names, names.Count);
+                        channel.SelectedIndex = 0;
+                    }
+                }
             }
             catch (Exception ex)
             {

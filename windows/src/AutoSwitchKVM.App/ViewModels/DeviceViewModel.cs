@@ -1,3 +1,4 @@
+using AutoSwitchKVM.App.Services;
 using AutoSwitchKVM.Core;
 using AutoSwitchKVM.Core.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -30,11 +31,13 @@ public sealed class DeviceViewModel : ObservableObject
 
     // Channel switching (type 5): which channel the device goes to when the KVM leaves this PC.
     private HostChannels? _channels;
+    private IReadOnlyList<string?>? _channelNames;
     public Visibility ChannelSettingVisibility => HandoffType == HandoffType.ChannelSwitch ? Visibility.Visible : Visibility.Collapsed;
     public string ChannelSettingDescription => _channels is { } c
         ? $"Where the device goes when the KVM leaves this PC. This PC is channel {c.Current + 1} of {c.Count}. Automatic uses the channel AutoSwitch marked on the other computer."
         : "Where the device goes when the KVM leaves this PC. Automatic uses the channel AutoSwitch marked on the other computer.";
-    public IReadOnlyList<string> ChannelChoices { get; } = new[] { "Automatic", "Channel 1", "Channel 2", "Channel 3" };
+    /// "Automatic", then one entry per channel with the name the device stores for it (0x1815).
+    public IReadOnlyList<string> ChannelChoices { get; private set; } = AppController.ChannelChoiceLabels("Automatic", null);
 
     /// 0 = automatic, n = channel n.
     public int ReleaseChannelIndex
@@ -53,7 +56,11 @@ public sealed class DeviceViewModel : ObservableObject
         {
             _handoff = await _app.Controller.ClassifyAsync(Model.Address, Model.Name);
             if (_handoff?.Type == HandoffType.ChannelSwitch)
+            {
                 _channels = await _app.Controller.GetChannelsAsync(Model.Address);
+                _channelNames = await _app.Controller.GetChannelNamesAsync(Model.Address);
+                ChannelChoices = AppController.ChannelChoiceLabels("Automatic", _channelNames, _channels?.Count ?? 3);
+            }
         }
         catch (Exception ex)
         {
@@ -66,6 +73,8 @@ public sealed class DeviceViewModel : ObservableObject
         OnPropertyChanged(nameof(HandoffType));
         OnPropertyChanged(nameof(ChannelSettingVisibility));
         OnPropertyChanged(nameof(ChannelSettingDescription));
+        OnPropertyChanged(nameof(ChannelChoices));
+        OnPropertyChanged(nameof(ReleaseChannelIndex));   // re-select after the items changed
     }
 
     public BTDevice Model { get; private set; }

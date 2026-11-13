@@ -72,6 +72,56 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
         finally { _lock.Release(); }
     }
 
+    // ---- Channel names (HID++ 0x1815 "Hosts Info"; Settings only, never on the release path) ----
+
+    private const ushort HostsInfoFeature = 0x1815;
+    private readonly Dictionary<string, byte> _hostsInfoIndex = new();   // per address: 0 = not supported
+
+    /// The name each channel's host gave itself when it paired (e.g. the computer name), or null
+    /// per channel when unknown; null overall when the device doesn't support Hosts Info or isn't
+    /// reachable. Verified on a K380: feature index 8, v0, names for all 3 channels. Layout as in
+    /// Solaar: [0] -> caps (bit 0 = names), ?, hosts, current; [1](host) -> host, status, ?, ?,
+    /// nameLength; [3](host, offset) -> host, offset, up to 14 name bytes.
+    public async Task<IReadOnlyList<string?>?> GetChannelNamesAsync(string address, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            return await Task.Run(() => WithEndpoint(address, (s, _) =>
+            {
+                var digits = address.Replace(":", "").Replace("-", "").ToUpperInvariant();
+                if (!_hostsInfoIndex.TryGetValue(digits, out var hi))
+                {
+                    var reply = Request(s, 0x00, 0, new[] { (byte)(HostsInfoFeature >> 8), (byte)(HostsInfoFeature & 0xFF) });
+                    hi = reply is null ? (byte)0 : reply[4];
+                    if (reply is not null) _hostsInfoIndex[digits] = hi;
+                }
+                if (hi == 0) return null;
+                var info = Request(s, hi, 0, Array.Empty<byte>());
+                if (info is null || (info[4] & 0x01) == 0) return null;   // no names on this device
+                int hosts = Math.Min((int)info[6], 8);
+                var names = new string?[hosts];
+                for (byte h = 0; h < hosts; h++)
+                {
+                    var hostInfo = Request(s, hi, 1, new[] { h });
+                    if (hostInfo is null || hostInfo[5] == 0) continue;   // channel not paired
+                    int length = Math.Min((int)hostInfo[8], 64);
+                    var bytes = new List<byte>();
+                    for (int offset = 0; offset < length; offset += 14)
+                    {
+                        var piece = Request(s, hi, 3, new[] { h, (byte)offset });
+                        if (piece is null) break;
+                        bytes.AddRange(piece.Skip(6).Take(Math.Min(14, length - offset)));
+                    }
+                    var name = System.Text.Encoding.UTF8.GetString(bytes.ToArray()).TrimEnd('\0').Trim();
+                    names[h] = name.Length > 0 ? name : null;
+                }
+                return (IReadOnlyList<string?>?)names;
+            }), ct);
+        }
+        finally { _lock.Release(); }
+    }
+
     // ---- HID++ plumbing ----
 
     /// Find the device's HID++ endpoint, look up the Change Host feature (cached), run `work`.

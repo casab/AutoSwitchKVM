@@ -56,7 +56,7 @@ src/assets/og.png       social preview, made by tools/make-og.py
 - **Fonts** are self-hosted (Nunito from `@fontsource-variable/nunito`), so the site makes no
   third-party requests and the CSP can stay `'self'`. That also means no inline `<script>` or
   `style="…"`: put styles in `site.css` and code in `site.js`.
-- **Pending (next release):** from the first tag after v0.2.0, `macos-release.yml` also attaches
+- **Pending (next release):** from the first tag after v0.2.0, the release workflow (macOS job) also attaches
   `AutoSwitchKVM-macos.dmg` (fixed name). Once that release is out, point `/download/mac` in
   `src/_redirects` at `https://github.com/casab/AutoSwitchKVM/releases/latest/download/AutoSwitchKVM-macos.dmg`
   so the Mac button downloads directly. Until then it must stay on the release page (the file 404s).

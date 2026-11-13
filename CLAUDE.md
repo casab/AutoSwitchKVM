@@ -32,9 +32,9 @@ This is a **monorepo organized by platform**:
   both platforms: it shows the screenshots from `osx/docs/images/` and `windows/docs/images/`.
 - `.github/` — CI: macOS job (`swift build`/`swift test` + blocking lint) and a Windows job
   (`dotnet test` on `AutoSwitchKVM.Core.Tests` + WinUI app build).
-  `windows-release.yml`: a `v*` tag builds and publishes the Windows installer/update packages
-  (Velopack) as a GitHub release. `macos-release.yml` builds on the same tag, waits for that
-  release, and attaches the macOS DMG + Sparkle appcast to it: one release per version.
+  `release.yml`: a `v*` tag builds both apps (Windows Velopack packages, macOS DMG + Sparkle
+  appcast) into one GitHub release, with notes from `CHANGELOG.md`. It replaced the separate
+  `windows-release.yml` + `macos-release.yml` on 2026-11-13. One release per version.
 
 ## Where to work
 
