@@ -90,7 +90,7 @@ public partial class App : Application
             Exit();
             return;
         }
-        mainInstance.Activated += (_, _) => _dispatcher?.TryEnqueue(ShowSettings);
+        mainInstance.Activated += (_, _) => _dispatcher?.Enqueue("activation", ShowSettings);
 
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         var previewConfig = preview ? cmd.FirstOrDefault(a => a.StartsWith("--config="))?["--config=".Length..] : null;
@@ -108,7 +108,7 @@ public partial class App : Application
         }
 
         Updates = new UpdateService();
-        Updates.Changed += () => _dispatcher?.TryEnqueue(() =>
+        Updates.Changed += () => _dispatcher?.Enqueue("update state", () =>
         {
             UpdateTrayIcon();
             AppViewModel.Instance.Refresh();   // About & updates in Settings
@@ -144,7 +144,7 @@ public partial class App : Application
         _trayIcon.ForceCreate();
 
         // Swap the tray icon (and tooltip) to match state changes (active / inactive / paused / off).
-        Controller.StateChanged += () => _dispatcher?.TryEnqueue(UpdateTrayIcon);
+        Controller.StateChanged += () => _dispatcher?.Enqueue("tray icon", UpdateTrayIcon);
 
         // First launch after installing: open Settings so setup (source, devices) is right there.
         if (Program.IsFirstRun) ShowSettings("overview");

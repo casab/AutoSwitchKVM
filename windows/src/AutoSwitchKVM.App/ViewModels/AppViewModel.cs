@@ -1,3 +1,4 @@
+using AutoSwitchKVM.App.Support;
 using System.Collections.ObjectModel;
 using AutoSwitchKVM.App.Platform;
 using AutoSwitchKVM.App.Services;
@@ -39,7 +40,7 @@ public sealed class AppViewModel : ObservableObject
     {
         _c = controller;
         _dispatcher = DispatcherQueue.GetForCurrentThread();
-        _c.StateChanged += () => _dispatcher.TryEnqueue(Refresh);
+        _c.StateChanged += () => _dispatcher.Enqueue("settings refresh", Refresh);
         Refresh();
     }
 

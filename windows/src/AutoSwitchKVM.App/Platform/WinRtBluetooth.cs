@@ -1083,7 +1083,7 @@ public sealed class WinRtBluetooth : IBluetoothController
 
     private void Post(Action action)
     {
-        if (_dispatcher != null) _dispatcher.TryEnqueue(() => action());
+        if (_dispatcher != null) _dispatcher.Enqueue("bluetooth event", action);
         else action();
     }
 

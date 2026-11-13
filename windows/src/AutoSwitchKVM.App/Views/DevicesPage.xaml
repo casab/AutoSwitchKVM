@@ -29,7 +29,7 @@
                 <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE702;" /></toolkit:SettingsCard.HeaderIcon>
             </toolkit:SettingsCard>
 
-            <ItemsRepeater ItemsSource="{x:Bind ViewModel.Devices}">
+            <ItemsRepeater x:Name="DeviceList">
                 <ItemsRepeater.Layout>
                     <StackLayout Spacing="{StaticResource SettingsCardSpacing}" />
                 </ItemsRepeater.Layout>

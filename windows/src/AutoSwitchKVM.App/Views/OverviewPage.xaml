@@ -69,7 +69,7 @@
             <!-- Devices -->
             <TextBlock Text="Devices" Style="{StaticResource SectionHeaderStyle}"
                        Visibility="{x:Bind ViewModel.HasDevices, Mode=OneWay}" />
-            <ItemsRepeater ItemsSource="{x:Bind ViewModel.Devices}">
+            <ItemsRepeater x:Name="DeviceList">
                 <ItemsRepeater.Layout>
                     <StackLayout Spacing="{StaticResource SettingsCardSpacing}" />
                 </ItemsRepeater.Layout>

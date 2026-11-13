@@ -140,7 +140,7 @@ public sealed class SelectionEngine
     public async Task PollStatusesAsync()
     {
         await RefreshPowerAsync();
-        foreach (var device in Config.Devices)
+        foreach (var device in Config.Devices.ToList())
         {
             if (IsBusy(device.Id)) continue;
             if (!BluetoothPowered)
@@ -433,7 +433,7 @@ public sealed class SelectionEngine
     {
         var run = NewRun("manual: connect all");
         Info($"run #{run.Token}: manual connect all ({Config.Devices.Count} device(s))");
-        foreach (var device in Config.Devices)
+        foreach (var device in Config.Devices.ToList())
         {
             if (StaleReason(run, respectSelection: false) is { } why)
             {
@@ -450,7 +450,7 @@ public sealed class SelectionEngine
     {
         var run = NewRun("manual: disconnect all");  // invalidates any in-flight connect run
         Info($"run #{run.Token}: manual disconnect all ({Config.Devices.Count} device(s))");
-        foreach (var device in Config.Devices)
+        foreach (var device in Config.Devices.ToList())
         {
             if (StaleReason(run, respectSelection: false) is { } why)
             {
@@ -575,7 +575,7 @@ public sealed class SelectionEngine
 
     private async Task ConnectAllAsync(Run run)
     {
-        foreach (var device in Config.Devices)
+        foreach (var device in Config.Devices.ToList())
         {
             if (!device.Enabled) continue;
             if (StaleReason(run, respectSelection: false) is { } why)
@@ -827,7 +827,7 @@ public sealed class SelectionEngine
     /// no "Disconnected" notice unless the device was actually connected.
     private async Task ReleaseHeldAsync(Run run)
     {
-        foreach (var device in Config.Devices)
+        foreach (var device in Config.Devices.ToList())
         {
             if (!device.Enabled) continue;
             if (StaleReason(run, respectSelection: false) is { } why)
@@ -845,7 +845,7 @@ public sealed class SelectionEngine
 
     private async Task DisconnectAllAsync(Run run)
     {
-        foreach (var device in Config.Devices)
+        foreach (var device in Config.Devices.ToList())
         {
             if (!device.Enabled) continue;
             if (StaleReason(run, respectSelection: false) is { } why)  // e.g. the source came back

@@ -71,7 +71,7 @@ public sealed class UpdateService
             return;
         }
         Log.Info("update", $"version {CurrentVersion}; checking for updates every {CheckInterval.TotalHours:0} h");
-        _timer = new Timer(_ => _dispatcher.TryEnqueue(() => _ = CheckAsync(userInitiated: false)),
+        _timer = new Timer(_ => _dispatcher.Enqueue("update check", () => CheckAsync(userInitiated: false)),
             null, FirstCheckDelay, CheckInterval);
     }
 
@@ -97,7 +97,7 @@ public sealed class UpdateService
             Log.Info("update", $"update available: {AvailableVersion}; downloading");
             DownloadPercent = 0;
             Set(UpdateState.Downloading);
-            await _manager.DownloadUpdatesAsync(info, p => _dispatcher.TryEnqueue(() =>
+            await _manager.DownloadUpdatesAsync(info, p => _dispatcher.Enqueue("download progress", () =>
             {
                 // Changed refreshes the whole Settings view model: report in 5 % steps.
                 if (p / 5 == DownloadPercent / 5) return;

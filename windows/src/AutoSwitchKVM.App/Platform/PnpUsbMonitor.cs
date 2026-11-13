@@ -211,7 +211,7 @@ public sealed class PnpUsbMonitor : IUsbMonitor, IDisposable
     {
         var handler = Changed;
         if (handler is null) return;
-        if (_dispatcher != null) _dispatcher.TryEnqueue(() => handler(snapshot));
+        if (_dispatcher != null) _dispatcher.Enqueue("usb snapshot", () => handler(snapshot));
         else handler(snapshot);
     }
 

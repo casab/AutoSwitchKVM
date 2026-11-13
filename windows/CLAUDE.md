@@ -276,7 +276,15 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   components were detected"). TrayPanel puts its content one level below the root and sizes the
   window from `SizeChanged`.
 - **An exception inside a `DispatcherQueue.TryEnqueue` callback bypasses `Application.UnhandledException`**
-  and kills the process (stowed exception in CoreMessagingXP/Microsoft.UI.Xaml). Wrap such callbacks.
+  and kills the process (stowed exception `0xc000027b` in CoreMessagingXP, nothing in the app log).
+  Enqueue through `Support/DispatcherExtensions.Enqueue(what, …)` (logs and carries on), never bare
+  `TryEnqueue`. `async void` exceptions take the same route via the SynchronizationContext, so
+  `Program.cs` installs `Support/SafeSynchronizationContext` (startup warns if it isn't active).
+- **Bind a shared collection only while the page is on screen.** A page navigated away from stays
+  subscribed until it is collected, and its detached `ItemsRepeater` throws E_FAIL (`0x80004005`)
+  when the collection's membership changes. On 2026-11-13 adding or removing a device after
+  visiting Overview crashed the app (four times in a row). Overview/Devices set
+  `DeviceList.ItemsSource` in `Loaded` and clear it in `Unloaded`; do the same for new pages.
 - **In a two-parameter lambda, a lone `_` is a real parameter, not a discard**:
   `(_, e) => TryParse(x, out _)` tried to write into the sender. Name the parameters.
 - **WinRT pairing ignores cancellation.** Cancelling `Custom.PairAsync` (incl. via `AsTask(ct)`)

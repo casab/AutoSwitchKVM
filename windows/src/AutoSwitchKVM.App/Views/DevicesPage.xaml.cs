@@ -8,7 +8,16 @@ public sealed partial class DevicesPage : Page
 {
     public AppViewModel ViewModel => AppViewModel.Instance;
 
-    public DevicesPage() => InitializeComponent();
+    public DevicesPage()
+    {
+        InitializeComponent();
+        // Bind the shared device list only while this page is on screen. A page navigated away
+        // from stays subscribed until it is collected, and its detached ItemsRepeater throws
+        // E_FAIL (0x80004005) when the list's membership changes (add/remove a device): that
+        // crashed the app on 2026-11-13.
+        Loaded += (_, _) => DeviceList.ItemsSource = ViewModel.Devices;
+        Unloaded += (_, _) => DeviceList.ItemsSource = null;
+    }
 
     private async void OnAddDevice(object sender, RoutedEventArgs e) => await Dialogs.AddDeviceAsync(XamlRoot);
 

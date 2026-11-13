@@ -60,7 +60,7 @@ internal static class Dialogs
         body.Children.Add(new ProgressBar { IsIndeterminate = true });
         body.Children.Add(count);
 
-        void OnLearn() => root.Content?.DispatcherQueue.TryEnqueue(() =>
+        void OnLearn() => root.Content?.DispatcherQueue.Enqueue("learn progress", () =>
             count.Text = learner.ChangeCount == 1 ? "1 device changed" : $"{learner.ChangeCount} devices changed");
         learner.Changed += OnLearn;
 

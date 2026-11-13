@@ -86,7 +86,7 @@ public sealed class AppController
         Log.Debug("usb", "monitor started");
         Engine.RefreshMonitoring();
         Fire(Engine.SeedAsync, "initial seed");
-        _pollTimer = new Timer(_ => _dispatcher.TryEnqueue(() => Fire(Engine.PollStatusesAsync, "status poll")),
+        _pollTimer = new Timer(_ => _dispatcher.Enqueue("status poll", () => Fire(Engine.PollStatusesAsync, "status poll")),
             null, 10_000, 10_000);
 
         // Sleep/wake. Suspend runs on the SystemEvents thread and blocks it (bounded): an
@@ -99,7 +99,7 @@ public sealed class AppController
         // Log-off/shutdown: same release, so the device isn't left bonded here while this PC is off
         // (the next launch also reconciles: spec §3 Evaluate step 5).
         _power.OnSessionEnding = reason => ReleaseBeforeGoingAway(reason);
-        _power.OnResume = () => _dispatcher.TryEnqueue(() =>
+        _power.OnResume = () => _dispatcher.Enqueue("resume", () =>
         {
             Log.Info("power", "resume -> re-evaluate");
             // A release that couldn't even start before sleep (e.g. queued behind a pair holding
@@ -112,7 +112,7 @@ public sealed class AppController
         _power.Start();
 
         // Global hotkeys (WM_HOTKEY fires on this UI thread).
-        _hotkeys.OnAction = a => _dispatcher.TryEnqueue(() => HandleHotkey(a));
+        _hotkeys.OnAction = a => _dispatcher.Enqueue("hotkey", () => HandleHotkey(a));
         _hotkeys.Start();
         ApplyHotkeys();
         Log.Debug("hotkey", $"global hotkeys {(Config.GlobalHotkeysEnabled ? "enabled" : "disabled")}");
@@ -120,6 +120,8 @@ public sealed class AppController
         LoginItem.SetEnabled(Config.LaunchAtLogin);
 
         Log.Info("app", "started");
+        if (SynchronizationContext.Current is not SafeSynchronizationContext)
+            Log.Warn("app", $"UI thread context is {SynchronizationContext.Current?.GetType().Name ?? "none"}, not the guarded one: async void exceptions will crash the app");
     }
 
     /// Show a notification (callers check Config.ShowNotifications where it applies).

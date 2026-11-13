@@ -30,8 +30,10 @@ public static class Program
         WinRT.ComWrappersSupport.InitializeComWrappers();
         Application.Start(callbackParams =>
         {
-            var context = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());
-            SynchronizationContext.SetSynchronizationContext(context);
+            // Guarded context: an exception from an async void method is logged instead of
+            // killing the process (see SafeSynchronizationContext).
+            SynchronizationContext.SetSynchronizationContext(
+                new Support.SafeSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
             new App();
         });
     }
