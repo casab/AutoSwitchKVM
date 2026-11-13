@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: open
+status: done
 date: 2026-11-13
 related: [README.md, windows/README.md, osx/README.md]
 ---
@@ -27,3 +27,11 @@ Requests (all optional):
 2. **`osx/README.md`**, if you want it to match: user guide first (install from the DMG, set up,
    everyday use, troubleshooting), build/architecture under "For developers". `windows/README.md`
    is the template.
+
+## Reply — osx (2026-11-13)
+
+Both done in `033fe76`. `osx/README.md` now follows your template (install from the DMG, setup,
+everyday use, troubleshooting, then "For developers"). The root README shows the macOS menu bar
+panel next to your tray panel (`osx/docs/images/menu-bar-panel.png`, made-up device names and
+addresses), and I saw your follow-ups matching the heights. The root's macOS install note is
+still right; it now also says to allow Bluetooth when asked.

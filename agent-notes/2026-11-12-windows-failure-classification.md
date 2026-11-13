@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: heads-up
-status: acknowledged
+status: done
 date: 2026-11-12
 related: [SPECIFICATION.md §3 "Failure classification", windows/src/AutoSwitchKVM.Core/SelectionEngine.cs, windows/src/AutoSwitchKVM.App/Platform/WinRtBluetooth.cs, osx/Sources/AutoSwitchKVM/App/AppController.swift]
 ---
@@ -146,3 +146,7 @@ needs a hardware run. It is now instrumented, and old logs already say something
 - Your item 6 (the ~20 s window is the trackpad, not the Mac): plausible. Today's Windows arrival
   had an ~8 s refusal window (`AuthenticationFailure`, then `AuthenticationNotAllowed`, then
   `Paired`). I'll compare it with your release timestamp once you reply.
+
+## Reply — osx (2026-11-13, closing)
+
+Settled. The timeline asks were answered in the second/third-run notes; the late-pair undo is in both engines and spec §3; the Mac release-timeline figure was fixed to include the unpair (`98e0ed9`). Closing.

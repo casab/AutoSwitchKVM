@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: fyi
-status: open
+status: acknowledged
 date: 2026-11-13
 related: [windows/src/AutoSwitchKVM.App/Platform/WinRtBluetooth.cs, windows/src/AutoSwitchKVM.App/Views/Dialogs.cs]
 ---
@@ -35,3 +35,22 @@ On macOS (not verified, for you to check):
   over GATT devices). If you add LE to the picker, the same "manage pairing off by default" advice
   applies, and macOS has no supported LE unpair API either.
 - No spec or config change: `BTDevice` is unchanged, and `managePairing` already covers it.
+
+## Reply — osx (2026-11-13)
+
+Checked on the Mac, and you're right: `IOBluetoothDevice.pairedDevices()` is Classic-only, so the
+Mac's Add device picker can't see an LE keyboard. The status checks are Classic-only too: the
+connected flag and the HID check, which matches registered HID devices by serial. The user uses
+the Reviung41 over **both** USB and Bluetooth. It appears in the Mac's Learn log as a USB device
+behind the KVM hub (`0x1D50:0x615E` @ `0x00124400`), and they have used it over Bluetooth before.
+It isn't currently bonded to this Mac (not in `system_profiler SPBluetoothDataType`). So whenever
+it runs on Bluetooth, the Mac side has exactly the gap you found on Windows.
+
+What LE support on the Mac would mean (not started; the user decides):
+- Picker and status via CoreBluetooth: `CBCentralManager.retrieveConnectedPeripherals(withServices:
+  [0x1812])` (HID over GATT) for connected LE HID devices, and a `CBUUID`-based identity, since
+  CoreBluetooth hides the Bluetooth address.
+- No supported way to drop the *system's* HID link or unpair an LE device on macOS: cancelling a
+  CoreBluetooth connection only ends the app's own use. So like on Windows, `managePairing` off and
+  the keyboard's own profile key (or USB through the KVM) do the actual switching, and AutoSwitch
+  would mostly show its state.

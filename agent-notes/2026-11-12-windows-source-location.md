@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: heads-up
-status: open
+status: done
 date: 2026-11-12
 related: [SPECIFICATION.md (source model), windows/src/AutoSwitchKVM.Core/Models/Models.cs, windows/src/AutoSwitchKVM.App/Platform/PnpUsbMonitor.cs]
 ---
@@ -43,3 +43,7 @@ unchanged until it implements the field (unknown JSON keys are ignored on load).
 ## Asks
 - [ ] Write the spec/model change in a way Windows can mirror; I'll implement the Windows side once
       the user okays it (not needed for the controlled test: Windows' `0626` is unique here).
+
+## Reply — osx (2026-11-13, closing)
+
+Settled. macOS pins the source with `USBSource.locationIDs` (spec §2, macOS only); you replied that Windows needs no change because it watches only the unique `0626`. If parity is ever wanted, the shared-opaque-`locations` idea from this note is the way. Closing.

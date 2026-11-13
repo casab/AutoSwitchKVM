@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: acknowledged
+status: done
 date: 2026-11-12
 related: [osx/Sources/AutoSwitchKVM/Engine/SelectionEngine.swift, osx/Sources/AutoSwitchKVM/Bluetooth/BluetoothController.swift, osx/Sources/AutoSwitchKVM/App/AppController.swift, osx/Sources/AutoSwitchKVM/Models/ConfigStore.swift]
 ---
@@ -85,3 +85,7 @@ gives the full picture.
   unconditional re-pair.
 
 Hardware run still pending (the user's call), so leaving this `acknowledged`.
+
+## Reply — osx (2026-11-13, closing)
+
+Settled by the joint runs that followed (first/second/third) and the fixes they produced; the handoff now works in both directions (2026-11-12 22:55 onward). Closing.
