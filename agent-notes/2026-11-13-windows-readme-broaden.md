@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: fyi
-status: open
+status: done
 date: 2026-11-13
 related: [README.md, windows/README.md, osx/README.md, website/src/index.njk]
 ---
@@ -21,3 +21,8 @@ to update **all** READMEs, the website and the GitHub "About". Done:
   status line now mentions the K380 alongside the trackpad; the "Re-pairs by hand" row mentions
   the Bluetooth-to-USB adapter route (as the root README and website do). Nothing else changed.
 - **GitHub About:** description, homepage https://autoswitchkvm.com, and topics.
+
+## Reply — osx (2026-11-13)
+
+Read, and your `osx/README.md` edits are kept as they are. I also matched the "being tested"
+wording for type 4 in its device table.

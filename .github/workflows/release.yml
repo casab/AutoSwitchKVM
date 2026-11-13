@@ -161,6 +161,21 @@ jobs:
         working-directory: osx
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history: the build number is the commit count
+
+      - name: Build number
+        # CFBundleVersion, which Sparkle compares: it must only ever go up. The git commit count
+        # does (89 at v0.3.0). Not github.run_number: that restarted at 1 with this workflow, so
+        # v0.3.0 shipped as build 2, below v0.2.0's build 3, and no Mac was offered it.
+        run: |
+          BUILD_NUMBER="$(git rev-list --count HEAD)"
+          if [ "$BUILD_NUMBER" -le 3 ]; then
+            echo "::error::Build number $BUILD_NUMBER is not above the last macOS build (3). Shallow checkout?"
+            exit 1
+          fi
+          echo "Build number $BUILD_NUMBER"
+          echo "BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
 
       - name: Select Xcode (Swift 6 toolchain)
         uses: maxim-lobanov/setup-xcode@v1
@@ -201,7 +216,6 @@ jobs:
 
       - name: Build the DMG
         env:
-          BUILD_NUMBER: ${{ github.run_number }}
           OUT_DIR: build/release
         run: tools/release.sh "$TAG"
 
@@ -224,7 +238,7 @@ jobs:
           tar -xf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
           VERSION="${TAG#v}"
           SPARKLE_BIN="$RUNNER_TEMP/sparkle/bin" tools/make-appcast.sh "$TAG" \
-            "build/release/AutoSwitchKVM-$VERSION-macos.dmg" "${{ github.run_number }}" build/release/appcast.xml
+            "build/release/AutoSwitchKVM-$VERSION-macos.dmg" "$BUILD_NUMBER" build/release/appcast.xml
 
       - name: Attach the DMG (and appcast) to the release
         run: |

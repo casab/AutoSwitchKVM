@@ -387,6 +387,7 @@ struct SettingsDeviceCard: View {
     /// it's sent to the other computer's channel instead of being disconnected.
     @ViewBuilder
     private func channelRow(_ ch: HostChannels) -> some View {
+        let names = controller.channelNames[device.id]
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Label("This Mac is on channel \(ch.current + 1) of \(ch.count)", systemImage: "arrow.left.arrow.right")
@@ -394,11 +395,17 @@ struct SettingsDeviceCard: View {
                 Spacer()
                 Text("Other computer's channel").font(.system(size: 11)).foregroundStyle(.secondary)
                 Picker("", selection: $device.releaseToChannel) {
-                    Text(ch.markedOtherChannel.map { "Automatic (\($0 + 1))" } ?? "Automatic (not found)")
-                        .tag(Int?.none)
-                    ForEach(1...max(1, ch.count), id: \.self) { n in Text("\(n)").tag(Int?.some(n)) }
+                    Text(
+                        ch.markedOtherChannel.map { "Automatic (\(HostChannels.label($0, names: names)))" }
+                            ?? "Automatic (not found)"
+                    )
+                    .tag(Int?.none)
+                    ForEach(1...max(1, ch.count), id: \.self) { n in
+                        Text(HostChannels.label(n - 1, names: names) + (n - 1 == ch.current ? " (this Mac)" : ""))
+                            .tag(Int?.some(n))
+                    }
                 }
-                .labelsHidden().frame(width: 150)
+                .labelsHidden().frame(width: 260)
                 .help(
                     "Where the device goes when the KVM leaves this Mac. Automatic uses the channel the other "
                         + "computer's AutoSwitch marked.")

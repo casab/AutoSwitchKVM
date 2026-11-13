@@ -16,6 +16,14 @@ GitHub release (and from there into the in-app update notes).
 
 ## Unreleased
 
+## v0.3.1 (2026-11-13)
+
+### macOS
+
+- Updates work again: Macs on 0.2.0 or earlier weren't offered 0.3.0 (its build number was too
+  low). The log now records each update check's result.
+- The Logitech channel choice shows each channel's computer name, as the keyboard stores it.
+
 ## v0.3.0 (2026-11-13)
 
 ### Both

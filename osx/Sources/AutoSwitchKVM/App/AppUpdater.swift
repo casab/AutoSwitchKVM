@@ -7,7 +7,9 @@ import Foundation
 #endif
 
 /// Automatic updates via Sparkle 2, from the appcast attached to the latest GitHub release
-/// (`SUFeedURL` in Info.plist; `.github/workflows/macos-release.yml` publishes it).
+/// (`SUFeedURL` in Info.plist; the `macos` job of `.github/workflows/release.yml` publishes it).
+/// Every check's outcome is logged with both build numbers: Sparkle compares `CFBundleVersion`
+/// with `sparkle:version`, and v0.3.0 shipped a lower build than the installed copies.
 ///
 /// Sparkle is linked only into the XcodeGen `.app` target (project.yml). The SwiftPM build, used
 /// by the tests and CI, doesn't have it, and there the updater is simply unavailable. It also
@@ -23,7 +25,7 @@ final class AppUpdater: NSObject, ObservableObject {
     @Published private(set) var canCheckForUpdates = false
 
     /// The version shown in Settings and the log: "1.2.0 (42)".
-    static var versionDescription: String {
+    nonisolated static var versionDescription: String {
         let info = Bundle.main.infoDictionary ?? [:]
         let version = info["CFBundleShortVersionString"] as? String ?? "?"
         let build = info["CFBundleVersion"] as? String ?? "?"
@@ -50,7 +52,7 @@ final class AppUpdater: NSObject, ObservableObject {
                 return
             }
             let controller = SPUStandardUpdaterController(
-                startingUpdater: true, updaterDelegate: nil, userDriverDelegate: self)
+                startingUpdater: true, updaterDelegate: self, userDriverDelegate: self)
             self.controller = controller
             observation = controller.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) {
                 [weak self] updater, _ in
@@ -60,7 +62,7 @@ final class AppUpdater: NSObject, ObservableObject {
             isAvailable = true
             Log.app.log(
                 "updates: on (\(controller.updater.automaticallyChecksForUpdates ? "automatic checks" : "manual checks only"); "
-                    + "feed \(feed))")
+                    + "feed \(controller.updater.feedURL?.absoluteString ?? feed))")
         #else
             Log.app.debug("updates: Sparkle isn't linked into this build (SwiftPM); the updater stays off")
         #endif
@@ -97,6 +99,53 @@ final class AppUpdater: NSObject, ObservableObject {
 }
 
 #if canImport(Sparkle)
+    /// The outcome of every check, in our own log: Sparkle's own lines only go to the unified log.
+    extension AppUpdater: SPUUpdaterDelegate {
+        nonisolated private static func describe(_ item: SUAppcastItem?) -> String {
+            guard let item else { return "none" }
+            return "\(item.displayVersionString) (build \(item.versionString))"
+        }
+
+        nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+            Log.app.log("updates: \(Self.describe(item)) is available (this copy: \(AppUpdater.versionDescription))")
+        }
+
+        nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater, error: Error) {
+            let info = (error as NSError).userInfo
+            let latest = info[SPULatestAppcastItemFoundKey] as? SUAppcastItem
+            let reason: String
+            switch (info[SPUNoUpdateFoundReasonKey] as? NSNumber).flatMap({
+                SPUNoUpdateFoundReason(rawValue: $0.int32Value)
+            }) {
+            case .onLatestVersion: reason = "up to date"
+            case .onNewerThanLatestVersion: reason = "this copy is newer than the feed's"
+            case .systemIsTooOld: reason = "the update needs a newer macOS"
+            case .systemIsTooNew: reason = "the update doesn't support this macOS"
+            default: reason = "no update"
+            }
+            Log.app.log(
+                "updates: \(reason) (this copy: \(AppUpdater.versionDescription); newest in the feed: "
+                    + "\(Self.describe(latest)); Sparkle compares build numbers)")
+        }
+
+        nonisolated func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+            let nsError = error as NSError
+            // "No update" also arrives here; updaterDidNotFindUpdate already logged it.
+            guard nsError.domain != SUSparkleErrorDomain || nsError.code != Int(SUError.noUpdateError.rawValue) else {
+                return
+            }
+            Log.app.warn("updates: check failed: \(error.localizedDescription) (\(nsError.domain) \(nsError.code))")
+        }
+
+        nonisolated func updater(_ updater: SPUUpdater, failedToDownloadUpdate item: SUAppcastItem, error: Error) {
+            Log.app.warn("updates: download of \(Self.describe(item)) failed: \(error.localizedDescription)")
+        }
+
+        nonisolated func updater(_ updater: SPUUpdater, willInstallUpdate item: SUAppcastItem) {
+            Log.app.log("updates: installing \(Self.describe(item))")
+        }
+    }
+
     extension AppUpdater: SPUStandardUserDriverDelegate {
         /// A menu bar app has no Dock icon or main window, so Sparkle shows scheduled update
         /// alerts gently instead of popping a window over whatever the user is doing.

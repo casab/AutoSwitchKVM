@@ -54,11 +54,17 @@ The app is menu-bar-only (`NSApp.setActivationPolicy(.accessory)` + `LSUIElement
   `BUILD_NUMBER`, default the commit count), signs it with `SIGN_IDENTITY` (default ad-hoc, `--deep`
   so the embedded Sparkle helpers match) and writes `build/release/AutoSwitchKVM-<version>-macos.dmg`
   + `.sha256`. Runs locally as is.
-- `.github/workflows/macos-release.yml` runs it on the same `v*` tags as the Windows release,
-  waits for the release the Windows workflow creates, and attaches the DMG, the same DMG as
-  `AutoSwitchKVM-macos.dmg` (fixed name for `releases/latest/download/…`, used by the website's
-  Download for Mac), and, for stable tags, the Sparkle `appcast.xml` from `tools/make-appcast.sh`. It appends macOS install notes to the
-  release body once (`<!-- macos-notes -->` marker). The DMG is also a run artifact.
+- `.github/workflows/release.yml` (one workflow for both platforms, since 2026-11-13) runs it on
+  `v*` tags: its `notes` job creates the release from the tag's `CHANGELOG.md` section +
+  `.github/release/install-notes.md` (as a pre-release); the `macos` job builds, writes the
+  appcast (stable tags only, `tools/make-appcast.sh`) and attaches the DMG, the same DMG as
+  `AutoSwitchKVM-macos.dmg` (fixed name for `releases/latest/download/…`, the website's Download
+  for Mac), and the appcast; `finalize` makes a stable tag the latest release once Windows is
+  attached too, which is when Sparkle sees it. The DMG is also a run artifact. **Releasing:**
+  rename `## Unreleased` in `CHANGELOG.md` to `## vX.Y.Z (date)` first; a stable tag without its
+  section fails in `notes`. **Build number** (`CFBundleVersion`, what Sparkle compares) = the git
+  commit count (full-history checkout), never `github.run_number`: the run counter restarted with
+  the new workflow and v0.3.0 shipped as build 2 < 3, invisible to every installed copy.
 - Secrets: `MACOS_SIGNING_P12` + `MACOS_SIGNING_P12_PASSWORD` (optional self-made code-signing
   certificate: keeps the code identity fixed, so the Bluetooth permission and login item survive
   updates; ad-hoc builds get a new identity each time), `SPARKLE_ED_PRIVATE_KEY` (without it no
@@ -279,6 +285,18 @@ the new profile but does not force-disconnect the previous profile's devices.
   stranded. The late release now retries up to 5 s. `handleStatusEvent` also drops events of busy
   devices, so a channel-switcher that connects while busy (e.g. mid arrival wait) is noted and sent
   on from `clearBusy` once free.
+- **Sparkle compares build numbers twice:** the feed's `sparkle:version` against the running
+  `CFBundleVersion` (to offer it), then the installer checks the *downloaded bundle's*
+  `CFBundleVersion` again ("Refusing to downgrade app from version 3 to 2", error 4005). Both
+  come from the same `BUILD_NUMBER`. Every check's outcome is in the app log (`updates: …`,
+  `AppUpdater`'s `SPUUpdaterDelegate`); Sparkle's own detail is in the unified log, subsystem
+  `org.sparkle-project.Sparkle` (processes `AutoSwitchKVM` and `Autoupdate`).
+- **End-to-end update test without a release** (verified 2026-11-13, 0.2.9 (1) -> 0.3.0 (2),
+  installed on quit): build a dev copy with a build number *below* the real release's, serve a
+  copy of the live appcast with a higher `sparkle:version` on `http://127.0.0.1:<port>/`, and
+  `defaults write com.enginal.AutoSwitchKVM SUFeedURL <that URL>` (Sparkle reads it before
+  Info.plist). The real DMG and signature stay valid. `defaults delete … SUFeedURL` afterwards:
+  it applies to every copy with this bundle ID, the installed one included.
 - **Testing a build next to the installed app:** `SIGN_IDENTITY=<the release certificate's SHA-1>
   BUILD_NUMBER=<installed build> tools/release.sh <version>` signs it with the same identity, so the
   Bluetooth and Input Monitoring permissions carry over, and Sparkle still offers the next release.

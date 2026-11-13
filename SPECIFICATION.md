@@ -413,7 +413,7 @@ device index `0xFF` for a direct Bluetooth connection). Verified on a Logitech K
 feature index 7, version 1, 3 channels. **Channel marks:** each AutoSwitch writes cookie `0xA5` on
 its own channel (the firmware clears a channel's cookie when a new host pairs there), so the
 leaving host can find the other host's channel without configuration.
-**Channel names** (Windows 2026-11-13): HID++ feature **0x1815 "Hosts Info"** stores the name
+**Channel names** (Windows and macOS 2026-11-13): HID++ feature **0x1815 "Hosts Info"** stores the name
 each channel's host gave itself when it paired (Windows: the computer name; macOS: the computer
 name, e.g. "…'s MacBook Pro"). Layout as in Solaar: `[0]` → caps (bit 0 = names), ?, hosts,
 current; `[1](host)` → host, status (0 = not paired), ?, ?, name length; `[3](host, offset)` →

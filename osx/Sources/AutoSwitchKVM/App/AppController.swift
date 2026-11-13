@@ -409,6 +409,10 @@ final class AppController: ObservableObject {
     /// visible while the KVM is on the other computer.
     @Published private(set) var channelInfo: [UUID: HostChannels] = [:]
 
+    /// The name each channel's computer gave itself when it paired (HID++ 0x1815), for the
+    /// channel choice. Kept like `channelInfo`.
+    @Published private(set) var channelNames: [UUID: [String?]] = [:]
+
     /// Ask each enabled device that isn't pairing-managed whether it switches channel on request.
     /// Read-only HID++ queries; a device that isn't connected here simply doesn't answer.
     func refreshChannelInfo() {
@@ -421,6 +425,10 @@ final class AppController: ObservableObject {
                         channelInfo[device.id] = ch
                         handoff[DeviceIdentityReader.normalize(device.address)] = .channelSwitch
                         engine.noteSwitchesChannels(device.id)
+                        let names = try await withTimeout(5) {
+                            try await self.hostSwitcher.channelNames(device.normalizedAddress)
+                        }
+                        if let names { channelNames[device.id] = names }
                     }
                 } catch {
                     Log.app.debug("\(device.name): channel query failed: \(error)")

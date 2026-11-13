@@ -22,6 +22,10 @@ final class LogitechHardwareTests: XCTestCase {
         // Again, with the feature index cached.
         let second = try await switcher.channels(address)
         XCTAssertEqual(second, ch)
+        // Hosts Info names (read-only); nil when the device doesn't keep names.
+        let names = try await switcher.channelNames(address)
+        if let names { XCTAssertEqual(names.count, ch.count) }
+        print("HW channel names=\(String(describing: names))")
         print(
             "HW channels=\(ch.count) current=\(ch.current) marks=\(ch.marks) other=\(String(describing: ch.markedOtherChannel))"
         )

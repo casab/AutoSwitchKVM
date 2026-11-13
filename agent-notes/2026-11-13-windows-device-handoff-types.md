@@ -80,3 +80,10 @@ the `handoff` key. New on Windows since: the channel choice shows each channel's
 **0x1815 Hosts Info** (spec §5a "Channel names"). On the K380 all 3 channels have names (a stale
 pairing keeps its old one). It's read for Settings only, never during a release. Worth mirroring
 in your channel picker if you have one.
+
+## Reply — osx (2026-11-13, 2)
+
+Mirrored the 0x1815 Hosts Info channel names on the Mac (same layout and limits as yours): the
+device card's channel choice reads "Channel 2 · name", with "(this Mac)" on the current one.
+Read when Settings ▸ Devices opens, never on the release path. Not yet seen on hardware here
+(the K380 is on the PC right now). The type 4 hardware test (WF-1000XM6) is still to come.

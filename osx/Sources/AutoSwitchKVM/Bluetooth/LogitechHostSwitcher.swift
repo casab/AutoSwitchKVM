@@ -20,10 +20,13 @@ import IOKit.hid
 final class LogitechHostSwitcher: HostSwitcher {
     private static let vendor = 0x046D
     private static let changeHostFeature: (UInt8, UInt8) = (0x18, 0x14)
+    private static let hostsInfoFeature: (UInt8, UInt8) = (0x18, 0x15)
     private static let replyTimeout: Duration = .milliseconds(1500)
 
     /// Change Host feature index per normalized address; 0 = the device doesn't have it.
     private var featureIndex: [String: UInt8] = [:]
+    /// Hosts Info (0x1815) feature index per normalized address; 0 = the device doesn't have it.
+    private var hostsInfoIndex: [String: UInt8] = [:]
     private var inUse = false
     private var permissionReported = false
 
@@ -52,6 +55,50 @@ final class LogitechHostSwitcher: HostSwitcher {
             _ = try await session.request(fi, function: 3, [UInt8(ch.current), HostChannels.autoSwitchMark])
             Log.bluetooth.debug("hid++ \(address): setCookie(\(ch.current), 0xA5)")
             return ch.current
+        }
+    }
+
+    /// HID++ 0x1815 "Hosts Info", layout as in Solaar (same as Windows):
+    ///   [0] getFeatureInfo() -> caps (bit 0 = names), ?, hosts, current
+    ///   [1] getHostInfo(host) -> host, status (0 = not paired), ?, ?, name length
+    ///   [3] getHostName(host, offset) -> host, offset, up to 14 name bytes
+    /// Verified on a K380 from Windows: feature index 8, v0, names for all 3 channels.
+    func channelNames(_ address: String) async throws -> [String?]? {
+        let key = Self.normalize(address)
+        return try await withSession(address) { session, _ -> [String?]? in
+            let hi: UInt8
+            if let cached = hostsInfoIndex[key] {
+                hi = cached
+            } else {
+                let (hi8, lo8) = Self.hostsInfoFeature
+                guard let reply = try await session.request(0x00, function: 0, [hi8, lo8]) else { return nil }
+                hi = reply[4]
+                hostsInfoIndex[key] = hi
+                Log.bluetooth.debug(
+                    "hid++ \(address): Hosts Info feature \(hi == 0 ? "not present" : "at index \(hi)")")
+            }
+            guard hi != 0, let info = try await session.request(hi, function: 0, []), info[4] & 0x01 != 0 else {
+                return nil  // no names on this device
+            }
+            let hosts = min(Int(info[6]), 8)
+            var names = [String?](repeating: nil, count: hosts)
+            for host in 0..<hosts {
+                guard let hostInfo = try await session.request(hi, function: 1, [UInt8(host)]), hostInfo[5] != 0 else {
+                    continue  // channel not paired
+                }
+                let length = min(Int(hostInfo[8]), 64)
+                var bytes: [UInt8] = []
+                var offset = 0
+                while offset < length {
+                    guard let piece = try await session.request(hi, function: 3, [UInt8(host), UInt8(offset)]) else {
+                        break
+                    }
+                    bytes += piece.dropFirst(6).prefix(min(14, length - offset))
+                    offset += 14
+                }
+                names[host] = HostChannels.decodeName(bytes, length: length)
+            }
+            return names
         }
     }
 

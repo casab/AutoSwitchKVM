@@ -18,6 +18,16 @@ protocol HostSwitcher: AnyObject, Sendable {
     /// (0-based), or nil when it was already marked or the device doesn't support channels.
     @discardableResult
     func markCurrentChannel(_ address: String) async throws -> Int?
+
+    /// The name the device stores for each channel (Logitech HID++ 0x1815 "Hosts Info"): what
+    /// each channel's computer called itself when it paired. nil when the device doesn't keep
+    /// names or isn't reachable; a nil entry for a channel without one. For Settings only,
+    /// never on the release path.
+    func channelNames(_ address: String) async throws -> [String?]?
+}
+
+extension HostSwitcher {
+    func channelNames(_ address: String) async throws -> [String?]? { nil }
 }
 
 /// A device's channels: how many, which one this Mac is on (0-based), and one mark byte per
@@ -35,5 +45,19 @@ struct HostChannels: Equatable, Sendable {
     var markedOtherChannel: Int? {
         let marked = (0..<min(count, marks.count)).filter { $0 != current && marks[$0] == Self.autoSwitchMark }
         return marked.count == 1 ? marked[0] : nil
+    }
+
+    /// "Channel 2 · Engin's PC" (0-based `channel`), or "Channel 2" without a stored name.
+    static func label(_ channel: Int, names: [String?]?) -> String {
+        let name = names.flatMap { channel < $0.count ? $0[channel] : nil }
+        return name.map { "Channel \(channel + 1) · \($0)" } ?? "Channel \(channel + 1)"
+    }
+
+    /// A channel name from Hosts Info name pieces (UTF-8, `length` bytes in all): trailing NULs
+    /// and spaces dropped, nil when empty.
+    static func decodeName(_ bytes: [UInt8], length: Int) -> String? {
+        let name = String(decoding: bytes.prefix(length), as: UTF8.self)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\0").union(.whitespacesAndNewlines))
+        return name.isEmpty ? nil : name
     }
 }

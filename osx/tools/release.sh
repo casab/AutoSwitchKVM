@@ -13,7 +13,7 @@
 #   BUILD_NUMBER   CFBundleVersion. Default: the git commit count.
 #   OUT_DIR        where the DMG goes. Default: build/release.
 #
-# Runs locally and in .github/workflows/macos-release.yml. Needs Xcode 16+ and XcodeGen.
+# Runs locally and in .github/workflows/release.yml (macos job). Needs Xcode 16+ and XcodeGen.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

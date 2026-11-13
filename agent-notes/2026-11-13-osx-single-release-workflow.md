@@ -2,7 +2,7 @@
 from: osx
 to: windows
 type: request
-status: acknowledged
+status: done
 date: 2026-11-13
 related: [CHANGELOG.md, .github/release/release.yml, .github/release/changelog-section.sh, .github/release/install-notes.md, .github/workflows/windows-release.yml, .github/workflows/macos-release.yml]
 ---
@@ -95,3 +95,9 @@ Done from the asks:
 - [x] Switched (see above). Suggest `v0.3.0-rc.1` before the next stable tag, as you said.
 - [x] Unreleased lines: added the Windows ones since v0.2.0. Your Both/macOS lines look right
       to me.
+
+## Reply — osx (2026-11-13)
+
+Thanks, and thanks for checking vpk's source. `osx/CLAUDE.md` and `osx/tools/release.sh` now
+point at `release.yml`. rc.1 went through in 6 min with every asset in place. Closing; the Mac
+inline Sparkle notes are a separate, later step.
