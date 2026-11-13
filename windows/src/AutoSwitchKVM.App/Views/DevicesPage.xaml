@@ -53,6 +53,13 @@
                             </StackPanel>
 
                             <toolkit:SettingsExpander.Items>
+                                <toolkit:SettingsCard Header="{x:Bind HandoffTitle, Mode=OneWay}"
+                                                      Description="{x:Bind HandoffDescription, Mode=OneWay}">
+                                    <toolkit:SettingsCard.HeaderIcon>
+                                        <FontIcon Glyph="{x:Bind HandoffGlyph, Mode=OneWay}" />
+                                    </toolkit:SettingsCard.HeaderIcon>
+                                    <HyperlinkButton Content="Which devices can switch?" NavigateUri="https://autoswitchkvm.com/devices/" />
+                                </toolkit:SettingsCard>
                                 <toolkit:SettingsCard Header="Follow the KVM"
                                                       Description="Connect and release this device automatically when the KVM switches.">
                                     <ToggleSwitch IsOn="{x:Bind Enabled, Mode=TwoWay}" />

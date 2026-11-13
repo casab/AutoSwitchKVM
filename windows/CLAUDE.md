@@ -353,6 +353,17 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   bond per host, and unpairing them on Windows forces a re-pair from the keyboard. Windows can't
   drop an LE HID link while keeping the bond, so with Manage pairing off a release leaves the
   keyboard connected; switching hosts is the keyboard's own profile key (or USB through the KVM).
+- **Device handoff types (spec §5a).** Only type 1 ("hands off by pairing", the trackpad) can be
+  switched on Windows; type 4 (multipoint, host connects) needs a disconnect-without-unpair, which
+  Windows has no public API for (future: `BluetoothSetServiceState` for Classic). Types 2/3 (device
+  picks the host / re-pairs by hand) can't be switched by any host. `Core/DeviceHandoff.cs`
+  (`HandoffCatalog.Classify`, tested in `HandoffCatalogTests`) classifies from
+  `WinRtBluetooth.GetIdentityAsync`: vendor/product from PnP IDs (`_VID&0001004C_PID&0324` Classic,
+  `_DEV_VID&02045E_PID&0B13` LE; last 4 hex = vendor), Classic/LE, class of device / LE appearance.
+  `AppController.ClassifyAsync` caches per address. Shown in Add device (sets the Manage pairing
+  default) and as the first card of each device row (`HandoffText` has the wording). Engine behavior
+  is unchanged: types 2/3 still get a connect attempt on arrival (a "status only" mode needs a
+  config field; not added).
 - **Buttons inside a `SettingsExpander`'s `Items` don't inherit the row's `DataContext`** (the
   toolkit hosts them in its own repeater). Pass the item explicitly (`Tag="{x:Bind}"`) instead of
   reading `DataContext` in a click handler: Devices ▸ Remove silently did nothing because of this.

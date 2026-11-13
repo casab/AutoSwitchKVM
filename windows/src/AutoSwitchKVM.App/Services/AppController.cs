@@ -410,6 +410,23 @@ public sealed class AppController
     }
 
     public Task<IReadOnlyList<PairedDeviceInfo>> PairedDevicesAsync() => _bt.PairedDevicesAsync();
+
+    // Handoff type per address (spec §5a). A device's type doesn't change; cache what was learned.
+    private readonly Dictionary<string, HandoffAssessment> _handoff = new();
+
+    /// How this device handles more than one computer, best effort (UI: Add device, device settings).
+    public async Task<HandoffAssessment> ClassifyAsync(string address, string name)
+    {
+        var key = address.Replace(":", "").Replace("-", "").ToUpperInvariant();
+        if (_handoff.TryGetValue(key, out var cached)) return cached;
+        var identity = await _bt.GetIdentityAsync(address, name);
+        var result = HandoffCatalog.Classify(identity);
+        // Only cache an answer backed by device data; a name-only guess may improve once paired.
+        if (identity.VendorId is not null || identity.Kind != DeviceKind.Unknown) _handoff[key] = result;
+        Log.Debug("bt", $"handoff type {name} ({address}): {result.Type}, {result.Confidence} " +
+            $"(vendor {identity.VendorId:X4}, product {identity.ProductId:X4}, {identity.Kind}, {(identity.IsLowEnergy ? "LE" : "Classic")})");
+        return result;
+    }
     /// Last reconciled USB snapshot (no WMI call): for UI refreshes that run on every state change.
     public IReadOnlyList<UsbDeviceInfo> LastUsbSnapshot => _usb.LastSnapshot;
 

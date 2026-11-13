@@ -17,6 +17,32 @@ public sealed class DeviceViewModel : ObservableObject
     {
         _app = app;
         Model = model;
+        _ = LoadHandoffAsync();
+    }
+
+    // ---------------- How it switches (spec §5a) ----------------
+
+    private HandoffAssessment? _handoff;
+    public HandoffType HandoffType => _handoff?.Type ?? HandoffType.Unknown;
+    public string HandoffTitle => _handoff is { } h ? "How it switches: " + HandoffText.Title(h.Type) + HandoffText.Confidence(h) : "How it switches";
+    public string HandoffDescription => _handoff is { } h ? HandoffText.WhatHappens(h.Type) : "Checking this device…";
+    public string HandoffGlyph => HandoffText.Glyph(HandoffType);
+
+    private async Task LoadHandoffAsync()
+    {
+        try
+        {
+            _handoff = await _app.Controller.ClassifyAsync(Model.Address, Model.Name);
+        }
+        catch (Exception ex)
+        {
+            Support.Log.Warn("app", $"{Model.Name}: could not tell how it switches ({ex.Message})");
+            _handoff = new HandoffAssessment(HandoffType.Unknown, HandoffConfidence.Unsure, "lookup failed");
+        }
+        OnPropertyChanged(nameof(HandoffTitle));
+        OnPropertyChanged(nameof(HandoffDescription));
+        OnPropertyChanged(nameof(HandoffGlyph));
+        OnPropertyChanged(nameof(HandoffType));
     }
 
     public BTDevice Model { get; private set; }

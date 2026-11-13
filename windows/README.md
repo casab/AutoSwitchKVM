@@ -38,8 +38,8 @@ when a new version is ready (in the tray menu, as a notification, and in
    KVM to the other computer and back. AutoSwitch finds the USB device that comes and goes with
    the switch (usually a hub inside the KVM). You can also pick it from a list or type its IDs.
 2. **Devices.** In **Settings ▸ Devices**, choose **Add device** and pick your trackpad, keyboard
-   or mouse. For the **Magic Trackpad**, or any device that only pairs with one computer at a
-   time, keep **Manage pairing** on.
+   or mouse. AutoSwitch tells you how the device switches and whether it can move it (see below),
+   and sets **Manage pairing** to match. For the **Magic Trackpad** it stays on.
 3. **Do the same on your other computer**, so it releases the devices when the KVM leaves it.
 
 That's it. Switch the KVM and your devices follow, usually within a few seconds.
@@ -47,6 +47,24 @@ That's it. Switch the KVM and your devices follow, usually within a few seconds.
 <p align="center">
   <img src="docs/images/settings-overview.png" alt="Settings: overview of the KVM state and each device" width="720">
 </p>
+
+## Which devices can switch
+
+Bluetooth devices handle more than one computer in four different ways, and only some can be
+moved by an app. When you add a device, and in its settings row, AutoSwitch shows which kind it
+is (**How it switches**) and what that means.
+
+| Kind | Examples | On Windows |
+|---|---|---|
+| **Hands off by pairing** | Apple Magic Trackpad, Magic Keyboard, Magic Mouse | **Switches automatically.** AutoSwitch unpairs it when the KVM leaves and pairs it when the KVM comes back (Manage pairing on). |
+| **Picks the computer itself** | ZMK/QMK wireless keyboards, Logitech Easy-Switch | **Can't switch.** The device's own key picks the computer. Use that key, or a USB cable through the KVM. Leave Manage pairing off: unpairing would make you pair the device again. |
+| **Re-pairs by hand** | Xbox, PlayStation, Nintendo controllers | **Can't switch.** It remembers one computer and moves only in pairing mode. Keep it on one computer, or use a cable through the KVM. |
+| **Joins whichever computer connects** | Many headphones and speakers | **Not yet.** Windows has no way to disconnect a Bluetooth device without unpairing it. The Mac app can switch these. |
+
+For the kinds it can't switch, AutoSwitch still shows the device's status. The kind is a best
+guess from the device's maker and type, marked *likely* or *probably* when it isn't a known model.
+To test a device yourself: remove it in Windows' Bluetooth settings; if your other computer can
+then pair it without a button press on the device, it hands off by pairing.
 
 ## Everyday use
 

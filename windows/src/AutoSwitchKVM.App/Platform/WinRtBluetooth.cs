@@ -853,6 +853,92 @@ public sealed class WinRtBluetooth : IBluetoothController
         return list.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
+    // ---- Identity (for the device's handoff type, SPECIFICATION.md §5a) ----
+
+    // Vendor/product per address. The PnP records that carry them go away when the device is
+    // unpaired, so keep what was seen.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (ushort? Vid, ushort? Pid)> _vendorProduct = new();
+
+    /// What Windows knows about a device: name, Classic or LE, kind (class of device / LE
+    /// appearance), and vendor/product IDs from its PnP records. Never throws; missing parts stay
+    /// null/Unknown and fall back to the configured name.
+    public async Task<DeviceIdentity> GetIdentityAsync(string address, string fallbackName, CancellationToken ct = default)
+    {
+        var digits = Digits(address);
+        var name = fallbackName;
+        var isLe = _knownLe.ContainsKey(digits);
+        var kind = DeviceKind.Unknown;
+        try
+        {
+            using var dev = await ResolveAsync(ParseAddress(address), digits, ct);
+            if (dev is not null)
+            {
+                isLe = dev.IsLe;
+                if (!string.IsNullOrWhiteSpace(dev.Name) && !dev.Name.StartsWith("Bluetooth ", StringComparison.Ordinal))
+                    name = dev.Name;
+                kind = dev.Le is { } le ? KindFor(le.Appearance) : KindFor(dev.Classic!.ClassOfDevice);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            Log.Debug("bt", $"identity {address}: device lookup failed ({ex.Message})");
+        }
+
+        if (!_vendorProduct.TryGetValue(digits, out var vp))
+        {
+            vp = await Task.Run(() => QueryVendorProduct(digits), ct);
+            if (vp.Vid is not null) _vendorProduct[digits] = vp;
+        }
+        return new DeviceIdentity(name, isLe, vp.Vid, vp.Pid, kind);
+    }
+
+    private static DeviceKind KindFor(BluetoothClassOfDevice cod) => cod.MajorClass switch
+    {
+        BluetoothMajorClass.Peripheral => cod.MinorClass is BluetoothMinorClass.PeripheralGamepad or BluetoothMinorClass.PeripheralJoystick
+            ? DeviceKind.GameController : DeviceKind.Input,
+        BluetoothMajorClass.AudioVideo => DeviceKind.Audio,
+        _ => DeviceKind.Unknown,
+    };
+
+    private static DeviceKind KindFor(BluetoothLEAppearance appearance)
+    {
+        if (appearance.Category != BluetoothLEAppearanceCategories.HumanInterfaceDevice) return DeviceKind.Unknown;
+        return appearance.SubCategory == BluetoothLEAppearanceSubcategories.Gamepad
+            || appearance.SubCategory == BluetoothLEAppearanceSubcategories.Joystick
+            ? DeviceKind.GameController : DeviceKind.Input;
+    }
+
+    /// Vendor/product IDs from the device's PnP records, e.g. BTHENUM\...{1200}_VID&0001004C_PID&0324
+    /// (Classic Device ID) or BTHLEDEVICE\{...}_DEV_VID&02045E_PID&0B13_... (LE Device Information).
+    private static (ushort? Vid, ushort? Pid) QueryVendorProduct(string digits)
+    {
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT DeviceID FROM Win32_PnPEntity WHERE DeviceID LIKE 'BTHENUM%' OR DeviceID LIKE 'BTHLEDEVICE%'");
+            foreach (ManagementBaseObject mo in searcher.Get())
+            {
+                using (mo)
+                {
+                    if (mo["DeviceID"] is not string id) continue;
+                    var upper = id.ToUpperInvariant();
+                    if (!upper.Contains(digits)) continue;
+                    var m = System.Text.RegularExpressions.Regex.Match(upper, @"_VID&([0-9A-F]+)_PID&([0-9A-F]{4})");
+                    if (!m.Success) continue;
+                    var vid = HandoffCatalog.ParseVendor(m.Groups[1].Value);
+                    if (vid is null or 0) continue;
+                    return (vid, Convert.ToUInt16(m.Groups[2].Value, 16));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Debug("bt", $"vendor/product query failed ({ex.Message})");
+        }
+        return (null, null);
+    }
+
     // ---- Diagnostics (Settings "Diagnose" button): dump everything WinRT sees for this MAC ----
 
     public async Task DiagnoseAsync(string address)

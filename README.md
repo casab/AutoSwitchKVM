@@ -74,11 +74,28 @@ warning:
 
 Platform guides with more detail: [Windows](windows/README.md) · [macOS](osx/README.md).
 
+## Which Bluetooth devices can follow the KVM?
+
+Not every Bluetooth device can be moved by an app. It depends on how the device handles more
+than one computer, and there are four kinds. AutoSwitch tells you which kind a device is when
+you add it, and what it can do with it.
+
+| Kind | How the device behaves | Examples | Can AutoSwitch switch it? |
+|---|---|---|---|
+| **Hands off by pairing** | Holds one pairing. Once a computer lets go, the next one can pair without you touching the device. | Apple Magic Trackpad, Magic Keyboard, Magic Mouse | **Yes**, on Mac and Windows. This is what AutoSwitch was built for. |
+| **Picks the computer itself** | Remembers several computers, and a key on the device chooses one. | ZMK and QMK wireless keyboards, Logitech Easy-Switch keyboards and mice | **No.** Only the device can choose. Use its switch key, or plug it into the KVM by USB. |
+| **Re-pairs by hand** | Remembers one Bluetooth computer. Moving it needs its pairing button. | Xbox, PlayStation and Nintendo controllers | **No.** Keep it on one computer, or connect it by cable through the KVM. |
+| **Joins whichever computer connects** | Remembers several computers and goes to the one that asks. | Many headphones and speakers | **On Mac, yes.** On Windows not yet: Windows can't disconnect a Bluetooth device without unpairing it. |
+
+For the kinds it can't switch, AutoSwitch still shows whether the device is connected. Not sure
+about a device? Remove it in one computer's Bluetooth settings. If the other computer can then
+pair it right away, without a button press on the device, it hands off by pairing.
+More detail: [autoswitchkvm.com/devices](https://autoswitchkvm.com/devices/).
+
 ## Good to know
 
-- **Which devices work?** Any Bluetooth device your computer can pair with. It's built and tested
-  with the Apple Magic Trackpad, the hardest case. Devices that can stay paired to several
-  computers just connect and disconnect.
+- **Which devices work?** Devices that hand off by pairing, like the Apple Magic Trackpad (the
+  hardest case, and the one AutoSwitch is built and tested with). See the table above for the rest.
 - **Which KVMs work?** Any KVM that switches USB between the computers. Most do, because that's
   how they share your keyboard and mouse.
 - **Why a few seconds?** The computer the KVM switched to has to wait until the other one lets go

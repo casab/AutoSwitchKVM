@@ -334,6 +334,40 @@ connect, so the handoff is not passive — the releasing side must actively unpa
 `managePairing` is effectively mandatory (not optional) for those devices on Windows. Validated
 against real hardware in Milestone 0 (`windows/PLAN.md` "spike findings").
 
+## 5a. Device handoff types (2026-11-13)
+
+Bluetooth devices handle "more than one computer" in four different ways, and a host can only
+switch some of them. Both apps describe devices with these four types (same names), show the type
+in Add device and in each device's settings, and say plainly what AutoSwitch can and can't do.
+
+| # | Type (UI name) | How the device behaves | What AutoSwitch can do |
+|---|---|---|---|
+| 1 | **Hands off by pairing** | One pairing. Once the current host removes it, the next host can pair with no button press. | **Supported** (macOS, Windows): `managePairing` on; unpair on leave, pair on arrive. |
+| 2 | **Picks the computer itself** | A pairing per host slot (ZMK/QMK profiles, Logitech Easy-Switch); a key on the device chooses the host. | **Not possible** from any host: a host can't change the device's slot, and unpairing breaks that slot (re-pair from the device). Status only. Workarounds: the device's own switch key, or USB through the KVM. |
+| 3 | **Re-pairs by hand** | Remembers one Bluetooth host; changing hosts needs pairing mode on the device (Xbox, PlayStation, Nintendo controllers). | **Not possible** automatically: after an unpair the device still points at the old host, and the new host can't pair until the user enters pairing mode. Status only. Workarounds: keep it on one computer, or connect it by cable through the KVM. |
+| 4 | **Joins whichever computer connects** | Remembers several hosts and connects to the one that asks (many headphones/speakers, some mice). | **macOS: supported** with `managePairing` off (disconnect on leave, connect on arrive). **Windows: not yet**: there is no public API to disconnect a Bluetooth device without unpairing it (a future option for Classic devices: toggling the device's services with `BluetoothSetServiceState`). |
+
+**Classification** (best effort, shown with its confidence: *known* model, *likely* from vendor or
+device type, *unsure*). Signals: vendor/product ID (Classic: Device ID record, e.g. Windows PnP
+`BTHENUM\…_VID&0001004C_PID&0324`; LE: Device Information service, `BTHLEDEVICE\…_DEV_VID&02045E_PID&0B13`;
+the last four hex digits are the vendor ID), transport (Classic / LE), and device kind (class of
+device or LE appearance: input, game controller, audio). Rules, first match wins:
+
+1. ZMK keyboard (`1D50:615E`) → type 2, known.
+2. Apple (`004C` Bluetooth SIG / `05AC` USB): Magic Trackpad, Keyboard or Mouse → type 1, known;
+   AirPods/Beats → type 4, likely; other → type 1, likely.
+3. Game controller from Microsoft (`045E`), Sony (`054C`) or Nintendo (`057E`) → type 3, known.
+4. Logitech (`046D`) keyboard or mouse → type 2, likely (Easy-Switch).
+5. Audio device → type 4, likely. Other game controller → type 3, likely.
+6. Bluetooth LE keyboard or mouse → type 2, unsure (most remember each host themselves).
+7. Anything else → unknown: the UI asks the user to test it (remove it on one computer; if the
+   other can pair right away without a button press, it is type 1).
+
+The type sets the **Manage pairing default** when a device is added (on for type 1 and for unknown
+Classic devices, off otherwise); the user can still change it. Windows: classification is
+implemented (`AutoSwitchKVM.Core/DeviceHandoff.cs`); engine behavior is unchanged (a "status only"
+mode for types 2 and 3 would need a config field, not added yet). macOS pending.
+
 ---
 
 ## 6. Learn source mode

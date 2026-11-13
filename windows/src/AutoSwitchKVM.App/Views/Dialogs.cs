@@ -184,18 +184,41 @@ internal static class Dialogs
             Content = "Manage pairing (unpair when the KVM switches away, pair when it comes back)",
             IsChecked = true,
         };
-        var leHint = Paragraph("This is a Bluetooth LE device. Keyboards that keep their own pairing for each computer " +
-                               "(for example ZMK or QMK wireless keyboards with host slots) should have Manage pairing off: " +
-                               "unpairing them here means pairing them again from the keyboard.");
-        leHint.Visibility = Visibility.Collapsed;
-        combo.SelectionChanged += (_, _) =>
+        // How the picked device switches (spec §5a): what AutoSwitch can do with it, and the
+        // matching Manage pairing default.
+        var handoffTitle = new TextBlock { FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+        var handoffText = Paragraph("");
+        var handoffLink = new HyperlinkButton { Content = "Which devices can switch?", NavigateUri = new Uri(HandoffText.LearnMoreUrl), Padding = new Thickness(0) };
+        var handoffPanel = new StackPanel { Spacing = 4, Visibility = Visibility.Collapsed };
+        handoffPanel.Children.Add(handoffTitle);
+        handoffPanel.Children.Add(handoffText);
+        handoffPanel.Children.Add(handoffLink);
+        var pickVersion = 0;
+        combo.SelectionChanged += async (_, _) =>
         {
             var i = combo.SelectedIndex;
             if (i < 0 || i >= paired.Count) return;
-            name.Text = paired[i].Name;
-            addr.Text = paired[i].Address;
-            managePairing.IsChecked = !paired[i].IsLowEnergy;
-            leHint.Visibility = paired[i].IsLowEnergy ? Visibility.Visible : Visibility.Collapsed;
+            var picked = paired[i];
+            name.Text = picked.Name;
+            addr.Text = picked.Address;
+            managePairing.IsChecked = !picked.IsLowEnergy;
+            var version = ++pickVersion;
+            handoffTitle.Text = "Checking how this device switches…";
+            handoffText.Text = "";
+            handoffPanel.Visibility = Visibility.Visible;
+            try
+            {
+                var a = await Vm.Controller.ClassifyAsync(picked.Address, picked.Name);
+                if (version != pickVersion) return;   // another device was picked meanwhile
+                handoffTitle.Text = HandoffText.Title(a.Type) + HandoffText.Confidence(a);
+                handoffText.Text = HandoffText.WhatHappens(a.Type);
+                managePairing.IsChecked = a.DefaultManagePairing(picked.IsLowEnergy);
+            }
+            catch (Exception ex)
+            {
+                Support.Log.Warn("app", $"add device: could not tell how {picked.Name} switches ({ex.Message})");
+                handoffPanel.Visibility = Visibility.Collapsed;
+            }
         };
         var error = new TextBlock { Foreground = Theme.Brush("SystemFillColorCriticalBrush"), Visibility = Visibility.Collapsed };
 
@@ -204,8 +227,8 @@ internal static class Dialogs
         body.Children.Add(combo);
         body.Children.Add(name);
         body.Children.Add(addr);
+        body.Children.Add(handoffPanel);
         body.Children.Add(managePairing);
-        body.Children.Add(leHint);
         body.Children.Add(error);
 
         var dialog = Dialog(root, "Add a Bluetooth device", body, "Add");

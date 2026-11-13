@@ -1,0 +1,107 @@
+---
+layout: base.njk
+permalink: /devices/
+title: "Which devices can switch? · AutoSwitch KVM"
+description: "Bluetooth devices handle more than one computer in four different ways. Here's which ones AutoSwitch KVM can move between your computers, and what to do with the rest."
+---
+<section class="hero hero--page">
+  <div class="wrap wrap--narrow">
+    <p class="eyebrow">Device guide</p>
+    <h1>Which devices can switch?</h1>
+    <p class="lead">
+      Bluetooth devices handle "more than one computer" in four different ways, and an app can only
+      move some of them. Here's how to tell which kind you have, and what to do with each.
+      AutoSwitch shows the kind for you when you add a device.
+    </p>
+  </div>
+</section>
+
+<section class="section section--tint">
+  <div class="wrap">
+    <ul class="kinds">
+      <li class="kind kind--yes">
+        <p class="kind__verdict">Switches automatically</p>
+        <h2>Hands off by pairing</h2>
+        <p>
+          The device holds one pairing. As soon as one computer lets go, the next can pair, without
+          you touching the device. AutoSwitch unpairs it when the KVM leaves and pairs it when the
+          KVM arrives (<strong>Manage pairing</strong> on).
+        </p>
+        <p class="kind__examples"><strong>Examples:</strong> Apple Magic Trackpad, Magic Keyboard, Magic Mouse.</p>
+        <p class="kind__platforms">Mac ✓ · Windows ✓</p>
+      </li>
+      <li class="kind kind--no">
+        <p class="kind__verdict">Can't be switched by an app</p>
+        <h2>Picks the computer itself</h2>
+        <p>
+          The device remembers several computers, one per slot or profile, and a key on the device
+          chooses which one it talks to. No computer can change that slot. Removing the pairing on
+          one computer breaks its slot, and you'd have to pair it again from the device.
+        </p>
+        <p class="kind__examples"><strong>Examples:</strong> ZMK and QMK wireless keyboards, Logitech Easy-Switch keyboards and mice.</p>
+        <p class="kind__tip"><strong>What to do:</strong> use the device's own switch key. Or plug it into the KVM with a USB cable: many of these keyboards prefer USB when it's connected, and the KVM switches it like any wired keyboard. Leave <strong>Manage pairing</strong> off.</p>
+      </li>
+      <li class="kind kind--no">
+        <p class="kind__verdict">Can't be switched by an app</p>
+        <h2>Re-pairs by hand</h2>
+        <p>
+          The device remembers one Bluetooth computer. To move it, you press its pairing button and
+          pair it again. After a computer removes it, it still points at that computer, and the other
+          one can't pair until you press the button.
+        </p>
+        <p class="kind__examples"><strong>Examples:</strong> Xbox, PlayStation and Nintendo controllers.</p>
+        <p class="kind__tip"><strong>What to do:</strong> keep it on the computer you play on, or connect it with a cable through the KVM. Leave <strong>Manage pairing</strong> off.</p>
+      </li>
+      <li class="kind kind--partly">
+        <p class="kind__verdict">Mac yes, Windows not yet</p>
+        <h2>Joins whichever computer connects</h2>
+        <p>
+          The device remembers several computers and goes to whichever one connects to it. The Mac
+          app disconnects it when the KVM leaves and connects it when the KVM arrives
+          (<strong>Manage pairing</strong> off). Windows has no way to disconnect a Bluetooth device
+          without unpairing it, so the Windows app can't do this yet.
+        </p>
+        <p class="kind__examples"><strong>Examples:</strong> many headphones and speakers.</p>
+        <p class="kind__platforms">Mac ✓ · Windows: not yet</p>
+      </li>
+    </ul>
+    <p class="kinds__note">
+      For the kinds it can't switch, AutoSwitch still shows whether the device is connected.
+    </p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap wrap--narrow">
+    <p class="eyebrow">Not sure?</p>
+    <h2>Test your device in a minute</h2>
+    <ol class="steps steps--list">
+      <li>
+        <span class="steps__badge">1</span>
+        <h3>Connect it to one computer</h3>
+        <p>Make sure it works there as usual.</p>
+      </li>
+      <li>
+        <span class="steps__badge">2</span>
+        <h3>Remove it there</h3>
+        <p>In that computer's Bluetooth settings, remove (forget) the device.</p>
+      </li>
+      <li>
+        <span class="steps__badge">3</span>
+        <h3>Pair it on the other computer</h3>
+        <p>
+          Without pressing anything on the device. If it pairs, it <strong>hands off by pairing</strong>
+          and AutoSwitch can switch it. If it only pairs after you press a button on it, it
+          <strong>re-pairs by hand</strong>. If it has a switch key for computers, it
+          <strong>picks the computer itself</strong>.
+        </p>
+      </li>
+    </ol>
+    <p>
+      AutoSwitch guesses the kind from the device's maker and type, and says so: <em>likely</em> or
+      <em>probably</em> when it isn't a known model. Found a device it gets wrong?
+      <a href="{{ site.issues }}">Tell us</a> and it'll be recognized in a future version.
+    </p>
+    <p><a class="btn btn--primary" href="/#download">Get AutoSwitch KVM</a></p>
+  </div>
+</section>
