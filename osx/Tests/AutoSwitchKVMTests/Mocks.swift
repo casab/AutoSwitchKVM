@@ -173,8 +173,12 @@ final class FakeHostSwitcher: HostSwitcher {
         supportedAddress.map { norm($0) == norm(address) } ?? false
     }
 
+    /// Called on each channel query (e.g. to simulate the KVM coming back meanwhile).
+    var onChannels: (() -> Void)?
+
     func channels(_ address: String) async throws -> HostChannels? {
-        mine(address) && reachable ? HostChannels(count: count, current: current, marks: marks) : nil
+        onChannels?()
+        return mine(address) && reachable ? HostChannels(count: count, current: current, marks: marks) : nil
     }
 
     func switchTo(_ address: String, channel: Int) async throws {

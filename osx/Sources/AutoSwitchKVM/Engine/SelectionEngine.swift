@@ -277,7 +277,17 @@ final class SelectionEngine: ObservableObject {
 
     private func handleStatusEvent(addr: String, connected: Bool) {
         guard let device = store.config.devices.first(where: { $0.normalizedAddress == addr }) else { return }
-        guard !isBusy(device.id) else { return }
+        guard !isBusy(device.id) else {
+            // A busy device's events are its operation's business, with one exception: a channel-
+            // switching device that lands here while the KVM is away (e.g. during its arrival wait)
+            // must still be sent on once it's free, or it's stranded here (hardware, 2026-11-13).
+            if connected, !selected, presenceEvaluated, switchesChannels(device) {
+                lateReleasePending.insert(device.id)
+                Log.engine.debug(
+                    "\(device.name): connected while busy and the KVM is elsewhere; sending it on when free")
+            }
+            return
+        }
         updateStatus(device, connected: connected, origin: "event")
     }
 
@@ -556,7 +566,7 @@ final class SelectionEngine: ObservableObject {
     private func releaseHeld(run: Run) async {
         let pairedList = await bt.pairedDevices()
         let paired = Set(pairedList.map { $0.address.replacingOccurrences(of: ":", with: "-").lowercased() })
-        for device in store.config.devices where device.enabled {
+        for device in releaseOrder {
             if let why = staleReason(run, respectSelection: false) {
                 Log.engine.debug("run #\(run.token): seed release stopped: \(why)")
                 return
@@ -1054,8 +1064,16 @@ final class SelectionEngine: ObservableObject {
 
     // MARK: - Release
 
+    /// Release order (spec §3): devices without `managePairing` first (a channel switch takes
+    /// ~0.5 s, a disconnect less), then the rest in list order, so an unpair doesn't hold back a
+    /// keyboard that the other computer is waiting for.
+    private var releaseOrder: [BTDevice] {
+        let enabled = store.config.devices.filter(\.enabled)
+        return enabled.filter { !$0.managePairing } + enabled.filter(\.managePairing)
+    }
+
     private func disconnectAll(run: Run) async {
-        for device in store.config.devices where device.enabled {
+        for device in releaseOrder {
             if let why = releaseStaleReason(run) {  // e.g. the source came back
                 Log.engine.debug("run #\(run.token): release run stopped: \(why)")
                 return
@@ -1085,10 +1103,18 @@ final class SelectionEngine: ObservableObject {
 
         // Spec §5a type 5: send a channel-switching device to the other computer's channel; its
         // pairings stay as they are. Falls through to the usual release when that isn't possible.
-        if !device.managePairing, await trySwitchChannel(device, why: "the KVM left this Mac") {
-            setStatus(device.id, .disconnected)
-            if notify { onNotice?("Switched", "\(name) went to the other computer") }
-            return
+        if !device.managePairing {
+            switch await switchChannel(device, why: "the KVM left this Mac", abortIf: { self.releaseStaleReason(run) })
+            {
+            case .sent:
+                setStatus(device.id, .disconnected)
+                if notify { onNotice?("Switched", "\(name) went to the other computer") }
+                return
+            case .abandoned:
+                return
+            case .unreachable, .notPossible:
+                break  // release it the usual way
+            }
         }
 
         var disconnectFailure: Failure?
@@ -1219,6 +1245,7 @@ final class SelectionEngine: ObservableObject {
     private func clearBusy(_ id: UUID) {
         guard let n = busyCounts[id] else { return }
         busyCounts[id] = n <= 1 ? nil : n - 1
+        if busyCounts[id] == nil { runPendingLateRelease(id) }
     }
 
     private func isBusy(_ id: UUID) -> Bool { busyCounts[id] != nil }
@@ -1299,17 +1326,34 @@ final class SelectionEngine: ObservableObject {
     /// of being disconnected. True when it was sent; false when it doesn't support that, isn't
     /// connected here, or the target channel is unknown (the caller then releases it as usual).
     private func trySwitchChannel(_ device: BTDevice, why: String) async -> Bool {
-        guard let hostSwitcher else { return false }
+        await switchChannel(device, why: why) == .sent
+    }
+
+    private enum ChannelSwitchResult { case sent, unreachable, notPossible, abandoned }
+
+    /// `.unreachable`: the device's control channel didn't answer (not connected here, or not
+    /// ready yet: macOS registers the HID device a moment after the Bluetooth connection).
+    /// `.notPossible`: it answered, but the target is unknown or the switch failed (logged).
+    /// `abortIf`: checked right after the channel query (the query takes a moment; a release must
+    /// not send the device away if the KVM came back meanwhile). Non-nil → `.abandoned`.
+    private func switchChannel(
+        _ device: BTDevice, why: String, abortIf: (() -> String?)? = nil
+    ) async -> ChannelSwitchResult {
+        guard let hostSwitcher else { return .unreachable }
         let addr = device.normalizedAddress
         let channels: HostChannels?
         do {
             channels = try await withTimeout(store.config.btCallTimeoutSecs) { try await hostSwitcher.channels(addr) }
         } catch {
             Log.engine.debug("\(device.name): channel query failed: \(Failure(error).summary)")
-            return false
+            return .unreachable
         }
-        guard let ch = channels else { return false }  // no channel switching, or not connected here
+        guard let ch = channels else { return .unreachable }  // no channel switching, or not reachable here
         channelSwitchers.insert(device.id)
+        if let stop = abortIf?() {
+            Log.engine.log("\(device.name): not sent to the other computer: \(stop)")
+            return .abandoned
+        }
 
         let target: Int?
         if let n = device.releaseToChannel, n >= 1, n <= ch.count {
@@ -1321,13 +1365,13 @@ final class SelectionEngine: ObservableObject {
             Log.engine.warn(
                 "\(device.name): it can switch channels, but the other computer's channel isn't known (set it in "
                     + "the device's settings, or run AutoSwitch on the other computer)")
-            return false
+            return .notPossible
         }
         guard target != ch.current else {
             Log.engine.warn(
                 "\(device.name): the other computer's channel is set to \(target + 1), but that's this Mac's "
                     + "channel; check the setting")
-            return false
+            return .notPossible
         }
         do {
             try await withTimeout(store.config.btCallTimeoutSecs) {
@@ -1335,10 +1379,10 @@ final class SelectionEngine: ObservableObject {
             }
         } catch {
             Log.engine.warn("\(device.name): switching to channel \(target + 1) failed: \(Failure(error).summary)")
-            return false
+            return .notPossible
         }
         Log.engine.log("\(device.name): sent to channel \(target + 1) (\(why))")
-        return true
+        return .sent
     }
 
     /// A device became connected. KVM here: mark our channel (once per session) so the other
@@ -1373,7 +1417,26 @@ final class SelectionEngine: ObservableObject {
             }
             return
         }
-        guard presenceEvaluated, !store.config.paused, !suspended, !isBusy(id) else { return }
+        guard presenceEvaluated, !store.config.paused, !suspended else { return }
+        if isBusy(id) {
+            // E.g. an arrival wait still holds it. Remember it, and send it on once it's free
+            // (spec §3 Late release; Windows does the same).
+            lateReleasePending.insert(id)
+            Log.engine.debug("\(device.name): connected while the KVM is elsewhere, but busy; sending it on when free")
+            return
+        }
+        startLateRelease(device)
+    }
+
+    /// Devices that connected here while the KVM was away, while busy: sent on once freed.
+    private var lateReleasePending = Set<UUID>()
+    /// How long a late release keeps asking a device that just connected (its control channel
+    /// appears a moment after the connection: 7 ms after it was too early on hardware).
+    var lateReleaseRetryMs = 5000
+    var lateReleaseRetryIntervalMs = 500
+
+    private func startLateRelease(_ device: BTDevice) {
+        let id = device.id
         let now = Date()
         if let last = lastLateRelease[id], now.timeIntervalSince(last) < lateReleaseMinInterval { return }
         lastLateRelease[id] = now
@@ -1382,9 +1445,43 @@ final class SelectionEngine: ObservableObject {
             guard let self else { return }
             self.markBusy(id)
             defer { self.clearBusy(id) }
-            if await self.trySwitchChannel(device, why: "it connected here while the KVM is elsewhere") {
-                self.setStatus(id, .disconnected)
+            let addr = device.normalizedAddress
+            let tries = max(1, self.lateReleaseRetryMs / max(1, self.lateReleaseRetryIntervalMs))
+            for attempt in 1...tries {
+                if !self.presentKeys.isEmpty {
+                    Log.engine.debug("\(device.name): late release stopped: the KVM came back")
+                    return
+                }
+                switch await self.switchChannel(device, why: "it connected here while the KVM is elsewhere") {
+                case .sent:
+                    self.setStatus(id, .disconnected)
+                    return
+                case .notPossible, .abandoned:
+                    return  // logged by switchChannel
+                case .unreachable:
+                    guard attempt < tries, await self.bt.isConnected(addr) else { break }
+                    await self.sleepHook(self.lateReleaseRetryIntervalMs)
+                    continue
+                }
+                break
             }
+            if await self.bt.isConnected(addr) {
+                Log.engine.warn(
+                    "\(device.name): couldn't send it to the other computer (its control channel didn't answer); "
+                        + "press its channel key")
+            }
+        }
+    }
+
+    /// A device's last busy operation ended: run a late release that was waiting for it.
+    private func runPendingLateRelease(_ id: UUID) {
+        guard lateReleasePending.remove(id) != nil,
+            let device = store.config.devices.first(where: { $0.id == id }),
+            !selected, !store.config.paused, !suspended
+        else { return }
+        Task { @MainActor [weak self] in
+            guard let self, await self.bt.isConnected(device.normalizedAddress) else { return }
+            self.startLateRelease(device)
         }
     }
 }

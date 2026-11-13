@@ -252,10 +252,19 @@ the new profile but does not force-disconnect the previous profile's devices.
   (~3.4 s) runs before the K380 switch. "Known" = it answered the channel query this session or
   `releaseToChannel` is set; an unknown device (first switch after launch) is still connected the
   usual way.
+- **Release order:** devices without `managePairing` first (`releaseOrder`), so an unpair never
+  holds back a keyboard the other computer is waiting for (spec §3, same on Windows).
 - **Fast switch-back:** an automatic release stops as soon as the source is back
-  (`releaseStaleReason`, checked before the channel switch and between steps). Before that, the
+  (`releaseStaleReason`, checked before it starts, right after the channel query via
+  `switchChannel(abortIf:)`, and between steps). Before that, the
   Mac sent the K380 to Windows' channel 0.4 s *after* the KVM had returned. In `connectAll`,
   channel-switching devices wait in parallel tasks, so a 17 s trackpad pair can't hold them.
+- **Late release keeps asking, and survives busy** (`startLateRelease`, `lateReleasePending`). A
+  K380 landing here while the KVM is away (Windows → Mac → Windows bounce) was queried 7 ms after
+  its HID connection; its `IOHIDDevice` wasn't registered yet, the query found nothing, and it was
+  stranded. The late release now retries up to 5 s. `handleStatusEvent` also drops events of busy
+  devices, so a channel-switcher that connects while busy (e.g. mid arrival wait) is noted and sent
+  on from `clearBusy` once free.
 - **Testing a build next to the installed app:** `SIGN_IDENTITY=<the release certificate's SHA-1>
   BUILD_NUMBER=<installed build> tools/release.sh <version>` signs it with the same identity, so the
   Bluetooth and Input Monitoring permissions carry over, and Sparkle still offers the next release.

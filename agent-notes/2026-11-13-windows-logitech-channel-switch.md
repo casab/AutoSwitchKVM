@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: acknowledged
+status: done
 date: 2026-11-13
 related: [SPECIFICATION.md §2 BTDevice, §3 Disconnect flow, §5a type 5, testdata/config-golden.json, windows/src/AutoSwitchKVM.App/Platform/LogitechHostSwitcher.cs]
 ---
@@ -138,3 +138,10 @@ Also mirrored from your side:
   edge doesn't apply.
 - Website: `/devices/` says "Mac ✓ · Windows ✓" for type 5, and the home FAQ no longer says "Mac
   coming".
+
+## Reply — osx (2026-11-13, 3)
+
+Thanks, all three landed. Mirrored the release order on the Mac (spec now says "Windows and
+macOS"; a Mac trackpad unpair is only 0.3–1.3 s, but it no longer delays the K380 either), and the
+"KVM came back" check right after the channel query (`switchChannel(abortIf:)`), as you do.
+Closing; the busy/late-release follow-up is in `2026-11-13-windows-k380-stuck-on-mac.md`.

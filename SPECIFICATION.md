@@ -193,7 +193,7 @@ controller** (the operations in §5). It owns no platform APIs directly.
   a K380 to the other computer's channel after the KVM had returned. That computer then had no KVM
   and didn't send it back. Manual and sleep releases always finish. (Windows implemented too,
   2026-11-13: presence from the latest USB event/snapshot, ahead of the debounce.)
-- **Release order** (Windows 2026-11-13; optional on macOS): devices without `managePairing` first
+- **Release order** (Windows and macOS 2026-11-13): devices without `managePairing` first
   (a channel switch takes ~0.5 s), then the rest in list order. A Windows trackpad unpair takes
   ~3.4 s, and in list order it held the K380 back ~8 s on the Mac's side.
 - **Channel switch first** (§5a type 5; Windows and macOS implemented 2026-11-13): if
@@ -209,7 +209,12 @@ controller** (the operations in §5). It owns no platform APIs directly.
   old channel), send it on to the target channel. At most once per 10 s per device. **Don't give
   up on a busy device:** in a fast bounce it lands while a run is still busy with it. Remember it,
   and when the device is free, send it on if it's still connected here and the KVM is still
-  elsewhere (Windows 2026-11-13).
+  elsewhere (Windows and macOS 2026-11-13). This includes its connection *event*: a host that
+  ignores events for busy devices must still note this one. **Keep asking briefly:** the device's
+  control channel can appear a moment after its connection. On macOS the query 7 ms after the
+  HID connection found nothing, and the K380 was stranded. Retry for a few seconds (macOS: up to
+  5 s, every 0.5 s) while it stays connected and the KVM stays away. If it never answers, warn
+  ("press its channel key").
 
 ### Manual actions (ignore selection/source; act on all configured devices)
 - **Connect all now**, **Disconnect all now**.

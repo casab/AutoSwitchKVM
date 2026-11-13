@@ -191,8 +191,9 @@ final class ChannelSwitchTests: XCTestCase {
         await arrive(f)
         f.bt.preset(paired: true, connected: true, addr)  // the K380 is here
 
+        // The K380 goes first; the KVM comes back while its channel is being queried.
         var bounced = false
-        f.bt.beforeDisconnect = { [engine = f.engine] in
+        f.switcher.onChannels = { [engine = f.engine] in
             guard !bounced else { return }
             bounced = true
             engine.handleUSB((vendorID: 0x05E3, productID: 0x0626, added: true))  // back before the debounce ran
@@ -232,5 +233,70 @@ final class ChannelSwitchTests: XCTestCase {
         XCTAssertNotEqual(f.engine.statuses[f.store.config.devices[0].id], .connected)
         pairGate = true
         await run.value
+    }
+
+    // MARK: - Late release timing (hardware 2026-11-13: the query 7 ms after the connection was too early)
+
+    /// It lands while the KVM is away, but its control channel needs a moment: keep asking.
+    func testALateReleaseKeepsAskingUntilTheDeviceAnswers() async {
+        let f = make(releaseToChannel: 1)
+        f.engine.channelArrivalWaitMs = 1000
+        await arrive(f)
+        await leave(f)
+        let switches = f.switcher.calls.filter { $0.hasPrefix("switch:") }.count
+
+        f.switcher.reachable = false  // just connected: not answering yet
+        f.switcher.current = 1  // it landed on this Mac's channel
+        var polls = 0
+        f.engine.sleepHook = { [switcher = f.switcher] _ in
+            polls += 1
+            if polls == 2 { switcher.reachable = true }
+        }
+        f.bt.simulateConnection(addr)
+        for _ in 0..<200 { await Task.yield() }
+        XCTAssertEqual(
+            f.switcher.calls.filter { $0.hasPrefix("switch:") }.count, switches + 1, "sent on: \(f.switcher.calls)")
+    }
+
+    /// It lands while an arrival wait still holds it busy: sent on once the wait lets go.
+    func testALateReleaseWaitsForABusyDeviceInsteadOfGivingUp() async {
+        let f = make(releaseToChannel: 1)
+        f.switcher.reachable = false  // still travelling when the release runs
+        var pollsInWait = 0
+        f.engine.sleepHook = { [engine = f.engine, bt = f.bt, switcher = f.switcher, addr] _ in
+            pollsInWait += 1
+            guard pollsInWait == 1 else { return }
+            // While the arrival wait holds it: the KVM leaves, then the keyboard lands here.
+            engine.handleUSB((vendorID: 0x05E3, productID: 0x0626, added: false))
+            await engine.evaluateNow()
+            switcher.reachable = true
+            bt.simulateConnection(addr)
+        }
+        LogThreshold.shared.level = .debug
+        defer { LogThreshold.shared.level = .info }
+        await arrive(f)
+        for _ in 0..<300 { await Task.yield() }
+        XCTAssertTrue(
+            f.switcher.calls.contains("switch:\(digits):0"),
+            "sent on once free: \(f.switcher.calls) LOG: "
+                + DebugLog.shared.entries.suffix(14).map(\.message).joined(separator: " || "))
+    }
+
+    /// The trackpad is listed first, but the K380's channel switch goes before its unpair.
+    func testChannelSwitchesAreReleasedBeforeUnpairs() async {
+        let f = makeDesk()
+        f.engine.channelArrivalWaitMs = 1000
+        await arrive(f)
+        f.bt.preset(paired: true, connected: true, addr)
+        f.switcher.current = 1
+        var order: [String] = []
+        f.bt.beforeDisconnect = { order.append("trackpad") }
+        let switchesBefore = f.switcher.calls.count
+        f.engine.handleUSB((vendorID: 0x05E3, productID: 0x0626, added: false))
+        await f.engine.evaluateNow()
+        XCTAssertGreaterThan(f.switcher.calls.count, switchesBefore)
+        XCTAssertEqual(order, ["trackpad"])
+        // The switch was recorded before the trackpad's disconnect started.
+        XCTAssertTrue(f.switcher.calls.last?.hasPrefix("switch:") ?? false)
     }
 }
