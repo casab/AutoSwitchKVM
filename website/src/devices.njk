@@ -2,136 +2,193 @@
 layout: base.njk
 permalink: /devices/
 title: "Which devices can switch? · AutoSwitch KVM"
-description: "Bluetooth devices handle more than one computer in four different ways. Here's which ones AutoSwitch KVM can move between your computers, and what to do with the rest."
+description: "Bluetooth devices handle more than one computer in different ways. Here's which ones AutoSwitch KVM can move between your computers, and what to do with the rest."
 ---
 <section class="hero hero--page">
   <div class="wrap wrap--narrow">
     <p class="eyebrow">Device guide</p>
     <h1>Which devices can switch?</h1>
     <p class="lead">
-      Bluetooth devices handle "more than one computer" in a few different ways, and an app can only
-      move some of them. Here's how to tell which kind you have, and what to do with each.
-      AutoSwitch shows the kind for you when you add a device.
+      It depends on how a device remembers your computers. Find yours below.
+      AutoSwitch also tells you when you add a device.
     </p>
   </div>
 </section>
 
-<section class="section section--tint">
+{# ---------- At a glance ---------- #}
+<section class="section section--tint glance-section">
   <div class="wrap">
+    <div class="glance" role="table" aria-label="Which kinds of devices AutoSwitch can switch">
+      <div class="glance__row glance__row--head" role="row">
+        <span role="columnheader">Kind of device</span>
+        <span role="columnheader">For example</span>
+        <span role="columnheader" class="glance__os">Mac</span>
+        <span role="columnheader" class="glance__os">Windows</span>
+      </div>
+      <a class="glance__row" role="row" href="#pairing">
+        <span role="cell" class="glance__kind">Hands off by pairing</span>
+        <span role="cell" class="glance__eg">Apple Magic Trackpad, Keyboard, Mouse</span>
+        <span role="cell" class="glance__os"><span class="mark mark--yes" aria-label="yes">✓</span></span>
+        <span role="cell" class="glance__os"><span class="mark mark--yes" aria-label="yes">✓</span></span>
+      </a>
+      <a class="glance__row" role="row" href="#channel">
+        <span role="cell" class="glance__kind">Switches channel on request</span>
+        <span role="cell" class="glance__eg">Logitech Easy-Switch (K380, MX…)</span>
+        <span role="cell" class="glance__os"><span class="mark mark--yes" aria-label="yes">✓</span></span>
+        <span role="cell" class="glance__os"><span class="mark mark--yes" aria-label="yes">✓</span></span>
+      </a>
+      <a class="glance__row" role="row" href="#connects">
+        <span role="cell" class="glance__kind">Joins whichever computer connects</span>
+        <span role="cell" class="glance__eg">Many headphones and speakers</span>
+        <span role="cell" class="glance__os"><span class="mark mark--test" aria-label="being tested">✓<small>testing</small></span></span>
+        <span role="cell" class="glance__os"><span class="mark mark--no" aria-label="not yet">—<small>not yet</small></span></span>
+      </a>
+      <a class="glance__row" role="row" href="#picks">
+        <span role="cell" class="glance__kind">Picks the computer itself</span>
+        <span role="cell" class="glance__eg">ZMK and QMK keyboards</span>
+        <span role="cell" class="glance__os"><span class="mark mark--no" aria-label="no">✕</span></span>
+        <span role="cell" class="glance__os"><span class="mark mark--no" aria-label="no">✕</span></span>
+      </a>
+      <a class="glance__row" role="row" href="#repairs">
+        <span role="cell" class="glance__kind">Re-pairs by hand</span>
+        <span role="cell" class="glance__eg">Xbox, PlayStation, Nintendo controllers</span>
+        <span role="cell" class="glance__os"><span class="mark mark--no" aria-label="no">✕</span></span>
+        <span role="cell" class="glance__os"><span class="mark mark--no" aria-label="no">✕</span></span>
+      </a>
+    </div>
+    <p class="glance__note">Can't switch? AutoSwitch still shows whether the device is connected, and there's usually an <a href="#tips">easy fix</a>.</p>
+  </div>
+</section>
+
+{# ---------- Switch automatically ---------- #}
+<section class="section">
+  <div class="wrap">
+    <p class="eyebrow">AutoSwitch moves these for you</p>
+    <h2>Switch automatically</h2>
     <ul class="kinds">
-      <li class="kind kind--yes">
-        <p class="kind__verdict">Switches automatically</p>
-        <h2>Hands off by pairing</h2>
-        <p>
-          The device holds one pairing. As soon as one computer lets go, the next can pair, without
-          you touching the device. AutoSwitch unpairs it when the KVM leaves and pairs it when the
-          KVM arrives (<strong>Manage pairing</strong> on).
-        </p>
-        <p class="kind__examples"><strong>Examples:</strong> Apple Magic Trackpad, Magic Keyboard, Magic Mouse.</p>
-        <p class="kind__platforms">Mac ✓ · Windows ✓</p>
+      <li class="kind kind--yes" id="pairing">
+        <svg class="kind__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="7" y="9" width="34" height="27" rx="6"/><path d="M15 40h18"/></svg>
+        <h3>Hands off by pairing</h3>
+        <p class="kind__one">One pairing at a time. AutoSwitch removes it on the computer you leave and pairs on the one you arrive at.</p>
+        <ul class="tags"><li>Magic Trackpad</li><li>Magic Keyboard</li><li>Magic Mouse</li></ul>
+        <p class="kind__do"><strong>Setting:</strong> Manage pairing on</p>
+        <details class="kind__why">
+          <summary>Why it works</summary>
+          <p>The device holds one pairing. As soon as one computer lets go, the next can pair without you touching the device.</p>
+        </details>
       </li>
-      <li class="kind kind--no">
-        <p class="kind__verdict">Can't be switched by an app</p>
-        <h2>Picks the computer itself</h2>
-        <p>
-          The device remembers several computers, one per slot or profile, and a key on the device
-          chooses which one it talks to. No computer can change that slot. Removing the pairing on
-          one computer breaks its slot, and you'd have to pair it again from the device.
-        </p>
-        <p class="kind__examples"><strong>Examples:</strong> ZMK and QMK wireless keyboards. (Most Logitech Easy-Switch devices can be switched: see the next card.)</p>
-        <p class="kind__tip"><strong>What to do:</strong> use the device's own switch key. Or plug it into the KVM with a USB cable: many of these keyboards prefer USB when it's connected, and the KVM switches it like any wired keyboard. Leave <strong>Manage pairing</strong> off.</p>
+      <li class="kind kind--yes" id="channel">
+        <svg class="kind__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="5" y="14" width="38" height="22" rx="5"/><path d="M12 22h0M18 22h0M24 22h0M30 22h0M36 22h0M15 29h18"/><circle cx="14" cy="8" r="2.6"/><circle cx="24" cy="8" r="2.6"/><circle cx="34" cy="8" r="2.6"/></svg>
+        <h3>Switches channel on request</h3>
+        <p class="kind__one">A channel per computer. AutoSwitch tells the device to hop to the other computer's channel, and finds that channel itself.</p>
+        <ul class="tags"><li>Logitech K380</li><li>Other Easy-Switch keyboards &amp; mice</li></ul>
+        <p class="kind__do"><strong>Setting:</strong> Manage pairing off</p>
+        <details class="kind__why">
+          <summary>Why it works</summary>
+          <p>Logitech's Easy-Switch devices accept a "change host" command from the computer they're connected to. Pairings stay exactly as they are. AutoSwitch checks that your device supports it, and on the Mac it asks once for Input Monitoring.</p>
+        </details>
       </li>
-      <li class="kind kind--yes">
-        <p class="kind__verdict">Switches automatically</p>
-        <h2>Switches channel on request</h2>
-        <p>
-          Like the previous kind, it remembers a computer per channel, but the computer it's
-          connected to can tell it to change channel. When the KVM leaves, AutoSwitch sends the
-          device to the other computer's channel. Its pairings stay exactly as they are.
-        </p>
-        <p class="kind__examples"><strong>Examples:</strong> Logitech Easy-Switch keyboards and mice, like the K380 (they support Logitech's "Change Host" command). AutoSwitch checks the device to be sure.</p>
-        <p class="kind__platforms">Mac ✓ · Windows ✓</p>
-      </li>
-      <li class="kind kind--no">
-        <p class="kind__verdict">Can't be switched by an app</p>
-        <h2>Re-pairs by hand</h2>
-        <p>
-          The device remembers one Bluetooth computer. To move it, you press its pairing button and
-          pair it again. After a computer removes it, it still points at that computer, and the other
-          one can't pair until you press the button.
-        </p>
-        <p class="kind__examples"><strong>Examples:</strong> Xbox, PlayStation and Nintendo controllers.</p>
-        <p class="kind__tip"><strong>What to do:</strong> keep it on the computer you play on, or connect it with a cable through the KVM. Or pair it to a <strong>Bluetooth-to-USB adapter</strong> plugged into the KVM (for controllers, e.g. the 8BitDo USB Wireless Adapter 2, which works on Windows and Mac): then the KVM switches it like a wired controller. Leave <strong>Manage pairing</strong> off.</p>
-      </li>
-      <li class="kind kind--partly">
-        <p class="kind__verdict">Mac yes, Windows not yet</p>
-        <h2>Joins whichever computer connects</h2>
-        <p>
-          The device remembers several computers and goes to whichever one connects to it. The Mac
-          app disconnects it when the KVM leaves and connects it when the KVM arrives
-          (<strong>Manage pairing</strong> off). Windows has no way to disconnect a Bluetooth device
-          without unpairing it, so the Windows app can't do this yet.
-        </p>
-        <p class="kind__examples"><strong>Examples:</strong> many headphones and speakers.</p>
-        <p class="kind__platforms">Mac: supported, being tested · Windows: not yet</p>
+      <li class="kind kind--partly" id="connects">
+        <svg class="kind__icon" aria-hidden="true" viewBox="0 0 48 48"><path d="M9 30v-6a15 15 0 0 1 30 0v6"/><rect x="6" y="28" width="8" height="12" rx="3"/><rect x="34" y="28" width="8" height="12" rx="3"/></svg>
+        <h3>Joins whichever computer connects</h3>
+        <p class="kind__one">Remembers several computers and goes to the one that asks. The Mac app connects and disconnects it with the KVM.</p>
+        <ul class="tags"><li>Many headphones</li><li>Speakers</li></ul>
+        <p class="kind__do"><strong>Mac:</strong> supported, being tested · <strong>Windows:</strong> not yet</p>
+        <details class="kind__why">
+          <summary>Why not on Windows</summary>
+          <p>Windows has no way for an app to disconnect a Bluetooth device without unpairing it, which would make you pair it again.</p>
+        </details>
       </li>
     </ul>
-    <div class="receiver-tip">
-      <h2>Make a Bluetooth device "wired" with an adapter</h2>
-      <p>
-        For a device AutoSwitch can't switch, a small Bluetooth-to-USB adapter plugged into the KVM
-        does the job: the device pairs once with the adapter, and the KVM switches the adapter like
-        any USB device. For game controllers, the 8BitDo USB Wireless Adapter 2 pairs Xbox,
-        PlayStation and Switch Pro controllers (Bluetooth ones only). For keyboards and mice there
-        are do-it-yourself bridges such as HID Remapper's Bluetooth build or a Raspberry Pi Pico W
-        keyboard bridge. They don't carry a Magic Trackpad's gestures, so keep AutoSwitch for that.
-      </p>
-    </div>
-    <div class="receiver-tip">
-      <h2>Using a USB receiver?</h2>
-      <p>
-        Logitech Unifying, Logi Bolt and Lightspeed receivers are faster than Bluetooth, and they
-        don't need AutoSwitch at all: plug the receiver into your KVM's USB hub, and the KVM switches
-        it like a wired keyboard. Use the KVM's plain USB port, not a "keyboard/mouse emulation"
-        port, which often doesn't pass receivers through properly.
-      </p>
-    </div>
-    <p class="kinds__note">
-      For the kinds it can't switch, AutoSwitch still shows whether the device is connected.
-    </p>
   </div>
 </section>
 
-<section class="section">
-  <div class="wrap wrap--narrow">
+{# ---------- Can't be switched ---------- #}
+<section class="section section--tint">
+  <div class="wrap">
+    <p class="eyebrow">No app can move these</p>
+    <h2>Can't be switched by an app</h2>
+    <ul class="kinds kinds--two">
+      <li class="kind kind--no" id="picks">
+        <svg class="kind__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="5" y="14" width="38" height="22" rx="5"/><path d="M12 22h0M18 22h0M24 22h0M30 22h0M36 22h0M15 29h18"/><path d="M33 6l4 4-4 4"/></svg>
+        <h3>Picks the computer itself</h3>
+        <p class="kind__one">A pairing per computer, and a key on the device chooses one. Only the device can switch.</p>
+        <ul class="tags"><li>ZMK keyboards</li><li>QMK keyboards</li></ul>
+        <p class="kind__do"><strong>What to do:</strong> use its own switch key, or plug it into the KVM by USB. Manage pairing off.</p>
+        <details class="kind__why">
+          <summary>Why not</summary>
+          <p>No computer can change which profile the keyboard uses. Removing the pairing on one computer breaks that profile, and you'd pair it again from the keyboard.</p>
+        </details>
+      </li>
+      <li class="kind kind--no" id="repairs">
+        <svg class="kind__icon" aria-hidden="true" viewBox="0 0 48 48"><path d="M14 16h20a9 9 0 0 1 8.7 11.4l-2 7.2a4.5 4.5 0 0 1-7.6 1.8L29 32H19l-4.1 4.4a4.5 4.5 0 0 1-7.6-1.8l-2-7.2A9 9 0 0 1 14 16z"/><path d="M15 22v6M12 25h6"/><circle cx="32" cy="23" r="1.6"/><circle cx="35" cy="27" r="1.6"/></svg>
+        <h3>Re-pairs by hand</h3>
+        <p class="kind__one">Remembers one Bluetooth computer. Moving it means pressing its pairing button.</p>
+        <ul class="tags"><li>Xbox</li><li>PlayStation</li><li>Nintendo Pro</li></ul>
+        <p class="kind__do"><strong>What to do:</strong> keep it on one computer, use a cable through the KVM, or a <a href="#tips">USB adapter</a>.</p>
+        <details class="kind__why">
+          <summary>Why not</summary>
+          <p>After a computer removes it, the controller still points at that computer, so the other one can't pair until you press the button.</p>
+        </details>
+      </li>
+    </ul>
+  </div>
+</section>
+
+{# ---------- Tips ---------- #}
+<section class="section" id="tips">
+  <div class="wrap">
+    <p class="eyebrow">No app needed</p>
+    <h2>Make it follow the KVM like a wired device</h2>
+    <ul class="tips">
+      <li class="tip">
+        <svg class="tip__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="16" y="6" width="16" height="22" rx="3"/><path d="M20 28v8h8v-8M24 36v6"/><path d="M21 12h6"/></svg>
+        <div>
+          <h3>USB receiver? Plug it into the KVM</h3>
+          <p>Logitech Unifying, Bolt and Lightspeed receivers follow the KVM on their own, and they're faster than Bluetooth. Use the KVM's plain USB port, not a "keyboard/mouse emulation" port.</p>
+        </div>
+      </li>
+      <li class="tip">
+        <svg class="tip__icon" aria-hidden="true" viewBox="0 0 48 48"><path d="M17 15l14 14-7 7V12l7 7-14 14"/></svg>
+        <div>
+          <h3>Bluetooth-to-USB adapter</h3>
+          <p>Pair the device once with an adapter on the KVM. For controllers: the 8BitDo USB Wireless Adapter 2 (Windows and Mac). For keyboards and mice: DIY bridges like HID Remapper. Not for a Magic Trackpad's gestures.</p>
+        </div>
+      </li>
+    </ul>
+  </div>
+</section>
+
+{# ---------- Test ---------- #}
+<section class="section section--tint">
+  <div class="wrap">
     <p class="eyebrow">Not sure?</p>
     <h2>Test your device in a minute</h2>
-    <ol class="steps steps--list">
+    <ol class="steps steps--row">
       <li>
         <span class="steps__badge">1</span>
         <h3>Connect it to one computer</h3>
-        <p>Make sure it works there as usual.</p>
+        <p>Make sure it works there.</p>
       </li>
       <li>
         <span class="steps__badge">2</span>
         <h3>Remove it there</h3>
-        <p>In that computer's Bluetooth settings, remove (forget) the device.</p>
+        <p>In Bluetooth settings, remove (forget) it.</p>
       </li>
       <li>
         <span class="steps__badge">3</span>
-        <h3>Pair it on the other computer</h3>
-        <p>
-          Without pressing anything on the device. If it pairs, it <strong>hands off by pairing</strong>
-          and AutoSwitch can switch it. If it only pairs after you press a button on it, it
-          <strong>re-pairs by hand</strong>. If it has a switch key for computers, it
-          <strong>picks the computer itself</strong>.
-        </p>
+        <h3>Pair it on the other one</h3>
+        <p>Without pressing anything on the device.</p>
       </li>
     </ol>
-    <p>
-      AutoSwitch guesses the kind from the device's maker and type, and says so: <em>likely</em> or
-      <em>probably</em> when it isn't a known model. Found a device it gets wrong?
-      <a href="{{ site.issues }}">Tell us</a> and it'll be recognized in a future version.
+    <ul class="outcomes">
+      <li class="outcome outcome--yes"><strong>It pairs</strong> Hands off by pairing: AutoSwitch can switch it.</li>
+      <li class="outcome outcome--no"><strong>Only after a button press</strong> Re-pairs by hand.</li>
+      <li class="outcome outcome--no"><strong>It has a computer-switch key</strong> Picks the computer itself (or, Logitech, switches channel).</li>
+    </ul>
+    <p class="glance__note">
+      AutoSwitch guesses the kind from the device's maker and type, and marks a guess as <em>likely</em>.
+      Found a device it gets wrong? <a href="{{ site.issues }}">Tell us</a>.
     </p>
     <p><a class="btn btn--primary" href="/#download">Get AutoSwitch KVM</a></p>
   </div>
