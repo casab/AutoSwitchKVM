@@ -26,6 +26,11 @@ public sealed record HostChannels(int Count, int Current, IReadOnlyList<byte> Ma
     /// The byte AutoSwitch writes on its own channel.
     public const byte AutoSwitchMark = 0xA5;
 
+    /// Per channel: is it paired with a host? null when the protocol doesn't say (Logitech's
+    /// Change Host). The ZMK module reports it, and an unpaired profile is never a target: the
+    /// keyboard would just advertise there for a new pairing.
+    public IReadOnlyList<bool>? Paired { get; init; }
+
     /// The single other channel marked by AutoSwitch, or null if none (or several: ambiguous).
     public int? MarkedOtherChannel
     {

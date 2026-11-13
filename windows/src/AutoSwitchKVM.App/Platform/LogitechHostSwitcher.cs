@@ -218,7 +218,7 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
 
     /// LE collections carry the address in their path; for Classic, the collection's parent is the
     /// device's BTHENUM HID node, whose instance ID ends with the address.
-    private static bool BelongsTo(string devicePath, string digits)
+    internal static bool BelongsTo(string devicePath, string digits)
     {
         if (devicePath.ToUpperInvariant().Contains(digits)) return true;
         var instanceId = InstanceIdFromPath(devicePath);

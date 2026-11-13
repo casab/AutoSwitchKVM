@@ -10,6 +10,7 @@ public sealed class FakeHostSwitcher : IHostSwitcher
     public int Count { get; set; } = 3;
     public int Current { get; set; }
     public byte[] Marks { get; set; } = new byte[3];
+    public bool[]? Paired { get; set; }
     public List<string> Calls { get; } = new();
     /// Also record calls here (e.g. the Bluetooth fake's Calls, to check ordering across both).
     public List<string>? SharedLog { get; set; }
@@ -22,7 +23,7 @@ public sealed class FakeHostSwitcher : IHostSwitcher
     public Task<HostChannels?> GetChannelsAsync(string address, CancellationToken ct = default)
     {
         OnGetChannels?.Invoke();
-        return Task.FromResult(Mine(address) && Reachable ? new HostChannels(Count, Current, Marks.ToArray()) : null);
+        return Task.FromResult(Mine(address) && Reachable ? new HostChannels(Count, Current, Marks.ToArray()) { Paired = Paired } : null);
     }
 
     public Task SwitchToAsync(string address, int channel, CancellationToken ct = default)

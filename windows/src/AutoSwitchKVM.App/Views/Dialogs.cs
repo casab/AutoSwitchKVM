@@ -228,11 +228,13 @@ internal static class Dialogs
                 channel.Visibility = a.Type == HandoffType.ChannelSwitch ? Visibility.Visible : Visibility.Collapsed;
                 if (a.Type == HandoffType.ChannelSwitch)
                 {
+                    var channels = await Vm.Controller.GetChannelsAsync(picked.Address);
                     var names = await Vm.Controller.GetChannelNamesAsync(picked.Address);
                     if (version != pickVersion) return;
-                    if (names is not null)
+                    if (names is not null || channels is not null)
                     {
-                        channel.ItemsSource = AppController.ChannelChoiceLabels("Automatic (found when AutoSwitch runs there)", names, names.Count);
+                        channel.ItemsSource = AppController.ChannelChoiceLabels("Automatic (found when AutoSwitch runs there)",
+                            names, channels?.Count ?? names!.Count, channels);
                         channel.SelectedIndex = 0;
                     }
                 }

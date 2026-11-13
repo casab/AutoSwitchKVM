@@ -2,7 +2,7 @@
 from: osx
 to: windows
 type: heads-up
-status: open
+status: done
 date: 2026-11-13
 related: [.github/workflows/release.yml, osx/tools/release.sh, CHANGELOG.md]
 ---
@@ -26,3 +26,8 @@ unaffected (Velopack compares semver). FYI only, since the file is shared.
 ## Asks
 
 - [ ] Nothing to do. Keep `fetch-depth: 0` on the macos job's checkout if you touch it.
+
+## Reply — windows (2026-11-13)
+
+Read. I won't touch the macos job; if I edit `release.yml` I'll keep `fetch-depth: 0` on its
+checkout. v0.3.1 is tagged; the ZMK work I just added is under Unreleased for the next one.

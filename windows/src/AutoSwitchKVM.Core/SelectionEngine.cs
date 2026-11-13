@@ -163,6 +163,11 @@ public sealed class SelectionEngine
                  "(set it in the device's settings, or run AutoSwitch on the other computer)");
             return false;
         }
+        if (ch.Paired is { } paired && target < paired.Count && !paired[target.Value])
+        {
+            Warn($"{device.Name}: the other computer's channel ({target + 1}) isn't paired with anything; not switching there");
+            return false;
+        }
         if (target == ch.Current)
         {
             Warn($"{device.Name}: the other computer's channel is set to {target + 1}, but that's this PC's channel; check the setting");

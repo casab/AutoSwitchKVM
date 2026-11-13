@@ -28,6 +28,10 @@ This is a **monorepo organized by platform**:
   Windows). The agent cutting a release renames it to `## vX.Y.Z (date)` before tagging; the
   rules are at the top of the file.
 - `agent-notes/` — **cross-agent handoff** (see below).
+- `firmware/zmk-autoswitch/` — the **AutoSwitch ZMK module**: lets the apps switch a ZMK
+  keyboard's Bluetooth profile (spec §5a type 5). `zephyr/module.yml` at the root makes this
+  repository a Zephyr module, so a zmk-config lists it in `config/west.yml`. CI:
+  `.github/workflows/firmware.yml`. See its README.
 - `website/` — autoswitchkvm.com (Eleventy, Cloudflare Workers static assets; see `website/README.md`). Shared by
   both platforms: it shows the screenshots from `osx/docs/images/` and `windows/docs/images/`.
 - `.github/` — CI: macOS job (`swift build`/`swift test` + blocking lint) and a Windows job

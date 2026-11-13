@@ -19,6 +19,13 @@ reference_win_driver/
 # Offline Logitech Flow simulator (ctpahhik/offline_logitech_flow_simulator) + HID++ 2.0 docs:
 # reference for host-initiated channel switching (feature 0x1814 Change Host)
 reference_flow/
+# ZMK firmware (zmkfirmware/zmk) and the user's zmk-config (Reviung41): references for the
+# AutoSwitch ZMK module (firmware/zmk-autoswitch)
+zmk_main_reference/
+zmk_reference/
+# Local firmware builds (firmware/zmk-autoswitch); CI or the zmk-config builds the real ones.
+firmware/out/
+.zmk-ws/
 
 # Signing material must never be committed (certificates, update-signing keys).
 *.p12

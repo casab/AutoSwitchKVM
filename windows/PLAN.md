@@ -210,6 +210,29 @@ Working set with Settings open: ~160 MB. ARM64 Setup.exe: 94.2 to 83.4 MB.
 6. **Idle memory**: a tray app sits idle most of the day. Measure the working set with no windows
    open after a few hours. If high, release the Settings window and its pages on close.
 
+## ZMK keyboards: the AutoSwitch firmware module
+
+Built 2026-11-13; compiles in CI, **not yet tried on a keyboard**. ZMK keyboards (spec §5a type 2)
+pick their profile themselves and have no host-side switch, so `firmware/zmk-autoswitch` adds one:
+a ZMK module over zzeneg/zmk-raw-hid (vendor HID 0xFF60/0x61, Bluetooth and USB) speaking the
+AutoSwitch protocol v1 (spec §5a): GET_INFO (profiles, active, paired bitmask, marks), SELECT,
+SET_MARK. It makes the keyboard type 5, and the engine path is the Logitech one.
+
+- Core: `ZmkHostProtocol` (encode/parse), `CompositeHostSwitcher` (Logitech, then ZMK; the first
+  backend that answers owns the device), `HostChannels.Paired` (the engine never switches to an
+  unpaired profile). Tests: `ZmkHostProtocolTests`.
+- App: `Platform/ZmkHostSwitcher.cs` (any vendor; 33-byte reports with report ID 0; endpoint
+  matched to the address like the Logitech one). Settings calls them profiles and flags empty ones.
+- Firmware: `firmware/zmk-autoswitch` (+ `zephyr/module.yml` at the repo root, so a zmk-config
+  pulls this repository as a west project). `ci/build.sh` + `.github/workflows/firmware.yml`
+  build a nice!nano Reviung41 with the module.
+- **To test on hardware:** flash, re-pair on both computers (new HID service), check that Add
+  device shows "Switches channel on request", then switch the KVM both ways. macOS needs the same
+  backend (agent-note `zmk-autoswitch-module`).
+- Open: does Windows expose the raw HID collection over BLE without a reconnect after flashing?
+  Does the reply always arrive before the switch (100 ms delay)? Battery cost of the extra
+  service: none expected (no traffic unless AutoSwitch asks).
+
 ## Planned: Logitech receivers (Unifying / Bolt)
 
 Recorded 2026-11-13; not scheduled (Bluetooth channel switching, spec §5a type 5, comes first and

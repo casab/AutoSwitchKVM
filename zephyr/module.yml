@@ -1,0 +1,7 @@
+# Zephyr/ZMK module entry for this repository: the AutoSwitch KVM host channel for ZMK
+# keyboards lives in firmware/zmk-autoswitch (see its README). A zmk-config pulls it in by listing
+# this repository in config/west.yml.
+name: zmk-autoswitch
+build:
+  cmake: firmware/zmk-autoswitch
+  kconfig: firmware/zmk-autoswitch/Kconfig

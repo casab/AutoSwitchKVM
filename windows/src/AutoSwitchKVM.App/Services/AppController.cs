@@ -17,7 +17,9 @@ public sealed class AppController
     private readonly ConfigStore _store;
     private readonly PnpUsbMonitor _usb;
     private readonly WinRtBluetooth _bt;
-    private readonly LogitechHostSwitcher _hostSwitcher = new();
+    private readonly LogitechHostSwitcher _logitech = new();
+    private readonly ZmkHostSwitcher _zmk = new();
+    private readonly CompositeHostSwitcher _hostSwitcher;
     private readonly PowerMonitor _power = new();
     private readonly HotKeyService _hotkeys = new();
     private readonly ToastNotifier _toasts = new();
@@ -52,6 +54,7 @@ public sealed class AppController
         Log.Info("app", $"config loaded from {_store.Path}: profile='{Config.ActiveProfileName}', " +
             $"source={(Config.Source is null ? "(none)" : Config.Source.DisplayVidPid)}, devices={Config.Devices.Count}, paused={Config.Paused}");
 
+        _hostSwitcher = new CompositeHostSwitcher(_logitech, _zmk);
         Engine = new SelectionEngine(Config, _usb, _bt, new AppLogSink(), _hostSwitcher);
         Engine.Changed += () => StateChanged?.Invoke();
         Engine.OnNotice = (title, body) =>
@@ -94,7 +97,7 @@ public sealed class AppController
     /// The names a channel-switching device stores per channel (null when unsupported/unreachable).
     public async Task<IReadOnlyList<string?>?> GetChannelNamesAsync(string address)
     {
-        try { return await _hostSwitcher.GetChannelNamesAsync(address); }
+        try { return await _logitech.GetChannelNamesAsync(address); }
         catch (Exception ex)
         {
             Log.Debug("hidpp", $"{address}: channel names query failed ({ex.Message})");
@@ -102,14 +105,19 @@ public sealed class AppController
         }
     }
 
-    /// "Channel 2 · MacBook" style labels for a channel choice: index 0 = automatic.
-    public static IReadOnlyList<string> ChannelChoiceLabels(string automatic, IReadOnlyList<string?>? names, int count = 3)
+    /// "Channel 2 · MacBook" style labels for a channel choice: index 0 = automatic. A device that
+    /// reports pairing per channel (the ZMK module) calls them profiles and flags the empty ones.
+    public static IReadOnlyList<string> ChannelChoiceLabels(string automatic, IReadOnlyList<string?>? names, int count = 3, HostChannels? channels = null)
     {
         var labels = new List<string> { automatic };
+        var noun = channels?.Paired is null ? "Channel" : "Profile";
         for (var i = 0; i < Math.Max(count, names?.Count ?? 0); i++)
         {
             var name = names is not null && i < names.Count ? names[i] : null;
-            labels.Add(name is null ? $"Channel {i + 1}" : $"Channel {i + 1} · {name}");
+            var label = name is null ? $"{noun} {i + 1}" : $"{noun} {i + 1} · {name}";
+            if (channels?.Paired is { } paired && i < paired.Count && !paired[i]) label += " (not paired)";
+            else if (channels is not null && i == channels.Current) label += " (this PC)";
+            labels.Add(label);
         }
         return labels;
     }
@@ -458,8 +466,9 @@ public sealed class AppController
         var result = HandoffCatalog.Classify(identity);
         var cache = identity.VendorId is not null || identity.Kind != DeviceKind.Unknown;
 
-        // Logitech multi-host devices may support HID++ "Change Host" (spec §5a type 5): ask the
-        // device. It only answers while connected to this PC, so a "no answer" isn't cached.
+        // Logitech multi-host devices may support HID++ "Change Host", and a ZMK keyboard may run
+        // the AutoSwitch module (spec §5a type 5): ask the device. It only answers while connected
+        // to this PC (and after a firmware update), so a "no answer" isn't cached.
         if (identity.VendorId == HandoffCatalog.Logitech || result.Type == HandoffType.DevicePicksHost)
         {
             HostChannels? channels = null;
@@ -467,8 +476,10 @@ public sealed class AppController
             catch (Exception ex) { Log.Debug("hidpp", $"{name}: channel query failed ({ex.Message})"); }
             if (channels is not null)
                 result = new HandoffAssessment(HandoffType.ChannelSwitch, HandoffConfidence.Known,
-                    $"{channels.Count} channels; this PC is channel {channels.Current + 1}.");
-            else if (identity.VendorId == HandoffCatalog.Logitech)
+                    channels.Paired is null
+                        ? $"{channels.Count} channels; this PC is channel {channels.Current + 1}."
+                        : $"AutoSwitch firmware module: {channels.Count} Bluetooth profiles; this PC is profile {channels.Current + 1}.");
+            else
                 cache = false;   // maybe just not connected right now: ask again next time
         }
 

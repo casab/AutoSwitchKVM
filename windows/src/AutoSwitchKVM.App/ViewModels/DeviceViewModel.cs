@@ -34,7 +34,7 @@ public sealed class DeviceViewModel : ObservableObject
     private IReadOnlyList<string?>? _channelNames;
     public Visibility ChannelSettingVisibility => HandoffType == HandoffType.ChannelSwitch ? Visibility.Visible : Visibility.Collapsed;
     public string ChannelSettingDescription => _channels is { } c
-        ? $"Where the device goes when the KVM leaves this PC. This PC is channel {c.Current + 1} of {c.Count}. Automatic uses the channel AutoSwitch marked on the other computer."
+        ? $"Where the device goes when the KVM leaves this PC. This PC is {(c.Paired is null ? "channel" : "profile")} {c.Current + 1} of {c.Count}. Automatic uses the one AutoSwitch marked on the other computer."
         : "Where the device goes when the KVM leaves this PC. Automatic uses the channel AutoSwitch marked on the other computer.";
     /// "Automatic", then one entry per channel with the name the device stores for it (0x1815).
     public IReadOnlyList<string> ChannelChoices { get; private set; } = AppController.ChannelChoiceLabels("Automatic", null);
@@ -42,7 +42,7 @@ public sealed class DeviceViewModel : ObservableObject
     /// 0 = automatic, n = channel n.
     public int ReleaseChannelIndex
     {
-        get => Model.ReleaseToChannel is int n && n >= 1 && n <= 3 ? n : 0;
+        get => Model.ReleaseToChannel is int n && n >= 1 && n < ChannelChoices.Count ? n : 0;
         set
         {
             if (value < 0 || value == ReleaseChannelIndex) return;
@@ -59,7 +59,7 @@ public sealed class DeviceViewModel : ObservableObject
             {
                 _channels = await _app.Controller.GetChannelsAsync(Model.Address);
                 _channelNames = await _app.Controller.GetChannelNamesAsync(Model.Address);
-                ChannelChoices = AppController.ChannelChoiceLabels("Automatic", _channelNames, _channels?.Count ?? 3);
+                ChannelChoices = AppController.ChannelChoiceLabels("Automatic", _channelNames, _channels?.Count ?? 3, _channels);
             }
         }
         catch (Exception ex)
