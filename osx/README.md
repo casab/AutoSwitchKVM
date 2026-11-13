@@ -39,8 +39,11 @@ Click the AutoSwitch KVM icon in the menu bar and choose **Settings**.
    inside the KVM). Keep those, untick anything else, give the source a name such as "Desk KVM",
    and save. You can also pick the devices yourself with **Pick manually…**.
 2. **Add your devices.** In the **Devices** tab, click **Add** and pick your trackpad, keyboard or
-   mouse from the devices this Mac knows. For the **Magic Trackpad**, or any device that only
-   pairs with one computer at a time, turn on **Manage pairing**.
+   mouse from the devices this Mac knows. AutoSwitch shows how each device handles a second
+   computer, says whether it can switch it, and sets **Manage pairing** to match (you can still
+   change it). See [which devices it can switch](#which-devices-it-can-switch).
+   For the **Magic Trackpad**, or any device that only pairs with one computer at a time,
+   Manage pairing is on: AutoSwitch unpairs it on leaving and pairs it on arriving.
    For a **Logitech Easy-Switch** keyboard or mouse (e.g. K380), leave Manage pairing **off**:
    AutoSwitch tells it to change channel instead. Its card then shows "Switches channel on
    request" and which channel this Mac is on. The other computer's channel is found
@@ -54,6 +57,25 @@ That's it. Switch the KVM and your devices follow, usually within a few seconds.
 <p align="center">
   <img src="docs/images/settings-devices.png" alt="Settings, Devices tab: each device with its state, Manage pairing, connect delay and manual controls" width="640">
 </p>
+
+## Which devices it can switch
+
+Bluetooth devices handle a second computer in a few different ways, and only some of them can be
+switched by a computer. Each device's card in Settings ▸ Devices names its type:
+
+| Type | How the device behaves | Examples | On the Mac |
+|---|---|---|---|
+| **Hands off by pairing** | One pairing; once a computer removes it, the next can pair. | Magic Trackpad, Keyboard, Mouse | **Yes**, with Manage pairing on. |
+| **Switches channel on request** | Easy-Switch channels that the connected computer can change. | Logitech K380 and other Easy-Switch devices | **Yes**, with Manage pairing off (needs Input Monitoring). |
+| **Joins whichever computer connects** | Remembers several computers and goes to the one that asks. | Many headphones and speakers | **Yes**, with Manage pairing off: disconnect on leaving, connect on arriving. |
+| **Picks the computer itself** | A pairing per computer; a key on the device picks one. | ZMK/QMK keyboards | **No.** Use the device's own key, or USB through the KVM. AutoSwitch shows its status. |
+| **Re-pairs by hand** | Remembers one computer; moving it needs pairing mode. | Xbox, PlayStation, Nintendo controllers | **No.** Keep it on one computer, or use a cable through the KVM. |
+
+The type comes from the device's vendor and kind as macOS reports them, so it's marked *likely*
+when it's a good guess rather than a known model. For a device AutoSwitch isn't sure about, test
+it: remove it in this Mac's Bluetooth settings; if the other computer can then pair it right
+away, without pressing anything on the device, it hands off by pairing.
+More detail: [autoswitchkvm.com/devices](https://autoswitchkvm.com/devices/).
 
 ## Everyday use
 

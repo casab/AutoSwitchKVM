@@ -77,6 +77,14 @@ final class IOBluetoothController: NSObject, BluetoothController {
     /// unregistered `IOHIDUserDevice` leftovers with the same serial, which a raw registry walk
     /// would mistake for a live device.
     func isHIDReady(_ address: String) async -> Bool? {
+        // Only peripherals (keyboards, mice, trackpads, controllers) bring up HID. For anything
+        // else (headphones: spec §5a type 4) we can't tell, so the engine trusts the link, as
+        // on Windows. Without this a connected headset counted as "link up but no HID".
+        if let dev = IOBluetoothDevice(addressString: Self.normalize(address)), dev.classOfDevice != 0,
+            dev.deviceClassMajor != kBluetoothDeviceClassMajorPeripheral
+        {
+            return nil
+        }
         let want = Self.normalize(address)
         let matching = IOServiceMatching("IOHIDDevice") as NSMutableDictionary
         matching[kIOPropertyMatchKey] = ["Transport": "Bluetooth"]

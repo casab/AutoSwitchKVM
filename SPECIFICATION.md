@@ -287,7 +287,9 @@ controller** (the operations in §5). It owns no platform APIs directly.
   started HID again until power-cycled; the 3 minutes of re-pair churn that followed only made
   things worse.
 - **Success means the device is usable, not just linked:** after the connect call, wait (bounded,
-  ~5 s) for the HID connection; a platform that can't tell falls back to the link check.
+  ~5 s) for the HID connection; a platform that can't tell falls back to the link check. A device
+  whose class of device isn't a peripheral (headphones, speakers: §5a type 4) has no HID, so
+  `isHIDReady` is "can't tell" for it on both platforms (macOS since 2026-11-13).
 - After a stale-bond unpair, **settle before re-pairing** (~2 s). macOS finishes an unpair up to
   ~2.6 s after the call returns; a pair started right away failed. The stale-bond re-pair runs
   **once per hard failure**, not again on each soft retry.
@@ -415,7 +417,12 @@ leaving host can find the other host's channel without configuration.
 The type sets the **Manage pairing default** when a device is added (on for type 1 and for unknown
 Classic devices, off otherwise); the user can still change it. Windows: classification is
 implemented (`AutoSwitchKVM.Core/DeviceHandoff.cs`); engine behavior is unchanged (a "status only"
-mode for types 2 and 3 would need a config field, not added yet). macOS pending.
+mode for types 2 and 3 would need a config field, not added yet). macOS: implemented 2026-11-13
+(`Models/DeviceHandoff.swift`, same rules and tests). Its signals come from
+`system_profiler SPBluetoothDataType -json` (~0.1 s; vendor ID, product ID and minor type such as
+"Keyboard"/"Gamepad"/"Headset" for Classic and LE devices alike, without paging the device), with
+IOBluetooth's class of device as a fallback for the kind. macOS can't tell Classic from LE there,
+so it classifies every device as Classic (rule 6 never fires on the Mac).
 
 ---
 

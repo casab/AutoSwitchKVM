@@ -343,6 +343,10 @@ struct SettingsDeviceCard: View {
                 .labelsHidden().frame(width: 92)
             }
 
+            if let a = controller.handoffAssessment(for: device.address) {
+                HandoffSummary(assessment: a, managePairing: device.managePairing)
+            }
+
             if let ch = controller.channelInfo[device.id] { channelRow(ch) }
 
             HStack(spacing: 8) {
@@ -376,6 +380,7 @@ struct SettingsDeviceCard: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.quaternary, lineWidth: 0.5))
         .opacity(device.enabled ? 1 : 0.7)
+        .task(id: device.address) { await controller.classify(address: device.address, name: device.name) }
     }
 
     /// Spec §5a type 5: the device switches channel on request (Logitech Easy-Switch). On release
@@ -384,11 +389,8 @@ struct SettingsDeviceCard: View {
     private func channelRow(_ ch: HostChannels) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Label(
-                    "Switches channel on request · this Mac is on channel \(ch.current + 1) of \(ch.count)",
-                    systemImage: "arrow.left.arrow.right"
-                )
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+                Label("This Mac is on channel \(ch.current + 1) of \(ch.count)", systemImage: "arrow.left.arrow.right")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 Text("Other computer's channel").font(.system(size: 11)).foregroundStyle(.secondary)
                 Picker("", selection: $device.releaseToChannel) {
@@ -401,9 +403,8 @@ struct SettingsDeviceCard: View {
                     "Where the device goes when the KVM leaves this Mac. Automatic uses the channel the other "
                         + "computer's AutoSwitch marked.")
             }
+            // With Manage pairing on, HandoffSummary already says to turn it off.
             if device.managePairing {
-                Text("Turn off Manage pairing to switch its channel instead of unpairing it.")
-                    .font(.system(size: 11)).foregroundStyle(.orange)
             } else if device.releaseToChannel == ch.current + 1 {
                 Text("That's this Mac's channel; pick the other computer's.")
                     .font(.system(size: 11)).foregroundStyle(.orange)
@@ -424,7 +425,18 @@ struct AddDeviceSheet: View {
 
     @State private var name = ""
     @State private var address = ""
+    @State private var managePairing = false
     @State private var paired: [PairedDeviceInfo] = []
+
+    /// 12 hex digits, separators ignored; nil until the address is complete.
+    private var completeAddress: String? {
+        let digits = DeviceIdentityReader.normalize(address.trimmingCharacters(in: .whitespaces))
+        return digits.count == 12 && digits.allSatisfy(\.isHexDigit) ? digits : nil
+    }
+
+    private var assessment: HandoffAssessment? {
+        completeAddress.flatMap { _ in controller.handoffAssessment(for: address) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -437,6 +449,10 @@ struct AddDeviceSheet: View {
                         VStack(alignment: .leading) {
                             Text(p.name)
                             Text(p.address).font(.caption).foregroundStyle(.secondary)
+                            if let a = controller.handoffAssessment(for: p.address) {
+                                Text(HandoffText.title(a.type) + HandoffText.confidence(a))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                         }
                         Spacer()
                         Button("Use") {
@@ -444,7 +460,7 @@ struct AddDeviceSheet: View {
                         }
                     }
                 }
-                .frame(height: 120)
+                .frame(height: 150)
                 Divider()
             }
 
@@ -452,11 +468,18 @@ struct AddDeviceSheet: View {
             TextField("Name", text: $name)
             TextField("Address (e.g. 3c-50-02-bf-22-45)", text: $address)
 
+            if let a = assessment {
+                HandoffSummary(assessment: a)
+            }
+            Toggle("Manage pairing — pair on connect, unpair on disconnect", isOn: $managePairing)
+                .font(.system(size: 12)).toggleStyle(.checkbox)
+
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Add") {
-                    let d = BTDevice(name: name.isEmpty ? address : name, address: address)
+                    let d = BTDevice(
+                        name: name.isEmpty ? address : name, address: address, managePairing: managePairing)
                     store.config.devices.append(d)
                     dismiss()
                 }
@@ -465,8 +488,44 @@ struct AddDeviceSheet: View {
             }
         }
         .padding()
-        .frame(width: 380)
-        .task { paired = await controller.bt.pairedDevices() }
+        .frame(width: 420)
+        .task {
+            controller.identities.invalidate()  // the user may have just paired it
+            paired = await controller.bt.pairedDevices()
+            for p in paired { await controller.classify(address: p.address, name: p.name) }
+        }
+        .task(id: completeAddress) {
+            // The type sets the Manage pairing default (spec §5a); the user can still change it.
+            guard completeAddress != nil else { return }
+            let a = await controller.classify(address: address, name: name)
+            managePairing = a.defaultManagePairing(isLowEnergy: false)
+        }
+    }
+}
+
+/// The device's handoff type (spec §5a): what it is, what AutoSwitch does with it on this Mac,
+/// and a hint when Manage pairing works against it.
+struct HandoffSummary: View {
+    let assessment: HandoffAssessment
+    var managePairing: Bool? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Label(
+                HandoffText.title(assessment.type) + HandoffText.confidence(assessment),
+                systemImage: HandoffText.symbol(assessment.type)
+            )
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(HandoffText.canSwitch(assessment.type) ? Color.green : Color.secondary)
+            Text(HandoffText.whatHappens(assessment.type))
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let managePairing, let hint = HandoffText.managePairingHint(assessment, managePairing: managePairing) {
+                Text(hint).font(.system(size: 11)).foregroundStyle(.orange)
+            }
+            Link("About device types", destination: HandoffText.learnMoreURL).font(.system(size: 11))
+        }
+        .help(assessment.reason)
     }
 }
 

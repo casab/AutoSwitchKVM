@@ -115,6 +115,14 @@ Single executable target, organized by folder under `Sources/AutoSwitchKVM/`:
   0xFF00) is part of it and takes 20-byte output report 0x11 (device index 0xFF, our software ID
   0x0B). Replies come through an input-report callback on the main run loop (awaited, never
   spun); calls are serialized.
+- **Device handoff types (spec §5a):** `Models/DeviceHandoff.swift` (`HandoffCatalog.classify`,
+  a 1:1 port of Windows' rules, tested in `HandoffCatalogTests` with the same cases),
+  `Bluetooth/DeviceIdentityReader` (vendor/product/minor type from
+  `system_profiler SPBluetoothDataType -json`, cached 30 s; class of device as fallback),
+  `UI/HandoffText` (Mac wording: types 1, 4, 5 can be switched here). `AppController.classify`
+  caches per address and upgrades a likely Logitech device to type 5 when it answers the Change
+  Host query. Shown in Add device (sets the Manage pairing default) and on each device card
+  (`HandoffSummary`). Engine behavior doesn't depend on the type.
 - `Bluetooth/` — `BluetoothController` (protocol + `withTimeout`), `BluetoothErrors` (`BTError`,
   `BTFailureKind`, and `BTCode`, which names IOReturn/HCI result codes and maps them to failure
   kinds), `IOBluetoothController` (native impl: synchronous connect/disconnect, async pair that
@@ -229,6 +237,12 @@ the new profile but does not force-disconnect the previous profile's devices.
   and retries only churned it. The positive case of this check still needs hardware confirmation.
   If the trackpad never counts as connected again, read the log's "registered Bluetooth HID
   serials" line.
+- **Only peripherals have HID.** `isHIDReady` returns nil ("can't tell") for a device whose class
+  of device isn't major 0x05 (headphones, speakers), so the engine trusts the link for them.
+  Before 2026-11-13 a connected headset counted as "link up but no HID" and was retried.
+- **IOBluetooth from a terminal-built tool aborts (exit 134)** without the terminal's Bluetooth
+  permission. For read-only device facts, `system_profiler SPBluetoothDataType` works anywhere
+  (it lists vendor/product IDs and minor types, LE devices included).
 - **`-[IOBluetoothDevice remove]` is deferred by bluetoothd.** It returns at once, the link drops
   ~1 s later, and the key is deleted ~1.5 s after that. `unpair` waits for the link to drop. The
   engine settles `postUnpairSettleMs` (2 s) before re-pairing, because a pair started straight

@@ -419,6 +419,7 @@ final class AppController: ObservableObject {
                     let ch = try await withTimeout(5) { try await self.hostSwitcher.channels(device.normalizedAddress) }
                     if let ch {
                         channelInfo[device.id] = ch
+                        handoff[DeviceIdentityReader.normalize(device.address)] = .channelSwitch
                         engine.noteSwitchesChannels(device.id)
                     }
                 } catch {
@@ -426,6 +427,45 @@ final class AppController: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - Device handoff types (spec §5a)
+
+    let identities = DeviceIdentityReader()
+
+    /// Classification per normalized address (`DeviceIdentityReader.normalize`), for Settings.
+    @Published private(set) var handoff: [String: HandoffAssessment] = [:]
+
+    func handoffAssessment(for address: String) -> HandoffAssessment? {
+        handoff[DeviceIdentityReader.normalize(address)]
+    }
+
+    /// Classify a device (spec §5a): the catalog rules from what macOS knows about it, then, for
+    /// a likely Easy-Switch device, a live read-only Change Host query (answers only while the
+    /// device is connected here). A device that answered once stays type 5.
+    @discardableResult
+    func classify(address: String, name: String) async -> HandoffAssessment {
+        let key = DeviceIdentityReader.normalize(address)
+        if handoff[key]?.type == .channelSwitch { return .channelSwitch }
+        let identity = await identities.identity(address: address, name: name)
+        var assessment = HandoffCatalog.classify(identity)
+        if assessment.type == .devicePicksHost, identity.vendorID == HandoffCatalog.logitech {
+            do {
+                if try await withTimeout(3, { try await self.hostSwitcher.channels(address) }) != nil {
+                    assessment = .channelSwitch
+                }
+            } catch {
+                Log.app.debug("\(name): channel query failed: \(error)")
+            }
+        }
+        if handoff[key] != assessment {
+            let ids = [identity.vendorID, identity.productID].map { $0.map { String(format: "%04X", $0) } ?? "?" }
+            Log.app.debug(
+                "\(name): handoff type \(assessment.type) (\(assessment.confidence)); vendor:product \(ids[0]):\(ids[1]), "
+                    + "kind \(identity.kind)")
+            handoff[key] = assessment
+        }
+        return assessment
     }
 
     func testPair(_ device: BTDevice) {
