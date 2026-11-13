@@ -175,13 +175,27 @@ internal static class Dialogs
         var paired = await Vm.Controller.PairedDevicesAsync();
 
         var combo = new ComboBox { Header = "Paired with this PC", PlaceholderText = paired.Count == 0 ? "None found" : "Choose a device", HorizontalAlignment = HorizontalAlignment.Stretch };
-        foreach (var p in paired) combo.Items.Add($"{p.Name}  ({p.Address})");
+        foreach (var p in paired) combo.Items.Add($"{p.Name}  ({p.Address}){(p.IsLowEnergy ? "  ·  Bluetooth LE" : "")}");
         var name = new TextBox { Header = "Name", PlaceholderText = "Magic Trackpad" };
-        var addr = new TextBox { Header = "Bluetooth address", PlaceholderText = "3C:50:02:BF:22:45" };
+        var addr = new TextBox { Header = "Bluetooth address", PlaceholderText = "A4:83:E7:5C:19:2D" };
+        // On Windows a Classic HID bond is exclusive and release means unpair, so default it on.
+        var managePairing = new CheckBox
+        {
+            Content = "Manage pairing (unpair when the KVM switches away, pair when it comes back)",
+            IsChecked = true,
+        };
+        var leHint = Paragraph("This is a Bluetooth LE device. Keyboards that keep their own pairing for each computer " +
+                               "(for example ZMK or QMK wireless keyboards with host slots) should have Manage pairing off: " +
+                               "unpairing them here means pairing them again from the keyboard.");
+        leHint.Visibility = Visibility.Collapsed;
         combo.SelectionChanged += (_, _) =>
         {
             var i = combo.SelectedIndex;
-            if (i >= 0 && i < paired.Count) { name.Text = paired[i].Name; addr.Text = paired[i].Address; }
+            if (i < 0 || i >= paired.Count) return;
+            name.Text = paired[i].Name;
+            addr.Text = paired[i].Address;
+            managePairing.IsChecked = !paired[i].IsLowEnergy;
+            leHint.Visibility = paired[i].IsLowEnergy ? Visibility.Visible : Visibility.Collapsed;
         };
         var error = new TextBlock { Foreground = Theme.Brush("SystemFillColorCriticalBrush"), Visibility = Visibility.Collapsed };
 
@@ -190,6 +204,8 @@ internal static class Dialogs
         body.Children.Add(combo);
         body.Children.Add(name);
         body.Children.Add(addr);
+        body.Children.Add(managePairing);
+        body.Children.Add(leHint);
         body.Children.Add(error);
 
         var dialog = Dialog(root, "Add a Bluetooth device", body, "Add");
@@ -209,8 +225,7 @@ internal static class Dialogs
         {
             Name = string.IsNullOrWhiteSpace(name.Text) ? addr.Text.Trim() : name.Text.Trim(),
             Address = addr.Text.Trim(),
-            // On Windows the bond is exclusive and release means unpair, so default it on.
-            ManagePairing = true,
+            ManagePairing = managePairing.IsChecked == true,
         });
     }
 

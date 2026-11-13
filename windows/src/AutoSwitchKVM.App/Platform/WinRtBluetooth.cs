@@ -27,13 +27,18 @@ namespace AutoSwitchKVM.App.Platform;
 ///   IsConnected     = ConnectionStatus == Connected (primary), corroborated by a BTHENUM HID node.
 ///   IsPoweredOn     = Bluetooth Radio.State == On.
 ///
+/// Bluetooth LE devices (e.g. a ZMK keyboard: HID over GATT) go through the same calls. ResolveAsync
+/// tries BluetoothLEDevice first, because for an LE address the Classic API returns a phantom
+/// "Bluetooth xx:xx..." record that never reports Connected. LE differences: HID readiness uses the
+/// BTHLEDEVICE / HID {00001812-...} nodes, and unpair uses WinRT (BluetoothRemoveDevice is Classic).
+///
 /// A CLI fallback (PolarGoose) remains a documented option if a future device can't be driven by
 /// WinRT custom pairing.
 public sealed class WinRtBluetooth : IBluetoothController
 {
     private readonly DispatcherQueue? _dispatcher;
     private readonly object _gate = new();
-    private readonly List<(BluetoothDevice dev, TypedEventHandler<BluetoothDevice, object> handler)> _subs = new();
+    private readonly List<(string Digits, Action Detach)> _subs = new();
     // Serializes pair/unpair so overlapping radio operations (engine retries + manual test buttons)
     // can't run concurrent inquiries against the one radio (the cause of AuthenticationTimeout churn).
     private readonly SemaphoreSlim _opLock = new(1, 1);
@@ -62,13 +67,62 @@ public sealed class WinRtBluetooth : IBluetoothController
         }
     }
 
+    // ---- Resolving an address (Classic or LE) ----
+
+    /// The parts of a Classic BluetoothDevice or a BluetoothLEDevice the controller needs.
+    private sealed class ResolvedDevice : IDisposable
+    {
+        public ResolvedDevice(BluetoothDevice classic) => Classic = classic;
+        public ResolvedDevice(BluetoothLEDevice le) => Le = le;
+        public BluetoothDevice? Classic { get; }
+        public BluetoothLEDevice? Le { get; }
+        public bool IsLe => Le is not null;
+        public string Name => Le?.Name ?? Classic!.Name;
+        public BluetoothConnectionStatus ConnectionStatus => Le?.ConnectionStatus ?? Classic!.ConnectionStatus;
+        public DeviceInformation DeviceInformation => Le?.DeviceInformation ?? Classic!.DeviceInformation;
+        public void Dispose()
+        {
+            Le?.Dispose();
+            Classic?.Dispose();
+        }
+    }
+
+    // Addresses seen as Bluetooth LE (a device's transport never changes), and when an address was
+    // last probed as LE without an answer (re-probed now and then, e.g. after it gets paired).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _knownLe = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> _leProbedAt = new();
+    private static readonly TimeSpan LeReprobeInterval = TimeSpan.FromSeconds(60);
+
+    /// Resolve an address to its Windows device record, LE first: for an LE address the Classic
+    /// API returns a phantom record ("Bluetooth e7:99:...", always Disconnected; seen 2026-11-13
+    /// with a ZMK keyboard), and for a Classic address the LE API returns null. null = not known
+    /// to Windows (never paired / removed).
+    private async Task<ResolvedDevice?> ResolveAsync(ulong addr, string digits, CancellationToken ct)
+    {
+        var knownLe = _knownLe.ContainsKey(digits);
+        if (knownLe || !_leProbedAt.TryGetValue(digits, out var at) || DateTime.UtcNow - at > LeReprobeInterval)
+        {
+            var le = await BluetoothLEDevice.FromBluetoothAddressAsync(addr).AsTask(ct);
+            if (le is not null)
+            {
+                if (_knownLe.TryAdd(digits, true))
+                    Log.Debug("bt", $"{FormatMac(addr)} is a Bluetooth LE device ('{le.Name}')");
+                return new ResolvedDevice(le);
+            }
+            if (knownLe) return null;   // an LE device Windows no longer knows; never trust the Classic phantom
+            _leProbedAt[digits] = DateTime.UtcNow;
+        }
+        var classic = await BluetoothDevice.FromBluetoothAddressAsync(addr).AsTask(ct);
+        return classic is null ? null : new ResolvedDevice(classic);
+    }
+
     // ---- Connection state ----
 
     public async Task<bool> IsConnectedAsync(string address, CancellationToken ct = default)
     {
         try
         {
-            using var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
+            using var dev = await ResolveAsync(ParseAddress(address), Digits(address), ct);
             // WinRT answered: trust it. An unknown device (null) is certainly not connected to
             // us. Falling through to the HID node on a mere "not connected" answer would let a
             // stale PnP entry masquerade as a working connection.
@@ -101,11 +155,14 @@ public sealed class WinRtBluetooth : IBluetoothController
     // flow: wait for HID on the pairing link first, reconnect only without it).
     public Task ConnectAsync(string address, CancellationToken ct = default) => PairAsync(address, ct);
 
-    private const string HidServiceGuid = "{00001124-0000-1000-8000-00805F9B34FB}";
+    private const string HidServiceGuid = "{00001124-0000-1000-8000-00805F9B34FB}";     // Classic HID
+    private const string HogpServiceGuid = "{00001812-0000-1000-8000-00805F9B34FB}";    // HID over GATT (LE)
 
-    // Per device: is it a HID peripheral (class of device never changes), and the last HID state
-    // logged (so the log shows each change without repeating every 250 ms poll).
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _isHidPeripheral = new();
+    private enum HidKind { None, Classic, Le }
+
+    // Per device: which HID chain to check (its class/appearance never changes), and the last HID
+    // state logged (so the log shows each change without repeating every 250 ms poll).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, HidKind> _hidKind = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _lastHidState = new();
 
     /// A bond + "Connected" link alone is not a working trackpad: on 2026-11-12 a host paired it
@@ -115,16 +172,26 @@ public sealed class WinRtBluetooth : IBluetoothController
     public async Task<bool?> IsHidReadyAsync(string address, CancellationToken ct = default)
     {
         var digits = Digits(address);
-        if (!_isHidPeripheral.TryGetValue(digits, out var hidPeripheral))
+        if (!_hidKind.TryGetValue(digits, out var kind))
         {
             try
             {
-                using var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
+                using var dev = await ResolveAsync(ParseAddress(address), digits, ct);
                 if (dev is null) return null;
-                hidPeripheral = dev.ClassOfDevice.MajorClass == BluetoothMajorClass.Peripheral;
-                _isHidPeripheral[digits] = hidPeripheral;
-                if (!hidPeripheral)
-                    Log.Debug("bt", $"hid {address}: not a HID peripheral ({dev.ClassOfDevice.MajorClass}); HID readiness not checked");
+                if (dev.Le is { } le)
+                {
+                    kind = le.Appearance.Category == BluetoothLEAppearanceCategories.HumanInterfaceDevice ? HidKind.Le : HidKind.None;
+                    if (kind == HidKind.None)
+                        Log.Debug("bt", $"hid {address}: LE device is not a HID device (appearance {le.Appearance.Category}); HID readiness not checked");
+                }
+                else
+                {
+                    var major = dev.Classic!.ClassOfDevice.MajorClass;
+                    kind = major == BluetoothMajorClass.Peripheral ? HidKind.Classic : HidKind.None;
+                    if (kind == HidKind.None)
+                        Log.Debug("bt", $"hid {address}: not a HID peripheral ({major}); HID readiness not checked");
+                }
+                _hidKind[digits] = kind;
             }
             catch (OperationCanceledException) { throw; }
             catch (BluetoothException) { throw; }
@@ -134,9 +201,9 @@ public sealed class WinRtBluetooth : IBluetoothController
                 return null;
             }
         }
-        if (!hidPeripheral) return null;
+        if (kind == HidKind.None) return null;
 
-        var state = await Task.Run(() => QueryHidState(digits), ct);
+        var state = await Task.Run(() => kind == HidKind.Le ? QueryLeHidState(digits) : QueryHidState(digits), ct);
         var text = state.ToString();
         if (!_lastHidState.TryGetValue(digits, out var previous) || previous != text)
         {
@@ -205,6 +272,49 @@ public sealed class WinRtBluetooth : IBluetoothController
         catch (Exception ex)
         {
             Log.Warn("bt", $"HID state query failed ({ex.Message})");
+            return new HidState(servicePresent, serviceError, 0, 0);
+        }
+    }
+
+    /// The HID chain for an LE (HID over GATT) device, from PnP. Both nodes carry the address:
+    ///   BTHLEDEVICE\{00001812-...}_DEV_VID&...&PID&..._<MAC>\...   ("Bluetooth Low Energy GATT compliant HID device")
+    ///   HID\{00001812-...}_DEV_VID&..._<MAC>&COLnn\...           (HID collections: keyboard, consumer control)
+    private static HidState QueryLeHidState(string digits)
+    {
+        uint serviceError = 0;
+        var servicePresent = false;
+        int ok = 0, total = 0;
+        try
+        {
+            using (var searcher = new ManagementObjectSearcher(
+                "SELECT DeviceID, ConfigManagerErrorCode FROM Win32_PnPEntity WHERE DeviceID LIKE 'BTHLEDEVICE%' OR DeviceID LIKE 'HID%'"))
+            {
+                foreach (ManagementBaseObject mo in searcher.Get())
+                {
+                    using (mo)
+                    {
+                        if (mo["DeviceID"] is not string id) continue;
+                        var upper = id.ToUpperInvariant();
+                        if (!upper.Contains(HogpServiceGuid) || !upper.Contains(digits)) continue;
+                        var error = mo["ConfigManagerErrorCode"] is uint e ? e : 0;
+                        if (upper.StartsWith("BTHLEDEVICE"))
+                        {
+                            servicePresent = true;
+                            serviceError = error;
+                        }
+                        else
+                        {
+                            total++;
+                            if (error == 0) ok++;
+                        }
+                    }
+                }
+            }
+            return new HidState(servicePresent, serviceError, ok, total);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("bt", $"LE HID state query failed ({ex.Message})");
             return new HidState(servicePresent, serviceError, 0, 0);
         }
     }
@@ -289,7 +399,7 @@ public sealed class WinRtBluetooth : IBluetoothController
         // FromBluetoothAddressAsync resolves the pairable AssociationEndpoint INSTANTLY (~10ms) -
         // the exact same endpoint a 30s inquiry would "discover" (verified: identical Id, CanPair=
         // True). So we pair it directly; no DeviceWatcher / FindAllAsync inquiry needed.
-        var dev = await BluetoothDevice.FromBluetoothAddressAsync(addr).AsTask(ct);
+        var dev = await ResolveAsync(addr, Digits(address), ct);
         if (dev is null)
         {
             throw new BluetoothException(BluetoothFailureKind.DeviceNotFound,
@@ -302,7 +412,7 @@ public sealed class WinRtBluetooth : IBluetoothController
         try
         {
             var pairing = dev.DeviceInformation.Pairing;
-            Log.Debug("bt", $"pair {address}: resolved '{dev.Name}' conn={dev.ConnectionStatus} " +
+            Log.Debug("bt", $"pair {address}: resolved {(dev.IsLe ? "LE " : "")}'{dev.Name}' conn={dev.ConnectionStatus} " +
                 $"IsPaired={pairing.IsPaired} CanPair={pairing.CanPair} ({sw.ElapsedMilliseconds} ms)");
 
             if (pairing.IsPaired)
@@ -392,7 +502,7 @@ public sealed class WinRtBluetooth : IBluetoothController
     /// A pair that timed out but is still running inside Windows: log how it ends, and if it ends
     /// Paired after a release was requested, remove the bond again so the other host can have it.
     private async Task WatchOrphanAsync(
-        Task<DevicePairingResult> task, string address, BluetoothDevice dev,
+        Task<DevicePairingResult> task, string address, ResolvedDevice dev,
         DeviceInformationCustomPairing custom,
         TypedEventHandler<DeviceInformationCustomPairing, DevicePairingRequestedEventArgs> handler,
         Stopwatch sw)
@@ -470,20 +580,23 @@ public sealed class WinRtBluetooth : IBluetoothController
     private async Task UnpairCoreAsync(string address, CancellationToken ct)
     {
         var addr = ParseAddress(address);
+        var digits = Digits(address);
         var sw = Stopwatch.StartNew();
+        var isLe = false;
 
         // Nothing to release? (The engine's reconcile-on-seed and stale-bond paths unpair
         // idempotently.) Skip the ~3.4 s removal and the probe when Windows has neither a bond nor a
         // link. A stale "paired" record only makes us do the removal anyway, so this is safe.
         try
         {
-            using var known = await BluetoothDevice.FromBluetoothAddressAsync(addr).AsTask(ct);
+            using var known = await ResolveAsync(addr, digits, ct);
             if (known is null ||
                 (!known.DeviceInformation.Pairing.IsPaired && known.ConnectionStatus != BluetoothConnectionStatus.Connected))
             {
                 Log.Debug("bt", $"unpair {address}: not paired and not connected; nothing to release ({sw.ElapsedMilliseconds} ms)");
                 return;
             }
+            isLe = known.IsLe;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -500,30 +613,38 @@ public sealed class WinRtBluetooth : IBluetoothController
         // the calling thread — the engine calls from the UI thread, which would freeze the tray
         // and keep the engine's per-call timeout from firing.
         // Diagnostic only (polls WinRT + WMI every ~150 ms for 10 s): run it at Debug level only.
-        if (Log.IsEnabled(LogLevel.Debug)) StartReleaseProbe(address, addr);
+        // BluetoothRemoveDevice is the Classic API; an LE device is unpaired through WinRT below.
         uint? rc = null;
-        try
+        if (isLe)
         {
-            rc = await Task.Run(() => RemoveDevice(addr), ct);
+            Log.Debug("bt", $"unpair {address}: Bluetooth LE device; using WinRT unpair");
         }
-        catch (Exception ex)
+        else
         {
-            Log.Warn("bt", $"unpair {address}: BluetoothRemoveDevice threw: {ex.Message}; trying WinRT unpair");
+            if (Log.IsEnabled(LogLevel.Debug)) StartReleaseProbe(address, addr);
+            try
+            {
+                rc = await Task.Run(() => RemoveDevice(addr), ct);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("bt", $"unpair {address}: BluetoothRemoveDevice threw: {ex.Message}; trying WinRT unpair");
+            }
+
+            if (rc == 0)
+            {
+                Log.Debug("bt", $"unpair {address}: BluetoothRemoveDevice OK - link dropped and bond removed ({sw.ElapsedMilliseconds} ms)");
+                RearmMonitoring(address);
+                return;
+            }
+            if (rc == ErrorNotFound)
+                Log.Debug("bt", $"unpair {address}: not in Windows' paired list (ERROR_NOT_FOUND); confirming via WinRT");
+            else if (rc is not null)
+                Log.Warn("bt", $"unpair {address}: BluetoothRemoveDevice failed: {Win32Name(rc.Value)}; trying WinRT unpair");
         }
 
-        if (rc == 0)
-        {
-            Log.Debug("bt", $"unpair {address}: BluetoothRemoveDevice OK - link dropped and bond removed ({sw.ElapsedMilliseconds} ms)");
-            RearmMonitoring(address);
-            return;
-        }
-        if (rc == ErrorNotFound)
-            Log.Debug("bt", $"unpair {address}: not in Windows' paired list (ERROR_NOT_FOUND); confirming via WinRT");
-        else if (rc is not null)
-            Log.Warn("bt", $"unpair {address}: BluetoothRemoveDevice failed: {Win32Name(rc.Value)}; trying WinRT unpair");
-
-        // Fallback: if the forceful remove didn't take, fall back to WinRT unpair.
-        using (var dev = await BluetoothDevice.FromBluetoothAddressAsync(addr).AsTask(ct))
+        // LE, or the forceful remove didn't take: WinRT unpair.
+        using (var dev = await ResolveAsync(addr, digits, ct))
         {
             if (dev?.DeviceInformation.Pairing.IsPaired == true)
             {
@@ -536,7 +657,8 @@ public sealed class WinRtBluetooth : IBluetoothController
                         ? BluetoothFailureKind.OperationInProgress
                         : BluetoothFailureKind.Unknown;
                     throw new BluetoothException(kind,
-                        $"unpair failed: {result.Status} (BluetoothRemoveDevice: {(rc is null ? "threw" : Win32Name(rc.Value))})",
+                        $"unpair failed: {result.Status}" +
+                        (isLe ? "" : $" (BluetoothRemoveDevice: {(rc is null ? "threw" : Win32Name(rc.Value))})"),
                         result.Status.ToString());
                 }
             }
@@ -682,8 +804,7 @@ public sealed class WinRtBluetooth : IBluetoothController
         var list = new List<PairedDeviceInfo>();
         try
         {
-            var selector = BluetoothDevice.GetDeviceSelectorFromPairingState(true);
-            var found = await DeviceInformation.FindAllAsync(selector).AsTask(ct);
+            var found = await DeviceInformation.FindAllAsync(BluetoothDevice.GetDeviceSelectorFromPairingState(true)).AsTask(ct);
             foreach (var di in found)
             {
                 try
@@ -701,9 +822,35 @@ public sealed class WinRtBluetooth : IBluetoothController
         }
         catch (Exception ex)
         {
-            Log.Warn("bt", $"paired list: enumeration failed ({ex.Message})");
+            Log.Warn("bt", $"paired list: Classic enumeration failed ({ex.Message})");
         }
-        return list;
+
+        // Bluetooth LE devices (e.g. BLE keyboards) are a separate list in Windows.
+        try
+        {
+            var found = await DeviceInformation.FindAllAsync(BluetoothLEDevice.GetDeviceSelectorFromPairingState(true)).AsTask(ct);
+            foreach (var di in found)
+            {
+                try
+                {
+                    using var dev = await BluetoothLEDevice.FromIdAsync(di.Id).AsTask(ct);
+                    if (dev is null) continue;
+                    var mac = FormatMac(dev.BluetoothAddress);
+                    if (list.Any(p => p.Address == mac)) continue;   // dual-mode device already listed
+                    var name = string.IsNullOrEmpty(dev.Name) ? di.Name : dev.Name;
+                    list.Add(new PairedDeviceInfo(name, mac, IsLowEnergy: true));
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("bt", $"paired list: skipping LE '{di.Name}' ({ex.Message})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("bt", $"paired list: LE enumeration failed ({ex.Message})");
+        }
+        return list.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     }
 
     // ---- Diagnostics (Settings "Diagnose" button): dump everything WinRT sees for this MAC ----
@@ -760,12 +907,23 @@ public sealed class WinRtBluetooth : IBluetoothController
         }
         catch (Exception ex) { Log.Error("diag", "FromBluetoothAddressAsync failed", ex); }
 
+        try
+        {
+            using var le = await BluetoothLEDevice.FromBluetoothAddressAsync(ParseAddress(address));
+            Log.Always("diag", le is null
+                ? "BluetoothLEDevice.FromBluetoothAddressAsync: NULL (not a known LE device)"
+                : $"BluetoothLEDevice: name='{le.Name}' conn={le.ConnectionStatus} addressType={le.BluetoothAddressType} " +
+                  $"IsPaired={le.DeviceInformation.Pairing.IsPaired} appearance={le.Appearance.Category}/{le.Appearance.SubCategory} id={le.DeviceId}");
+        }
+        catch (Exception ex) { Log.Error("diag", "BluetoothLEDevice.FromBluetoothAddressAsync failed", ex); }
+        await DumpSelectorAsync("le-paired", BluetoothLEDevice.GetDeviceSelectorFromPairingState(true), digits);
+
         await DumpSelectorAsync("paired", BluetoothDevice.GetDeviceSelectorFromPairingState(true), digits);
         await DumpSelectorAsync("unpaired", BluetoothDevice.GetDeviceSelectorFromPairingState(false), digits);
         try { await DumpSelectorAsync("bt-classic-any", BluetoothDevice.GetDeviceSelector(), digits); }
         catch (Exception ex) { Log.Warn("diag", $"bt-classic-any selector failed: {ex.Message}"); }
 
-        Log.Always("diag", $"BTHENUM HID node present for MAC: {HidNodePresent(digits)}");
+        Log.Always("diag", $"Bluetooth PnP node present for MAC: {HidNodePresent(digits)}; LE HID chain: {QueryLeHidState(digits)}");
         Log.Always("diag", "===== end Diagnose =====");
     }
 
@@ -821,33 +979,47 @@ public sealed class WinRtBluetooth : IBluetoothController
         try
         {
             var digits = Digits(address);
-            var dev = await BluetoothDevice.FromBluetoothAddressAsync(ParseAddress(address)).AsTask(ct);
+            var dev = await ResolveAsync(ParseAddress(address), digits, ct);
             if (dev is null)
             {
                 Log.Debug("bt", $"monitor {address}: not known to Windows yet (unpaired); events resume after the next pair");
                 return;
             }
 
-            TypedEventHandler<BluetoothDevice, object> handler = (sender, _) =>
+            // Read the status in the event handler, not inside the dispatched lambda: StopMonitoring
+            // disposes the device, and a queued lambda touching a disposed sender throws
+            // ObjectDisposedException on the UI thread.
+            void Report(Func<BluetoothConnectionStatus> status)
             {
-                // Read the status HERE, not inside the dispatched lambda: StopMonitoring
-                // disposes the BluetoothDevice, and a queued lambda touching a disposed
-                // sender throws ObjectDisposedException on the UI thread.
                 bool isConnected;
-                try { isConnected = sender.ConnectionStatus == BluetoothConnectionStatus.Connected; }
+                try { isConnected = status() == BluetoothConnectionStatus.Connected; }
                 catch { return; }  // device already disposed/removed mid-event
                 Post(() => onChange(new ConnectionChange(digits, isConnected)));
-            };
+            }
 
-            dev.ConnectionStatusChanged += handler;
+            Action detach;
+            if (dev.Le is { } le)
+            {
+                TypedEventHandler<BluetoothLEDevice, object> handler = (sender, _) => Report(() => sender.ConnectionStatus);
+                le.ConnectionStatusChanged += handler;
+                detach = () => { le.ConnectionStatusChanged -= handler; le.Dispose(); };
+            }
+            else
+            {
+                var classic = dev.Classic!;
+                TypedEventHandler<BluetoothDevice, object> handler = (sender, _) => Report(() => sender.ConnectionStatus);
+                classic.ConnectionStatusChanged += handler;
+                detach = () => { classic.ConnectionStatusChanged -= handler; classic.Dispose(); };
+            }
+
             lock (_gate)
             {
                 if (ct.IsCancellationRequested)
                 {
-                    try { dev.ConnectionStatusChanged -= handler; dev.Dispose(); } catch { /* ignore */ }
+                    try { detach(); } catch { /* ignore */ }
                     return;
                 }
-                _subs.Add((dev, handler));
+                _subs.Add((digits, detach));
             }
         }
         catch (OperationCanceledException) { /* superseded */ }
@@ -875,12 +1047,8 @@ public sealed class WinRtBluetooth : IBluetoothController
 
             for (var i = _subs.Count - 1; i >= 0; i--)
             {
-                var (dev, handler) = _subs[i];
-                string subDigits;
-                try { subDigits = dev.BluetoothAddress.ToString("X12"); }
-                catch { subDigits = ""; }
-                if (subDigits != digits) continue;
-                try { dev.ConnectionStatusChanged -= handler; dev.Dispose(); } catch { /* ignore */ }
+                if (_subs[i].Digits != digits) continue;
+                try { _subs[i].Detach(); } catch { /* ignore */ }
                 _subs.RemoveAt(i);
             }
         }
@@ -903,9 +1071,9 @@ public sealed class WinRtBluetooth : IBluetoothController
     {
         lock (_gate)
         {
-            foreach (var (dev, handler) in _subs)
+            foreach (var sub in _subs)
             {
-                try { dev.ConnectionStatusChanged -= handler; dev.Dispose(); } catch { /* ignore */ }
+                try { sub.Detach(); } catch { /* ignore */ }
             }
             _subs.Clear();
         }
@@ -950,7 +1118,7 @@ public sealed class WinRtBluetooth : IBluetoothController
         try
         {
             using var searcher = new ManagementObjectSearcher(
-                "SELECT DeviceID FROM Win32_PnPEntity WHERE DeviceID LIKE 'BTHENUM%'");
+                "SELECT DeviceID FROM Win32_PnPEntity WHERE DeviceID LIKE 'BTHENUM%' OR DeviceID LIKE 'BTHLE%'");
             foreach (ManagementBaseObject mo in searcher.Get())
             {
                 using (mo)

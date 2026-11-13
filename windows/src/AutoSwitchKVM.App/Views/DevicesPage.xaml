@@ -83,7 +83,7 @@
                                                 ToolTipService.ToolTip="Move down">
                                             <FontIcon Glyph="&#xE70D;" FontSize="14" />
                                         </Button>
-                                        <Button Click="OnRemoveDevice">
+                                        <Button Click="OnRemoveDevice" Tag="{x:Bind}">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <FontIcon Glyph="&#xE74D;" FontSize="14" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                                                 <TextBlock Text="Remove" />

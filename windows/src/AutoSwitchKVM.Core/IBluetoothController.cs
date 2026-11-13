@@ -1,7 +1,8 @@
 namespace AutoSwitchKVM.Core;
 
 /// Lightweight view of a paired device (name + address).
-public readonly record struct PairedDeviceInfo(string Name, string Address);
+/// IsLowEnergy: a Bluetooth LE device (e.g. a BLE keyboard) rather than Classic (the Magic Trackpad).
+public readonly record struct PairedDeviceInfo(string Name, string Address, bool IsLowEnergy = false);
 
 /// Raised when a monitored device's connection state changes.
 /// <param name="Address">Normalized (colon-less, upper) address digits.</param>

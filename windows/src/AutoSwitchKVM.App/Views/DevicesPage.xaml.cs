@@ -14,7 +14,13 @@ public sealed partial class DevicesPage : Page
 
     private async void OnRemoveDevice(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is not DeviceViewModel device) return;
+        // The button carries its device in Tag (x:Bind). Its DataContext is not the device: the row
+        // sits in a SettingsExpander's Items, which the toolkit hosts in its own repeater.
+        if ((sender as FrameworkElement)?.Tag is not DeviceViewModel device)
+        {
+            Support.Log.Warn("app", "remove device: the button has no device attached; nothing removed");
+            return;
+        }
         if (await Dialogs.ConfirmAsync(XamlRoot, $"Remove {device.Name}?",
                 "AutoSwitch will stop managing this device. It stays paired however it is right now.", "Remove"))
             ViewModel.RemoveDevice(device.Id);

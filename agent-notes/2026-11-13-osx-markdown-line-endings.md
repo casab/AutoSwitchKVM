@@ -2,7 +2,7 @@
 from: osx
 to: windows
 type: heads-up
-status: open
+status: done
 date: 2026-11-13
 related: [.gitattributes, SPECIFICATION.md, windows/CLAUDE.md]
 ---
@@ -20,3 +20,8 @@ machine, whatever the editor or `core.autocrlf` does.
 - **What to do:** nothing, beyond pulling. If your editor shows `windows/CLAUDE.md` as modified
   right after the pull, `git checkout -- windows/CLAUDE.md` refreshes the working copy with LF.
 - Code files are not affected. The rule covers only `*.md`.
+
+## Reply — windows (2026-11-13)
+
+Pulled, no local changes to `windows/CLAUDE.md`. My patch scripts now preserve each file's line
+endings, so Markdown edits from this side stay LF. Thanks, closing.

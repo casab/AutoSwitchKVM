@@ -179,8 +179,9 @@ testability):
   - `Platform/WinRtBluetooth.cs` — **implemented (Milestone 4)**: radio power, ConnectionStatus+HID
     `isConnected`, idempotent `pair` (resolve endpoint by address + Custom.PairAsync ConfirmOnly
     auto-accept), `unpair`=`BluetoothRemoveDevice` first + WinRT fallback, `connect`=ensure-paired,
-    `disconnect`=no-op (Classic HID: release is unpair), paired-list, ConnectionStatusChanged
-    monitoring. Maps `DevicePairingResultStatus` → `BluetoothFailureKind` (`KindFor`). Tracks a
+    `disconnect`=no-op (Classic HID: release is unpair), paired-list (Classic + LE),
+    ConnectionStatusChanged monitoring. Classic and Bluetooth LE devices both resolve through
+    `ResolveAsync` (LE first; see Gotchas). Maps `DevicePairingResultStatus` → `BluetoothFailureKind` (`KindFor`). Tracks a
     timed-out pairing that is still running ("orphan"; see Gotchas), and records per-device
     pair/release intent so a queued pair steps aside for a newer release. **Key mapping:** the
     engine's mid-connect `disconnect` is a deliberate no-op and `pair` is idempotent, so the shared
@@ -327,6 +328,20 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   while selected produced a late "disconnected" event that looked like an unexpected drop, and
   auto-reconnect re-paired the device. Only the suspend release calls `_bt` directly (it must
   run off the UI thread), after `Engine.NotifySuspending()` halts automation.
+- **Bluetooth LE devices go through the same controller** (2026-11-13, a ZMK keyboard). For an LE
+  address, `BluetoothDevice.FromBluetoothAddressAsync` does **not** return null: it returns a phantom
+  Classic record ("Bluetooth e7:99:...", never Connected). `WinRtBluetooth.ResolveAsync` therefore
+  tries `BluetoothLEDevice` first (null for Classic devices like the trackpad) and remembers LE
+  addresses. LE specifics: HID readiness = `BTHLEDEVICE\{00001812-…}…<MAC>` + `HID\{00001812-…}…<MAC>&COLnn`
+  (both carry the MAC); unpair = WinRT `UnpairAsync` (`BluetoothRemoveDevice` is Classic-only); the
+  paired list merges `BluetoothLEDevice.GetDeviceSelectorFromPairingState(true)`. **Manage pairing
+  defaults off for LE devices** in Add device: multi-host keyboards (ZMK/QMK host slots) keep one
+  bond per host, and unpairing them on Windows forces a re-pair from the keyboard. Windows can't
+  drop an LE HID link while keeping the bond, so with Manage pairing off a release leaves the
+  keyboard connected; switching hosts is the keyboard's own profile key (or USB through the KVM).
+- **Buttons inside a `SettingsExpander`'s `Items` don't inherit the row's `DataContext`** (the
+  toolkit hosts them in its own repeater). Pass the item explicitly (`Tag="{x:Bind}"`) instead of
+  reading `DataContext` in a click handler: Devices ▸ Remove silently did nothing because of this.
 - **Log through `ILogSink`** in Core (the app wires `AppLogSink`). No silent `catch { }` on
   Bluetooth paths: best-effort steps log a warning; fire-and-forget calls go through
   `RunLoggedAsync`/`Fire` so a fault is logged instead of becoming an unobserved task exception.
