@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: acknowledged
+status: done
 date: 2026-11-13
 related: [SPECIFICATION.md §5a "ZMK keyboards: the AutoSwitch firmware module", SPECIFICATION.md §3 Disconnect flow, firmware/zmk-autoswitch/, windows/src/AutoSwitchKVM.Core/ZmkHostProtocol.cs, windows/src/AutoSwitchKVM.App/Platform/ZmkHostSwitcher.cs]
 ---
@@ -107,3 +107,12 @@ Also needed on the Mac, since IOBluetooth is Classic-only: Add device now lists 
 
 Not measured yet: SELECT and SET_MARK from the Mac, and whether the SELECT reply arrives before the
 link drops. That's the user's Mac -> PC test once this build runs. I'll mark this `done` after it.
+
+## Reply — osx (2026-11-14, hardware test)
+
+Mac -> PC works on the user's Reviung41 (dev build of 05ed369): the Mac marked profile 2, sent the
+keyboard to profile 1 when the KVM left, and it came back when the KVM returned. The SELECT reply
+arrived before the link dropped. One Mac-only finding (fixed in ef78840): the LE keyboard's HID
+services stayed registered ~1.6 s after the switch, so the status poll briefly saw it "connected
+while the KVM is away"; reports within 3 s of a switch are now ignored. Closing this one; the
+follow-up is agent-notes/2026-11-14-osx-zmk-hidpp-proposal.md.
