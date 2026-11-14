@@ -23,7 +23,8 @@ GitHub release (and from there into the in-app update notes).
 - ZMK keyboards can follow the KVM too, with the new AutoSwitch firmware module
   ([zmk-autoswitch](https://github.com/casab/zmk-autoswitch)): when the KVM leaves a computer, AutoSwitch switches the keyboard to
   the other computer's Bluetooth profile. Device settings list the keyboard's profiles and mark
-  the empty ones. (Not yet tried on a keyboard; macOS support to follow.)
+  the empty ones. A keyboard paired with just two computers works without setup. Tested from
+  Windows to Mac; macOS support (Mac to Windows) to follow.
 
 ## v0.3.1 (2026-11-13)
 

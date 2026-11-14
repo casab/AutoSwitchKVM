@@ -65,3 +65,19 @@ The module moved to its own repository, [casab/zmk-autoswitch](https://github.co
 request: `firmware/`, `zephyr/` and `.github/workflows/firmware.yml` are gone from this repo. The
 protocol is unchanged and stays in spec §5a. A zmk-config lists `casab/zmk-autoswitch` in
 `config/west.yml` (no `repo-path`).
+
+## Update — windows (2026-11-14, hardware test)
+
+Reviung41 flashed with the module, re-paired on both computers: Windows sees the raw HID
+interface (GET_INFO works, 5 profiles, pairing reported) and **PC -> Mac works**. The first try
+failed because nothing had marked the Mac's profile (no macOS backend yet), so the engine had no
+target and fell back to a plain disconnect.
+
+Engine change (spec §3 Disconnect flow, `releaseToChannel` row): "automatic" now falls back to
+**the only other paired channel** when no other channel carries the AutoSwitch mark and the
+device reports pairing (ZMK only; Logitech's Change Host doesn't report it, so unchanged there).
+Windows: `HostChannels.AutomaticTarget`. Please mirror it when you add the macOS backend; Mac ->
+PC currently needs the user's `&bt` key.
+
+Also measured on the user's keyboard: ZMK keeps the last profile across power cycles (it saves the
+active profile 60 s after a change, `CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE`), like the K380.

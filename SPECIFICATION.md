@@ -49,7 +49,7 @@ A managed Bluetooth device.
 | `enabled` | bool | `true` | Participates in automatic handoff |
 | `managePairing` | bool | `false` | Pair on connect / unpair on disconnect |
 | `connectDelayMs` | int | `0` | Per-device stagger before connecting |
-| `releaseToChannel` | int? | `null` | §5a type 5 only: the device channel (1-based, as printed on it) to send it to when the KVM leaves this host; `null` = automatic (the channel the other host's AutoSwitch marked). Added 2026-11-13 (Windows). |
+| `releaseToChannel` | int? | `null` | §5a type 5 only: the device channel (1-based, as printed on it) to send it to when the KVM leaves this host; `null` = automatic (the channel the other host's AutoSwitch marked; for a device that reports pairing, with no mark, its only other paired channel). Added 2026-11-13 (Windows). |
 
 Connect **order** = position in the profile's device list (user-reorderable).
 
@@ -199,7 +199,8 @@ controller** (the operations in §5). It owns no platform APIs directly.
 - **Channel switch first** (§5a type 5; Windows and macOS implemented 2026-11-13): if
   `managePairing` is off and the device is connected here and supports host-initiated channel
   switching, send it to the target channel (`releaseToChannel`, else the single other channel
-  marked by AutoSwitch) and stop: no disconnect, no unpair. If the target is unknown or the switch
+  marked by AutoSwitch; with no other channel marked at all and the device reporting pairing,
+  the single other paired channel, Windows 2026-11-14) and stop: no disconnect, no unpair. If the target is unknown or the switch
   fails, warn and fall through to the usual release. **Never send a device to a channel it
   reports as unpaired** (the ZMK module reports pairing per profile; Logitech's Change Host
   doesn't): it would only advertise there for a new pairing. Warn instead (Windows 2026-11-13).

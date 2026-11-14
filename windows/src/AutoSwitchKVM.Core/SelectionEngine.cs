@@ -156,7 +156,7 @@ public sealed class SelectionEngine
             return true;   // handled: the device stays here, where the KVM is again
         }
 
-        int? target = device.ReleaseToChannel is int n && n >= 1 && n <= ch.Count ? n - 1 : ch.MarkedOtherChannel;
+        int? target = device.ReleaseToChannel is int n && n >= 1 && n <= ch.Count ? n - 1 : ch.AutomaticTarget;
         if (target is null)
         {
             Warn($"{device.Name}: it can switch channels, but the other computer's channel isn't known " +

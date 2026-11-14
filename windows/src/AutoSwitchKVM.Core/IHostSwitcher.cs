@@ -41,4 +41,31 @@ public sealed record HostChannels(int Count, int Current, IReadOnlyList<byte> Ma
             return marked.Count == 1 ? marked[0] : null;
         }
     }
+
+    /// The single other paired channel, when the device reports pairing (ZMK) and exactly one
+    /// channel besides this host's is paired; else null.
+    public int? OnlyOtherPairedChannel
+    {
+        get
+        {
+            if (Paired is not { } paired) return null;
+            var others = Enumerable.Range(0, Math.Min(Count, paired.Count))
+                .Where(i => i != Current && paired[i]).ToList();
+            return others.Count == 1 ? others[0] : null;
+        }
+    }
+
+    /// Where "automatic" sends the device: the single other channel marked by AutoSwitch; with no
+    /// mark at all, the only other paired channel (a ZMK keyboard paired with just these two
+    /// computers works before the other computer's AutoSwitch has marked its profile).
+    public int? AutomaticTarget
+    {
+        get
+        {
+            if (MarkedOtherChannel is int m) return m;
+            var anyOtherMarked = Enumerable.Range(0, Math.Min(Count, Marks.Count))
+                .Any(i => i != Current && Marks[i] == AutoSwitchMark);
+            return anyOtherMarked ? null : OnlyOtherPairedChannel;
+        }
+    }
 }

@@ -38,6 +38,28 @@ public class ZmkHostProtocolTests
         Assert.Equal(0, ch.Current);
         Assert.Equal(new[] { true, true, false, false, false }, ch.Paired);
         Assert.Equal(1, ch.MarkedOtherChannel);
+        Assert.Equal(1, ch.AutomaticTarget);
+    }
+
+    [Fact]
+    public void Automatic_target_falls_back_to_the_only_other_paired_profile()
+    {
+        // Paired with two computers, the other one hasn't marked its profile (its AutoSwitch
+        // doesn't speak the module yet): profile 1 is the only other paired one.
+        var ch = ZmkHostProtocol.ParseInfo(InfoReply(0, 5, 0, 0b00011, 0xA5, 0, 0, 0, 0))!;
+        Assert.Null(ch.MarkedOtherChannel);
+        Assert.Equal(1, ch.AutomaticTarget);
+
+        // Three paired profiles, none marked: ambiguous.
+        ch = ZmkHostProtocol.ParseInfo(InfoReply(0, 5, 0, 0b00111, 0xA5, 0, 0, 0, 0))!;
+        Assert.Null(ch.AutomaticTarget);
+
+        // Three paired, one marked: the mark decides.
+        ch = ZmkHostProtocol.ParseInfo(InfoReply(0, 5, 0, 0b00111, 0xA5, 0, 0xA5, 0, 0))!;
+        Assert.Equal(2, ch.AutomaticTarget);
+
+        // Logitech (pairing not reported), nothing marked: unknown, as before.
+        Assert.Null(new HostChannels(3, 0, new byte[] { 0xA5, 0, 0 }).AutomaticTarget);
     }
 
     [Theory]
