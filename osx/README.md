@@ -66,9 +66,9 @@ switched by a computer. Each device's card in Settings ▸ Devices names its typ
 | Type | How the device behaves | Examples | On the Mac |
 |---|---|---|---|
 | **Hands off by pairing** | One pairing; once a computer removes it, the next can pair. | Magic Trackpad, Keyboard, Mouse | **Yes**, with Manage pairing on. |
-| **Switches channel on request** | Easy-Switch channels that the connected computer can change. | Logitech K380 and other Easy-Switch devices | **Yes**, with Manage pairing off (needs Input Monitoring). |
+| **Switches channel on request** | Easy-Switch channels or Bluetooth profiles that the connected computer can change. | Logitech K380 and other Easy-Switch devices; ZMK keyboards with the [AutoSwitch firmware module](https://github.com/casab/zmk-autoswitch) | **Yes**, with Manage pairing off (Logitech needs Input Monitoring). |
 | **Joins whichever computer connects** | Remembers several computers and goes to the one that asks. | Many headphones and speakers | **Yes, being tested**, with Manage pairing off: disconnect on leaving, connect on arriving. |
-| **Picks the computer itself** | A pairing per computer; a key on the device picks one. | ZMK/QMK keyboards | **No.** Use the device's own key, or USB through the KVM. AutoSwitch shows its status. |
+| **Picks the computer itself** | A pairing per computer; a key on the device picks one. | QMK keyboards, ZMK keyboards without the module | **No.** Use the device's own key, or USB through the KVM. AutoSwitch shows its status. |
 | **Re-pairs by hand** | Remembers one computer; moving it needs pairing mode. | Xbox, PlayStation, Nintendo controllers | **No.** Keep it on one computer, use a cable through the KVM, or pair it to a Bluetooth-to-USB adapter (e.g. 8BitDo USB Wireless Adapter 2) plugged into the KVM. |
 
 The type comes from the device's vendor and kind as macOS reports them, so it's marked *likely*

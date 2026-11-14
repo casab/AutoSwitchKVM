@@ -120,14 +120,18 @@ Single executable target, organized by folder under `Sources/AutoSwitchKVM/`:
   is one `IOHIDDevice` whose `SerialNumber` is its address; the HID++ collection (usage page
   0xFF00) is part of it and takes 20-byte output report 0x11 (device index 0xFF, our software ID
   0x0B). Replies come through an input-report callback on the main run loop (awaited, never
-  spun); calls are serialized.
+  spun); calls are serialized. `ZmkHostSwitcher` + `ZmkHostProtocol` speak the AutoSwitch ZMK
+  module's protocol (spec §5a, raw HID 0xFF60/0x61, 32-byte reports, no report ID); the app passes
+  `CompositeHostSwitcher([Logitech, ZMK])` (first backend that answers owns the address). A device
+  that reports pairing per channel (`HostChannels.paired`, ZMK) has "profiles", an
+  `automaticTarget` fallback to the only other paired profile, and is never sent to an unpaired one.
 - **Device handoff types (spec §5a):** `Models/DeviceHandoff.swift` (`HandoffCatalog.classify`,
   a 1:1 port of Windows' rules, tested in `HandoffCatalogTests` with the same cases),
   `Bluetooth/DeviceIdentityReader` (vendor/product/minor type from
   `system_profiler SPBluetoothDataType -json`, cached 30 s; class of device as fallback),
   `UI/HandoffText` (Mac wording: types 1, 4, 5 can be switched here). `AppController.classify`
-  caches per address and upgrades a likely Logitech device to type 5 when it answers the Change
-  Host query. Shown in Add device (sets the Manage pairing default) and on each device card
+  caches per address and upgrades a Logitech device, or any "picks the computer itself" device
+  (ZMK), to type 5 when it answers a channel query. Shown in Add device (sets the Manage pairing default) and on each device card
   (`HandoffSummary`). Engine behavior doesn't depend on the type.
 - `Bluetooth/` — `BluetoothController` (protocol + `withTimeout`), `BluetoothErrors` (`BTError`,
   `BTFailureKind`, and `BTCode`, which names IOReturn/HCI result codes and maps them to failure
@@ -265,6 +269,17 @@ the new profile but does not force-disconnect the previous profile's devices.
   On release the device is sent to the other computer's channel (`releaseToChannel`, else the
   single other channel marked 0xA5); when it connects while selected, this Mac's channel is marked;
   when it wakes here while the KVM is away, it's sent on (≤ once per 10 s).
+- **ZMK raw HID on macOS (2026-11-14, Reviung41):** over LE the module's interface is a separate
+  `IOHIDDevice` with no `SerialNumber`; match `DeviceAddress` (`"e7-99-a2-72-a6-76"`). It answers
+  without Input Monitoring (vendor usage page). Check it with
+  `AUTOSWITCH_ZMK_ADDRESS=… swift test --filter ZmkHardwareTests` (GET_INFO only).
+- **Bluetooth LE devices are outside IOBluetooth.** It doesn't list them, can't open or close their
+  links, and reports them not connected. `IOBluetoothController` treats a registered HID device with
+  `Transport = "Bluetooth Low Energy"` and a matching `DeviceAddress` as connected and HID-ready,
+  `connect` waits for an LE device to connect by itself (no Classic bond and no class of device, or
+  already registered), `disconnect` of a connected LE device throws an explanation, and
+  `pairedDevices` adds the LE devices only `system_profiler` lists. Status of LE devices comes from
+  the 10 s poll (no connect notifications). The connect-wait path is not yet verified in the app.
 - **Don't call a channel-switching device on arrival** (`switchesChannels` →
   `waitForChannelArrival`). On hardware, three `openConnection` page timeouts to a K380 still on
   the PC's channel kept it out ~20 s (it connected *incoming* only between our pages). Waiting,

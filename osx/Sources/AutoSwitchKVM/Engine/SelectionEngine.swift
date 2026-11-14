@@ -1359,12 +1359,20 @@ final class SelectionEngine: ObservableObject {
         if let n = device.releaseToChannel, n >= 1, n <= ch.count {
             target = n - 1
         } else {
-            target = ch.markedOtherChannel
+            target = ch.automaticTarget
         }
         guard let target else {
             Log.engine.warn(
                 "\(device.name): it can switch channels, but the other computer's channel isn't known (set it in "
                     + "the device's settings, or run AutoSwitch on the other computer)")
+            return .notPossible
+        }
+        guard !ch.isUnpaired(target) else {
+            // Spec §3: never send a device to a channel it reports as unpaired (ZMK profiles); it
+            // would only advertise there for a new pairing.
+            Log.engine.warn(
+                "\(device.name): the other computer's \(ch.noun.lowercased()) (\(target + 1)) isn't paired with "
+                    + "anything; not switching there")
             return .notPossible
         }
         guard target != ch.current else {
@@ -1381,7 +1389,7 @@ final class SelectionEngine: ObservableObject {
             Log.engine.warn("\(device.name): switching to channel \(target + 1) failed: \(Failure(error).summary)")
             return .notPossible
         }
-        Log.engine.log("\(device.name): sent to channel \(target + 1) (\(why))")
+        Log.engine.log("\(device.name): sent to \(ch.noun.lowercased()) \(target + 1) (\(why))")
         return .sent
     }
 

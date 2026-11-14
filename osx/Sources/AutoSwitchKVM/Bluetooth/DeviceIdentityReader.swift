@@ -41,6 +41,18 @@ final class DeviceIdentityReader {
             "device identities: \(cache.count) from system_profiler in \(Elapsed.since(started))")
     }
 
+    /// Every device `system_profiler` lists as paired, LE included (IOBluetooth's own list is
+    /// Classic-only). Addresses as "e7-99-a2-72-a6-76".
+    nonisolated static func systemPairedDevices() async -> [PairedDeviceInfo] {
+        guard let data = await runSystemProfiler() else { return [] }
+        return parse(data).map { key, identity in
+            let pairs = stride(from: 0, to: key.count, by: 2).map {
+                key.dropFirst($0).prefix(2)
+            }
+            return PairedDeviceInfo(name: identity.name, address: pairs.joined(separator: "-").lowercased())
+        }.sorted { $0.name < $1.name }
+    }
+
     // MARK: - system_profiler
 
     nonisolated private static func runSystemProfiler() async -> Data? {

@@ -164,6 +164,8 @@ final class FakeHostSwitcher: HostSwitcher {
     var count = 3
     var current = 0
     var marks: [UInt8] = [0, 0, 0]
+    /// Per-channel pairing, as the ZMK module reports it; nil = not reported (Logitech).
+    var paired: [Bool]?
     private(set) var calls: [String] = []
 
     private func norm(_ a: String) -> String {
@@ -178,7 +180,8 @@ final class FakeHostSwitcher: HostSwitcher {
 
     func channels(_ address: String) async throws -> HostChannels? {
         onChannels?()
-        return mine(address) && reachable ? HostChannels(count: count, current: current, marks: marks) : nil
+        return mine(address) && reachable
+            ? HostChannels(count: count, current: current, marks: marks, paired: paired) : nil
     }
 
     func switchTo(_ address: String, channel: Int) async throws {

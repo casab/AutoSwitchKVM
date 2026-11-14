@@ -46,7 +46,8 @@ final class AppController: ObservableObject {
         self.store = store
         self.usb = usb
         self.bt = bt
-        let hostSwitcher = LogitechHostSwitcher()
+        // Logitech HID++ first, then the AutoSwitch ZMK module (spec §5a type 5).
+        let hostSwitcher = CompositeHostSwitcher([LogitechHostSwitcher(), ZmkHostSwitcher()])
         self.hostSwitcher = hostSwitcher
         self.engine = SelectionEngine(store: store, usb: usb, bt: bt, hostSwitcher: hostSwitcher)
         self.learner = SourceLearner(usb: usb)
@@ -423,7 +424,7 @@ final class AppController: ObservableObject {
                     let ch = try await withTimeout(5) { try await self.hostSwitcher.channels(device.normalizedAddress) }
                     if let ch {
                         channelInfo[device.id] = ch
-                        handoff[DeviceIdentityReader.normalize(device.address)] = .channelSwitch
+                        handoff[DeviceIdentityReader.normalize(device.address)] = .channelSwitch(ch)
                         engine.noteSwitchesChannels(device.id)
                         let names = try await withTimeout(5) {
                             try await self.hostSwitcher.channelNames(device.normalizedAddress)
@@ -449,18 +450,19 @@ final class AppController: ObservableObject {
     }
 
     /// Classify a device (spec §5a): the catalog rules from what macOS knows about it, then, for
-    /// a likely Easy-Switch device, a live read-only Change Host query (answers only while the
-    /// device is connected here). A device that answered once stays type 5.
+    /// a likely Easy-Switch device or any device that picks the computer itself (e.g. a ZMK
+    /// keyboard, which may run the AutoSwitch module), a live read-only channel query (answers only
+    /// while the device is connected here). A device that answered once stays type 5.
     @discardableResult
     func classify(address: String, name: String) async -> HandoffAssessment {
         let key = DeviceIdentityReader.normalize(address)
         if handoff[key]?.type == .channelSwitch { return .channelSwitch }
         let identity = await identities.identity(address: address, name: name)
         var assessment = HandoffCatalog.classify(identity)
-        if assessment.type == .devicePicksHost, identity.vendorID == HandoffCatalog.logitech {
+        if assessment.type == .devicePicksHost || identity.vendorID == HandoffCatalog.logitech {
             do {
-                if try await withTimeout(3, { try await self.hostSwitcher.channels(address) }) != nil {
-                    assessment = .channelSwitch
+                if let ch = try await withTimeout(3, { try await self.hostSwitcher.channels(address) }) {
+                    assessment = .channelSwitch(ch)
                 }
             } catch {
                 Log.app.debug("\(name): channel query failed: \(error)")

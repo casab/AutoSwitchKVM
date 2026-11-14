@@ -26,6 +26,13 @@ GitHub release (and from there into the in-app update notes).
   the empty ones. A keyboard paired with just two computers works without setup. Tested from
   Windows to Mac; macOS support (Mac to Windows) to follow.
 
+### macOS
+
+- ZMK keyboards with the AutoSwitch firmware module follow the KVM from the Mac too: the Mac
+  switches the keyboard to the other computer's Bluetooth profile. Device settings list the
+  profiles and mark the empty ones. A keyboard paired with just two computers works without setup.
+- Bluetooth LE keyboards (such as ZMK keyboards) can be added, and show as connected.
+
 ## v0.3.1 (2026-11-13)
 
 ### macOS

@@ -200,10 +200,10 @@ controller** (the operations in §5). It owns no platform APIs directly.
   `managePairing` is off and the device is connected here and supports host-initiated channel
   switching, send it to the target channel (`releaseToChannel`, else the single other channel
   marked by AutoSwitch; with no other channel marked at all and the device reporting pairing,
-  the single other paired channel, Windows 2026-11-14) and stop: no disconnect, no unpair. If the target is unknown or the switch
+  the single other paired channel, Windows 2026-11-14, macOS 2026-11-14) and stop: no disconnect, no unpair. If the target is unknown or the switch
   fails, warn and fall through to the usual release. **Never send a device to a channel it
   reports as unpaired** (the ZMK module reports pairing per profile; Logitech's Change Host
-  doesn't): it would only advertise there for a new pairing. Warn instead (Windows 2026-11-13).
+  doesn't): it would only advertise there for a new pairing. Warn instead (Windows 2026-11-13, macOS 2026-11-14).
 - **Disconnect**; if `managePairing`, then **unpair** (remove the bond). Set status `disconnected`.
 - **Marking** (type 5): whenever such a device becomes connected while this host is selected, mark
   this host's channel (once per session) so the other host can find it.
@@ -390,7 +390,7 @@ in Add device and in each device's settings, and say plainly what AutoSwitch can
 | 1 | **Hands off by pairing** | One pairing. Once the current host removes it, the next host can pair with no button press. | **Supported** (macOS, Windows): `managePairing` on; unpair on leave, pair on arrive. |
 | 2 | **Picks the computer itself** | A pairing per host slot (ZMK/QMK profiles, Logitech Easy-Switch); a key on the device chooses the host. | **Not possible** from any host: a host can't change the device's slot, and unpairing breaks that slot (re-pair from the device). Status only. Workarounds: the device's own switch key, or USB through the KVM. |
 | 3 | **Re-pairs by hand** | Remembers one Bluetooth host; changing hosts needs pairing mode on the device (Xbox, PlayStation, Nintendo controllers). | **Not possible** automatically: after an unpair the device still points at the old host, and the new host can't pair until the user enters pairing mode. Status only. Workarounds: keep it on one computer, or connect it by cable through the KVM. |
-| 5 | **Switches channel on request** | A type 2 device whose connected host can tell it to change slot: Logitech Easy-Switch devices with HID++ 2.0 feature **0x1814 "Change Host"** (`getHostInfo`, `setCurrentHost(n)`, `getCookies`, `setCookie(n, b)`), and ZMK keyboards running the AutoSwitch firmware module (below; Windows 2026-11-13, macOS pending). | **Supported on release** (Windows and macOS implemented 2026-11-13): the leaving host sends it to the other host's channel; pairings untouched; `managePairing` off. Only the host it's connected to can send the command, so each host does its own release. See the Disconnect flow. |
+| 5 | **Switches channel on request** | A type 2 device whose connected host can tell it to change slot: Logitech Easy-Switch devices with HID++ 2.0 feature **0x1814 "Change Host"** (`getHostInfo`, `setCurrentHost(n)`, `getCookies`, `setCookie(n, b)`), and ZMK keyboards running the AutoSwitch firmware module (below; Windows 2026-11-13, macOS 2026-11-14). | **Supported on release** (Windows and macOS implemented 2026-11-13): the leaving host sends it to the other host's channel; pairings untouched; `managePairing` off. Only the host it's connected to can send the command, so each host does its own release. See the Disconnect flow. |
 | 4 | **Joins whichever computer connects** | Remembers several hosts and connects to the one that asks (many headphones/speakers, some mice). | **macOS: supported** with `managePairing` off (disconnect on leave, connect on arrive). **Windows: not yet**: there is no public API to disconnect a Bluetooth device without unpairing it (a future option for Classic devices: toggling the device's services with `BluetoothSetServiceState`). |
 
 **Classification** (best effort, shown with its confidence: *known* model, *likely* from vendor or
@@ -425,7 +425,8 @@ channels; a stale pairing keeps its old name). Shown in the channel choice ("Cha
 read for Settings only, never on the release path.
 
 **ZMK keyboards: the AutoSwitch firmware module** ([casab/zmk-autoswitch](https://github.com/casab/zmk-autoswitch); Windows
-implemented 2026-11-13, macOS pending; not yet tried on hardware). ZMK has no host-side way to
+implemented 2026-11-13 and tried on hardware 2026-11-14 (PC -> Mac); macOS implemented 2026-11-14, GET_INFO
+verified on the Reviung41, switching not yet tried). ZMK has no host-side way to
 change the Bluetooth profile, so the module adds one. Channels are the keyboard's Bluetooth
 profiles (`BT_SEL 0..n`). Transport: the raw HID collection of
 [zzeneg/zmk-raw-hid](https://github.com/zzeneg/zmk-raw-hid) (usage page `0xFF60`, usage `0x61`,
@@ -451,6 +452,14 @@ Protocol v1, every report (request and reply):
 
 Reading the reply on Windows: HID reports carry a leading report-ID byte `0` (write 33 bytes,
 strip byte 0 on read).
+
+On macOS the raw HID service of an LE keyboard is an `IOHIDDevice` of its own (`Transport = "Bluetooth Low
+Energy"`, usage pair 0xFF60/0x61), with no `SerialNumber`: match its `DeviceAddress` property
+(`"e7-99-a2-72-a6-76"`). Reports go as is (32 bytes, output report 0). It answered right after the
+firmware update and re-pair, and needs no Input Monitoring permission (a vendor usage page, not a
+keyboard). macOS can't open or close an LE link: an LE device counts as connected while its HID
+services are registered, "connect" waits for it to connect by itself, and a disconnect fails with
+an explanation.
 
 The type sets the **Manage pairing default** when a device is added (on for type 1 and for unknown
 Classic devices, off otherwise); the user can still change it. Windows: classification is

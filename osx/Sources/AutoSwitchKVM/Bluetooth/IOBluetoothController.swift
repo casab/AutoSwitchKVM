@@ -64,7 +64,38 @@ final class IOBluetoothController: NSObject, BluetoothController {
 
     func isConnected(_ address: String) async -> Bool {
         guard let dev = try? device(address) else { return false }
-        return dev.isConnected()
+        return dev.isConnected() || Self.lowEnergyHIDRegistered(address)
+    }
+
+    // MARK: Bluetooth LE (HID over GATT)
+
+    /// IOBluetooth is Classic-only: it doesn't list LE devices, can't open or close their links,
+    /// and its connected flag stays false for them. macOS connects a bonded LE keyboard by itself
+    /// when it advertises, and bluetoothd then publishes its HID services as registered
+    /// `IOHIDDevice`s with `Transport = "Bluetooth Low Energy"` and `DeviceAddress =
+    /// "e7-99-a2-72-a6-76"` (no `SerialNumber`; seen on a ZMK Reviung41, 2026-11-14). That is the
+    /// LE device's "connected and HID up" signal here.
+    static func lowEnergyHIDRegistered(_ address: String) -> Bool {
+        let want = normalize(address)
+        let matching = IOServiceMatching("IOHIDDevice") as NSMutableDictionary
+        matching[kIOPropertyMatchKey] = ["Transport": "Bluetooth Low Energy"]
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS else {
+            return false
+        }
+        defer { IOObjectRelease(iterator) }
+        while case let service = IOIteratorNext(iterator), service != 0 {
+            defer { IOObjectRelease(service) }
+            let property = IORegistryEntryCreateCFProperty(service, "DeviceAddress" as CFString, kCFAllocatorDefault, 0)
+            if let found = property?.takeRetainedValue() as? String, normalize(found) == want { return true }
+        }
+        return false
+    }
+
+    /// An LE device as far as IOBluetooth can tell: connected over LE right now, or no Classic
+    /// bond and no class of device (IOBluetooth has never seen it over Classic).
+    private func isLowEnergy(_ dev: IOBluetoothDevice, _ address: String) -> Bool {
+        Self.lowEnergyHIDRegistered(address) || (!dev.isPaired() && dev.classOfDevice == 0)
     }
 
     /// Addresses whose last HID check found nothing (so the diagnostic is logged once per miss).
@@ -77,6 +108,7 @@ final class IOBluetoothController: NSObject, BluetoothController {
     /// unregistered `IOHIDUserDevice` leftovers with the same serial, which a raw registry walk
     /// would mistake for a live device.
     func isHIDReady(_ address: String) async -> Bool? {
+        if Self.lowEnergyHIDRegistered(address) { return true }
         // Only peripherals (keyboards, mice, trackpads, controllers) bring up HID. For anything
         // else (headphones: spec §5a type 4) we can't tell, so the engine trusts the link, as
         // on Windows. Without this a connected headset counted as "link up but no HID".
@@ -134,6 +166,10 @@ final class IOBluetoothController: NSObject, BluetoothController {
         // switch-aways and the UI stalled meanwhile, delaying this Mac's release for the other host.
         // Success is now judged by the engine's HID check (`isHIDReady`). Here the callback is only
         // an early hint, and the link state is the fallback when the callback never fires.
+        if isLowEnergy(dev, address) {
+            try await waitForLowEnergy(address)
+            return
+        }
         let wasConnected = dev.isConnected()
         let note = wasConnected ? " (already connected; reopening for a clean connect)" : ""
         Log.bluetooth.debug("openConnection \(address) (async)…\(note)")
@@ -169,6 +205,24 @@ final class IOBluetoothController: NSObject, BluetoothController {
         }
     }
 
+    /// "Connecting" an LE device: macOS can't call it, so wait for it to connect by itself (it does
+    /// as soon as it advertises to this Mac, e.g. after its profile was switched here).
+    private func waitForLowEnergy(_ address: String) async throws {
+        let start = ContinuousClock.now
+        Log.bluetooth.debug("connect \(address): Bluetooth LE device; waiting for it to connect by itself")
+        while !Self.lowEnergyHIDRegistered(address) {
+            if start.duration(to: .now) > Self.connectWait {
+                Log.bluetooth.debug("connect \(address): the LE device didn't connect within \(Elapsed.since(start))")
+                throw BTError.classified(
+                    .timeout,
+                    "the Bluetooth LE device didn't connect (macOS can't call an LE device; it connects by itself "
+                        + "when it's on this Mac's profile)")
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)  // throws when withTimeout cancels us
+        }
+        Log.bluetooth.debug("connect \(address): LE device connected (\(Elapsed.since(start)))")
+    }
+
     /// Completion of an async `openConnection(_:)` (IOBluetooth's informal target protocol).
     @objc(connectionComplete:status:)
     func connectionComplete(_ device: IOBluetoothDevice?, status: IOReturn) {
@@ -185,6 +239,12 @@ final class IOBluetoothController: NSObject, BluetoothController {
         var pending = false
         if case .pending = connectAttempts[key] { pending = true }
         guard dev.isConnected() || pending else {
+            if Self.lowEnergyHIDRegistered(address) {
+                throw BTError.classified(
+                    .unknown,
+                    "macOS has no call to disconnect a Bluetooth LE device; it stays connected until it switches "
+                        + "profile (its profile key)")
+            }
             Log.bluetooth.debug("closeConnection \(address): not connected, nothing to close")
             return
         }
@@ -279,16 +339,23 @@ final class IOBluetoothController: NSObject, BluetoothController {
         }
     }
 
+    /// Classic bonds from IOBluetooth, plus the LE devices only `system_profiler` lists.
     func pairedDevices() async -> [PairedDeviceInfo] {
         guard let devices = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] else {
             Log.bluetooth.warn("pairedDevices: IOBluetooth returned no list (Bluetooth off or permission denied?)")
             return []
         }
-        return devices.map {
+        var list = devices.map {
             PairedDeviceInfo(
                 name: $0.name ?? $0.addressString ?? "Unknown",
                 address: $0.addressString ?? "")
         }
+        let classic = Set(list.map { DeviceIdentityReader.normalize($0.address) })
+        for other in await DeviceIdentityReader.systemPairedDevices()
+        where !classic.contains(DeviceIdentityReader.normalize(other.address)) {
+            list.append(other)
+        }
+        return list
     }
 
     func isPoweredOn() async -> Bool? {
@@ -334,7 +401,7 @@ final class IOBluetoothController: NSObject, BluetoothController {
                 Log.bluetooth.warn("monitoring: '\(addr)' is not a valid Bluetooth address; skipped")
                 continue
             }
-            let connected = dev.isConnected()
+            let connected = dev.isConnected() || Self.lowEnergyHIDRegistered(addr)
             onChange(addr, connected)
             if connected { armDisconnect(dev, addr) }
         }

@@ -48,6 +48,15 @@ struct HandoffAssessment: Equatable, Sendable {
     static let channelSwitch = HandoffAssessment(
         type: .channelSwitch, confidence: .known,
         reason: "Logitech Easy-Switch device that answers the Change Host command.")
+
+    /// The device answered a channel query: type 5, known. A device that reports pairing per
+    /// channel is a ZMK keyboard running the AutoSwitch firmware module.
+    static func channelSwitch(_ channels: HostChannels) -> HandoffAssessment {
+        guard channels.paired != nil else { return .channelSwitch }
+        return HandoffAssessment(
+            type: .channelSwitch, confidence: .known,
+            reason: "ZMK keyboard with the AutoSwitch firmware module: \(channels.count) Bluetooth profiles.")
+    }
 }
 
 /// Best-effort classification (spec §5a "Classification"); first matching rule wins. Same rules

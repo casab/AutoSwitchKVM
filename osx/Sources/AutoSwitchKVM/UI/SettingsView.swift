@@ -383,40 +383,47 @@ struct SettingsDeviceCard: View {
         .task(id: device.address) { await controller.classify(address: device.address, name: device.name) }
     }
 
-    /// Spec §5a type 5: the device switches channel on request (Logitech Easy-Switch). On release
-    /// it's sent to the other computer's channel instead of being disconnected.
+    /// Spec §5a type 5: the device switches channel on request (Logitech Easy-Switch, or a ZMK
+    /// keyboard with the AutoSwitch module, whose channels are Bluetooth profiles). On release it's
+    /// sent to the other computer's channel instead of being disconnected.
     @ViewBuilder
     private func channelRow(_ ch: HostChannels) -> some View {
         let names = controller.channelNames[device.id]
+        let noun = ch.noun.lowercased()
+        let label = { (n: Int) in HostChannels.label(n, names: names, noun: ch.noun) }
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Label("This Mac is on channel \(ch.current + 1) of \(ch.count)", systemImage: "arrow.left.arrow.right")
+                Label("This Mac is on \(noun) \(ch.current + 1) of \(ch.count)", systemImage: "arrow.left.arrow.right")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
-                Text("Other computer's channel").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("Other computer's \(noun)").font(.system(size: 11)).foregroundStyle(.secondary)
                 Picker("", selection: $device.releaseToChannel) {
-                    Text(
-                        ch.markedOtherChannel.map { "Automatic (\(HostChannels.label($0, names: names)))" }
-                            ?? "Automatic (not found)"
-                    )
-                    .tag(Int?.none)
+                    Text(ch.automaticTarget.map { "Automatic (\(label($0)))" } ?? "Automatic (not found)")
+                        .tag(Int?.none)
                     ForEach(1...max(1, ch.count), id: \.self) { n in
-                        Text(HostChannels.label(n - 1, names: names) + (n - 1 == ch.current ? " (this Mac)" : ""))
-                            .tag(Int?.some(n))
+                        Text(
+                            label(n - 1)
+                                + (ch.isUnpaired(n - 1) ? " (not paired)" : n - 1 == ch.current ? " (this Mac)" : "")
+                        )
+                        .tag(Int?.some(n))
                     }
                 }
                 .labelsHidden().frame(width: 260)
                 .help(
-                    "Where the device goes when the KVM leaves this Mac. Automatic uses the channel the other "
-                        + "computer's AutoSwitch marked.")
+                    "Where the device goes when the KVM leaves this Mac. Automatic uses the \(noun) the other "
+                        + "computer's AutoSwitch marked"
+                        + (ch.paired == nil ? "." : ", or the only other paired one."))
             }
             // With Manage pairing on, HandoffSummary already says to turn it off.
             if device.managePairing {
             } else if device.releaseToChannel == ch.current + 1 {
-                Text("That's this Mac's channel; pick the other computer's.")
+                Text("That's this Mac's \(noun); pick the other computer's.")
                     .font(.system(size: 11)).foregroundStyle(.orange)
-            } else if device.releaseToChannel == nil, ch.markedOtherChannel == nil {
-                Text("Run AutoSwitch on the other computer, or pick its channel here.")
+            } else if let n = device.releaseToChannel, ch.isUnpaired(n - 1) {
+                Text("\(ch.noun) \(n) isn't paired with anything; the keyboard won't be sent there.")
+                    .font(.system(size: 11)).foregroundStyle(.orange)
+            } else if device.releaseToChannel == nil, ch.automaticTarget == nil {
+                Text("Run AutoSwitch on the other computer, or pick its \(noun) here.")
                     .font(.system(size: 11)).foregroundStyle(.orange)
             }
         }

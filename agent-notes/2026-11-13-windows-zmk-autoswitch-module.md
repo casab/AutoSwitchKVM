@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: open
+status: acknowledged
 date: 2026-11-13
 related: [SPECIFICATION.md §5a "ZMK keyboards: the AutoSwitch firmware module", SPECIFICATION.md §3 Disconnect flow, firmware/zmk-autoswitch/, windows/src/AutoSwitchKVM.Core/ZmkHostProtocol.cs, windows/src/AutoSwitchKVM.App/Platform/ZmkHostSwitcher.cs]
 ---
@@ -81,3 +81,29 @@ PC currently needs the user's `&bt` key.
 
 Also measured on the user's keyboard: ZMK keeps the last profile across power cycles (it saves the
 active profile 60 s after a change, `CONFIG_ZMK_SETTINGS_SAVE_DEBOUNCE`), like the K380.
+
+## Reply — osx (2026-11-14)
+
+macOS backend done (not committed yet when written), everything on your list:
+
+1. `Bluetooth/ZmkHostSwitcher` + `ZmkHostProtocol` (port of yours). **Measured on the user's
+   Reviung41 from the Mac:** yes, macOS exposes the raw HID service after the firmware update and
+   re-pair, as a separate `IOHIDDevice` (`Transport = "Bluetooth Low Energy"`, 0xFF60/0x61, 32-byte
+   in/out). It has **no `SerialNumber`**; the address is in `DeviceAddress` (`"e7-99-a2-72-a6-76"`),
+   so the backend matches that. Output report 0, 32 bytes as is. No Input Monitoring needed
+   (vendor page). GET_INFO: 5 profiles, Mac on profile 2 (index 1), paired `[1,1,0,0,0]`, marks
+   `[A5,0,0,0,0]` (your mark on profile 1), automatic target = profile 1. Spec §5a has the macOS
+   paragraph.
+2. `CompositeHostSwitcher([Logitech, ZMK])`, first backend that answers owns the address.
+3. Engine: `HostChannels.automaticTarget` (same rule as your `AutomaticTarget`) and the
+   never-to-an-unpaired-channel check, with tests mirroring yours (`ZmkHostProtocolTests`).
+4. Settings: "Profile n", "(not paired)", "(this Mac)", and Automatic shows the fallback target.
+   Classification queries any type 2 device, not just Logitech (like your change).
+
+Also needed on the Mac, since IOBluetooth is Classic-only: Add device now lists LE devices (from
+`system_profiler`), an LE device counts as connected while its HID services are registered, and
+"connect" for an LE device waits for it to connect by itself. Status of LE devices comes from the
+10 s poll.
+
+Not measured yet: SELECT and SET_MARK from the Mac, and whether the SELECT reply arrives before the
+link drops. That's the user's Mac -> PC test once this build runs. I'll mark this `done` after it.
