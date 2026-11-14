@@ -16,43 +16,35 @@ GitHub release (and from there into the in-app update notes).
 
 ## Unreleased
 
+## v0.4.0 (2026-11-14)
+
+### Both
+
+- **ZMK keyboards follow the KVM**, with the free AutoSwitch firmware module
+  [zmk-autoswitch](https://github.com/casab/zmk-autoswitch): when the KVM leaves a computer,
+  AutoSwitch switches the keyboard to the other computer's Bluetooth profile, the same way it
+  does for Logitech Easy-Switch keyboards. Add the module to your zmk-config, flash, and pair the
+  keyboard again on each computer. A keyboard paired with just two computers works without setup.
+- Channel-switching keyboards show which computer each channel belongs to: AutoSwitch writes the
+  computer's name on its own channel when the keyboard has none there (ZMK keyboards). Settings
+  flags channels that aren't paired with anything, on Logitech keyboards too, and never sends a
+  keyboard to one.
+- A keyboard you switch by hand stays where you put it: AutoSwitch no longer sends it back when
+  it comes to this computer while the KVM is on the other one, or pulls it back when it leaves
+  while the KVM is here.
+- Starting AutoSwitch while the KVM is on the other computer no longer sends your keyboard away:
+  a channel-switching keyboard stays on whichever computer it's on. The trackpad is still
+  released.
+
 ### Windows
 
 - Notifications show up in installed versions (they never did before: only development builds
   showed them). This includes "Restart to update".
-- ZMK keyboards can follow the KVM too, with the new AutoSwitch firmware module
-  ([zmk-autoswitch](https://github.com/casab/zmk-autoswitch)): when the KVM leaves a computer, AutoSwitch switches the keyboard to
-  the other computer's Bluetooth profile. Device settings list the keyboard's profiles and mark
-  the empty ones. A keyboard paired with just two computers works without setup. Tested from
-  Windows to Mac; macOS support (Mac to Windows) to follow.
-- Channel-switching keyboards show which computer each channel belongs to: AutoSwitch writes this
-  PC's name on its own channel when the keyboard has none there (ZMK keyboards with
-  zmk-autoswitch 2.0). Settings flags channels that aren't paired with anything, on Logitech
-  keyboards too, and never sends a keyboard to one.
-- A keyboard you switch by hand stays where you put it: AutoSwitch no longer sends it back when
-  it comes to this PC while the KVM is on the other computer, or pulls it back when it leaves while
-  the KVM is here. A ZMK keyboard is no longer pulled back to the PC a few seconds after the KVM
-  leaves.
-- Starting AutoSwitch while the KVM is on the other computer no longer sends your keyboard away:
-  a channel-switching keyboard stays on whichever computer it's on. The trackpad is still
-  released. This PC's name is written in capitals, as Windows gives it to Logitech keyboards.
+- This PC's name is written on a keyboard in capitals, as Windows gives it to Logitech keyboards.
 
 ### macOS
 
-- ZMK keyboards with the AutoSwitch firmware module follow the KVM from the Mac too: the Mac
-  switches the keyboard to the other computer's Bluetooth profile. Device settings list its
-  channels and mark the empty ones. A keyboard paired with just two computers works without setup.
 - Bluetooth LE keyboards (such as ZMK keyboards) can be added, and show as connected.
-- ZMK keyboards with zmk-autoswitch 2.0 work too, and channel-switching keyboards show which
-  computer each channel belongs to: AutoSwitch writes this Mac's name on its own channel when the
-  keyboard has none there. Settings flags channels that aren't paired with anything, on Logitech
-  keyboards too, and never sends a keyboard to one.
-- A keyboard you switch by hand stays where you put it: AutoSwitch no longer sends it back when
-  it comes to the Mac while the KVM is on the other computer, or pulls it back when it leaves while
-  the KVM is here.
-- Starting AutoSwitch while the KVM is on the other computer no longer sends your keyboard away:
-  a channel-switching keyboard stays on whichever computer it's on. The trackpad is still
-  released.
 
 ## v0.3.1 (2026-11-13)
 

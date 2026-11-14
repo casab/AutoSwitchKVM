@@ -13,6 +13,8 @@ computer and moves your Bluetooth devices along with it:
 - **Apple Magic Trackpad, Keyboard and Mouse:** it hands the pairing over to the other computer.
 - **Logitech Easy-Switch keyboards and mice** (e.g. K380): it tells the device to switch to the
   other computer's channel.
+- **ZMK keyboards** with the free [zmk-autoswitch](https://github.com/casab/zmk-autoswitch) firmware module: the same,
+  with the keyboard's Bluetooth profiles as channels.
 - **Everything else:** it tells you what's possible for the device and shows its status (see
   [which devices can follow the KVM](#which-bluetooth-devices-can-follow-the-kvm)).
 
@@ -34,8 +36,9 @@ So every switch means some manual work, depending on the device:
 - **One-computer devices** like Apple's **Magic Trackpad** can only be paired with one computer
   at a time. Moving one means removing it in the first computer's Bluetooth settings, then
   searching and pairing on the other. Switch back later? All again, the other way.
-- **Multi-channel devices** like Logitech's **Easy-Switch** keyboards and mice remember a
-  channel per computer, but you press the channel key on every device, every time you switch.
+- **Multi-channel devices** like Logitech's **Easy-Switch** keyboards and mice, or a ZMK
+  keyboard's Bluetooth profiles, remember a channel per computer, but you press the channel key
+  on every device, every time you switch.
 
 AutoSwitch KVM does that work for you every time the KVM switches.
 
@@ -46,7 +49,10 @@ AutoSwitch KVM does that work for you every time the KVM switches.
 - **Works with one-computer devices.** It unpairs on the way out and pairs on the way in, so the
   Magic Trackpad, Keyboard and Mouse hand over cleanly.
 - **Speaks Logitech Easy-Switch.** It tells the device to change channel, finds the other
-  computer's channel by itself, and shows which computer is on which channel.
+  computer's channel by itself, and shows which computer is on which channel. ZMK keyboards learn
+  the same language from the [zmk-autoswitch](https://github.com/casab/zmk-autoswitch) module.
+- **Respects your hands.** Switched a keyboard to the other computer with its own key? AutoSwitch
+  leaves it there.
 - **Knows your devices.** Settings shows how each device handles a second computer and whether
   AutoSwitch can switch it, and suggests the fix when it can't.
 - **Several devices.** Keyboard, mouse, trackpad: choose which follow the KVM and in what order.
@@ -81,7 +87,8 @@ warning:
    the other computer and back. The app spots the USB device that comes and goes with the switch.
 3. **Add your Bluetooth devices.** AutoSwitch shows how each one switches and sets **Manage
    pairing** to match: on for a Magic Trackpad (or anything that only pairs with one computer at
-   a time), off for a Logitech Easy-Switch device, which changes channel instead.
+   a time), off for a Logitech Easy-Switch device or a ZMK keyboard, which change channel instead.
+   For a ZMK keyboard, add the [zmk-autoswitch](https://github.com/casab/zmk-autoswitch) module to its firmware first.
 4. **Switch the KVM.** Your devices follow, usually within a few seconds.
 
 Platform guides with more detail: [Windows](windows/README.md) · [macOS](osx/README.md).
@@ -95,9 +102,9 @@ you add it, and what it can do with it.
 | Kind | How the device behaves | Examples | Can AutoSwitch switch it? |
 |---|---|---|---|
 | **Hands off by pairing** | Holds one pairing. Once a computer lets go, the next one can pair without you touching the device. | Apple Magic Trackpad, Magic Keyboard, Magic Mouse | **Yes**, on Mac and Windows. This is what AutoSwitch was built for. |
-| **Picks the computer itself** | Remembers several computers, and a key on the device chooses one. | ZMK and QMK wireless keyboards | **No.** Only the device can choose. Use its switch key, or plug it into the KVM by USB. |
+| **Picks the computer itself** | Remembers several computers, and a key on the device chooses one. | QMK wireless keyboards; ZMK keyboards without the module | **No.** Only the device can choose. Use its switch key, or plug it into the KVM by USB. For ZMK, add the [zmk-autoswitch](https://github.com/casab/zmk-autoswitch) module: the keyboard then switches channel on request. |
 | **Re-pairs by hand** | Remembers one Bluetooth computer. Moving it needs its pairing button. | Xbox, PlayStation and Nintendo controllers | **No.** Keep it on one computer, connect it by cable through the KVM, or pair it to a Bluetooth-to-USB adapter (e.g. 8BitDo USB Wireless Adapter 2) plugged into the KVM. |
-| **Switches channel on request** | Like the previous kind, but the computer it's connected to can tell it to change channel. | Logitech Easy-Switch keyboards and mice (e.g. K380) | **Yes**, on Mac and Windows: when the KVM leaves, AutoSwitch sends it to the other computer's channel. |
+| **Switches channel on request** | Like the previous kind, but the computer it's connected to can tell it to change channel. | Logitech Easy-Switch keyboards and mice (e.g. K380); ZMK keyboards with [zmk-autoswitch](https://github.com/casab/zmk-autoswitch) | **Yes**, on Mac and Windows: when the KVM leaves, AutoSwitch sends it to the other computer's channel. |
 | **Joins whichever computer connects** | Remembers several computers and goes to the one that asks. | Many headphones and speakers | **On Mac, yes** (being tested). On Windows not yet: Windows can't disconnect a Bluetooth device without unpairing it. |
 
 **Using a USB receiver?** Logitech Unifying, Logi Bolt and Lightspeed receivers are faster than
@@ -112,9 +119,10 @@ More detail: [autoswitchkvm.com/devices](https://autoswitchkvm.com/devices/).
 
 ## Good to know
 
-- **Which devices work?** Apple Magic accessories (they hand off by pairing) and Logitech
-  Easy-Switch keyboards and mice (they switch channel), on both platforms. The table above covers
-  the rest, and Settings tells you for each device.
+- **Which devices work?** Apple Magic accessories (they hand off by pairing), Logitech
+  Easy-Switch keyboards and mice, and ZMK keyboards with the zmk-autoswitch module (they switch
+  channel), on both platforms. The table above covers the rest, and Settings tells you for each
+  device.
 - **Which KVMs work?** Any KVM that switches USB between the computers. Most do, because that's
   how they share your keyboard and mouse.
 - **Why a few seconds?** The computer the KVM switched to has to wait until the other one lets go
@@ -156,6 +164,7 @@ SPECIFICATION.md  Behavior contract both apps implement (config model, engine, B
 testdata/         Shared config fixture; both test suites read it, so settings stay compatible
 agent-notes/      Coordination notes between the macOS and Windows work streams
 website/          autoswitchkvm.com (Eleventy, deployed on Cloudflare Workers)
+                  (the ZMK firmware module is its own repository: casab/zmk-autoswitch, MIT)
 .github/          CI (build + tests for both apps) and release workflows
 ```
 

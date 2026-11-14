@@ -9,7 +9,7 @@ layout: base.njk
       <h1><span class="nowrap">Press the KVM button.</span><br><span class="hl nowrap">Your devices follow.</span></h1>
       <p class="lead">
         AutoSwitch KVM moves your Bluetooth keyboard, mouse and trackpad to whichever computer your
-        KVM switch picks. Apple Magic accessories, Logitech Easy-Switch keyboards and mice, and more.
+        KVM switch picks. Apple Magic accessories, Logitech Easy-Switch keyboards and mice, ZMK keyboards, and more.
         No Bluetooth settings. No re-pairing. No channel keys. You just switch.
       </p>
       <div class="cta" data-downloads>
@@ -131,17 +131,19 @@ layout: base.njk
         <p class="works__how">Hands off by pairing<br>Mac ✓ · Windows ✓</p>
       </li>
       <li class="works__item">
-        <h3>Logitech Easy-Switch keyboards &amp; mice</h3>
+        <h3>Logitech Easy-Switch &amp; ZMK keyboards</h3>
         <p>
-          The K380 and other Easy-Switch devices keep a channel per computer. AutoSwitch tells the
-          device to hop to the other computer's channel, and finds that channel by itself.
+          The K380 and other Easy-Switch devices keep a channel per computer, and so does a ZMK
+          keyboard with the free <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> firmware module.
+          AutoSwitch tells the device to hop to the other computer's channel, and finds that
+          channel by itself.
         </p>
         <p class="works__how">Switches channel on request<br>Mac ✓ · Windows ✓</p>
       </li>
       <li class="works__item works__item--other">
         <h3>Everything else</h3>
         <p>
-          ZMK keyboards, game controllers, headphones: AutoSwitch tells you what's possible for each
+          QMK keyboards, game controllers, headphones: AutoSwitch tells you what's possible for each
           one, shows its status, and points you to the easy fixes (like a USB adapter on the KVM).
         </p>
         <p class="works__how"><a href="/devices/">See the device guide →</a></p>
@@ -250,7 +252,7 @@ layout: base.njk
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
         <h3>Speaks Easy-Switch</h3>
-        <p>Logitech keyboards and mice change channel when AutoSwitch asks. It even reads which computer is on which channel.</p>
+        <p>Logitech keyboards and mice, and ZMK keyboards with zmk-autoswitch, change channel when AutoSwitch asks. It even shows which computer is on which channel, and leaves a keyboard you switched by hand where you put it.</p>
       </li>
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
@@ -334,8 +336,9 @@ layout: base.njk
         <p>
           Devices that hold one pairing and accept the next computer once released, like the Apple
           Magic Trackpad, Keyboard and Mouse: those switch automatically, and so do Logitech
-          Easy-Switch devices like the K380. Keyboards with their own host keys (ZMK) and
-          game controllers can't be switched by any app;
+          Easy-Switch devices like the K380 and ZMK keyboards with the
+          <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> module. QMK keyboards and game controllers
+          can't be switched by any app;
           AutoSwitch tells you so when you add one, and shows their status.
           <a href="/devices/">The device guide</a> explains all four kinds.
         </p>
