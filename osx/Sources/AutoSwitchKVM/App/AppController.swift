@@ -422,19 +422,30 @@ final class AppController: ObservableObject {
             for device in devices {
                 do {
                     let ch = try await withTimeout(5) { try await self.hostSwitcher.channels(device.normalizedAddress) }
-                    if let ch {
-                        channelInfo[device.id] = ch
-                        handoff[DeviceIdentityReader.normalize(device.address)] = .channelSwitch(ch)
-                        engine.noteSwitchesChannels(device.id)
-                        let names = try await withTimeout(5) {
-                            try await self.hostSwitcher.channelNames(device.normalizedAddress)
-                        }
-                        if let names { channelNames[device.id] = names }
-                    }
+                    if let ch { await noteChannels(ch, address: device.address) }
                 } catch {
                     Log.app.debug("\(device.name): channel query failed: \(error)")
                 }
             }
+        }
+    }
+
+    /// A device answered a channel query: keep its channels and names for the channel choice in
+    /// Settings, and tell the engine it switches channels.
+    private func noteChannels(_ ch: HostChannels, address: String) async {
+        let key = DeviceIdentityReader.normalize(address)
+        handoff[key] = .channelSwitch(ch)
+        let devices = store.config.devices.filter { DeviceIdentityReader.normalize($0.address) == key }
+        for device in devices {
+            channelInfo[device.id] = ch
+            engine.noteSwitchesChannels(device.id)
+        }
+        guard !devices.isEmpty else { return }
+        do {
+            let names = try await withTimeout(5) { try await self.hostSwitcher.channelNames(address) }
+            if let names { for device in devices { channelNames[device.id] = names } }
+        } catch {
+            Log.app.debug("\(address): channel names query failed: \(error)")
         }
     }
 
@@ -452,22 +463,33 @@ final class AppController: ObservableObject {
     /// Classify a device (spec §5a): the catalog rules from what macOS knows about it, then, for
     /// a likely Easy-Switch device or any device that picks the computer itself (e.g. a ZMK
     /// keyboard, which may run the AutoSwitch module), a live read-only channel query (answers only
-    /// while the device is connected here). A device that answered once stays type 5.
+    /// while the device is connected here). A device that answered once stays type 5; it is asked
+    /// again only while a configured device with its address has no channels for Settings yet (e.g.
+    /// it was classified in Add device, before it was in the list).
     @discardableResult
     func classify(address: String, name: String) async -> HandoffAssessment {
         let key = DeviceIdentityReader.normalize(address)
-        if handoff[key]?.type == .channelSwitch { return .channelSwitch }
+        let known = handoff[key].flatMap { $0.type == .channelSwitch ? $0 : nil }
+        if let known,
+            store.config.devices.allSatisfy({
+                DeviceIdentityReader.normalize($0.address) != key || channelInfo[$0.id] != nil
+            })
+        {
+            return known
+        }
         let identity = await identities.identity(address: address, name: name)
         var assessment = HandoffCatalog.classify(identity)
         if assessment.type == .devicePicksHost || identity.vendorID == HandoffCatalog.logitech {
             do {
                 if let ch = try await withTimeout(3, { try await self.hostSwitcher.channels(address) }) {
                     assessment = .channelSwitch(ch)
+                    await noteChannels(ch, address: address)
                 }
             } catch {
                 Log.app.debug("\(name): channel query failed: \(error)")
             }
         }
+        if let known, assessment.type != .channelSwitch { return known }  // not reachable right now
         if handoff[key] != assessment {
             let ids = [identity.vendorID, identity.productID].map { $0.map { String(format: "%04X", $0) } ?? "?" }
             Log.app.debug(

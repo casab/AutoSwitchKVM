@@ -280,6 +280,8 @@ the new profile but does not force-disconnect the previous profile's devices.
   already registered), `disconnect` of a connected LE device throws an explanation, and
   `pairedDevices` adds the LE devices only `system_profiler` lists. Status of LE devices comes from
   the 10 s poll (no connect notifications). The connect-wait path is not yet verified in the app.
+  After a switch the LE keyboard stayed registered ~1.6 s, so a "connected" report within
+  `channelSwitchLingerMs` (3 s) of sending a device away is not taken as a late return.
 - **Don't call a channel-switching device on arrival** (`switchesChannels` →
   `waitForChannelArrival`). On hardware, three `openConnection` page timeouts to a K380 still on
   the PC's channel kept it out ~20 s (it connected *incoming* only between our pages). Waiting,

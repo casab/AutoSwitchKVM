@@ -1390,6 +1390,7 @@ final class SelectionEngine: ObservableObject {
             return .notPossible
         }
         Log.engine.log("\(device.name): sent to \(ch.noun.lowercased()) \(target + 1) (\(why))")
+        channelSwitchSent[device.id] = .now
         return .sent
     }
 
@@ -1426,6 +1427,12 @@ final class SelectionEngine: ObservableObject {
             return
         }
         guard presenceEvaluated, !store.config.paused, !suspended else { return }
+        if let sent = channelSwitchSent[id], sent.duration(to: .now) < .milliseconds(channelSwitchLingerMs) {
+            Log.engine.debug(
+                "\(device.name): still reported connected \(Elapsed.since(sent)) after it was sent away; "
+                    + "its connection is closing")
+            return
+        }
         if isBusy(id) {
             // E.g. an arrival wait still holds it. Remember it, and send it on once it's free
             // (spec §3 Late release; Windows does the same).
@@ -1435,6 +1442,12 @@ final class SelectionEngine: ObservableObject {
         }
         startLateRelease(device)
     }
+
+    /// When each device was last sent to another channel. Its connection lingers a moment after
+    /// that (an LE keyboard's HID services stayed registered ~1.6 s on hardware, 2026-11-14), and a
+    /// status report in that window isn't the device coming back.
+    private var channelSwitchSent: [UUID: ContinuousClock.Instant] = [:]
+    var channelSwitchLingerMs = 3000
 
     /// Devices that connected here while the KVM was away, while busy: sent on once freed.
     private var lateReleasePending = Set<UUID>()

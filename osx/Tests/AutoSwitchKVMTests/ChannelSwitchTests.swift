@@ -124,6 +124,7 @@ final class ChannelSwitchTests: XCTestCase {
     /// The keyboard was asleep at the switch and woke up on this Mac's channel: send it on.
     func testADeviceThatConnectsWhileSwitchedAwayIsSentOn() async {
         let f = make(releaseToChannel: 1)
+        f.engine.channelSwitchLingerMs = 0  // it wakes up later, not while its link is closing
         await arrive(f)
         await leave(f)
         let switches = f.switcher.calls.filter { $0.hasPrefix("switch:") }.count
@@ -132,6 +133,21 @@ final class ChannelSwitchTests: XCTestCase {
         f.bt.simulateConnection(addr)
         await settle()
         XCTAssertEqual(f.switcher.calls.filter { $0.hasPrefix("switch:") }.count, switches + 1, "\(f.switcher.calls)")
+    }
+
+    /// Hardware 2026-11-14 (Reviung41 over LE): still reported connected 1.6 s after it was sent
+    /// away. That's its link closing, not the device coming back: no second send.
+    func testAConnectionReportedRightAfterTheSwitchIsNotALateRelease() async {
+        let f = make(releaseToChannel: 1)
+        await arrive(f)
+        await leave(f)
+        let switches = f.switcher.calls.filter { $0.hasPrefix("switch:") }.count
+        XCTAssertEqual(switches, 1)
+
+        f.switcher.current = 1
+        f.bt.simulateConnection(addr)
+        await settle()
+        XCTAssertEqual(f.switcher.calls.filter { $0.hasPrefix("switch:") }.count, switches, "\(f.switcher.calls)")
     }
 
     // MARK: - Arrival: wait, don't call (hardware 2026-11-13: paging a K380 kept it out ~20 s)
@@ -240,6 +256,7 @@ final class ChannelSwitchTests: XCTestCase {
     /// It lands while the KVM is away, but its control channel needs a moment: keep asking.
     func testALateReleaseKeepsAskingUntilTheDeviceAnswers() async {
         let f = make(releaseToChannel: 1)
+        f.engine.channelSwitchLingerMs = 0  // it lands later, not while its link is closing
         f.engine.channelArrivalWaitMs = 1000
         await arrive(f)
         await leave(f)
