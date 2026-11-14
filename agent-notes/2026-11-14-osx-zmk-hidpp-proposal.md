@@ -2,7 +2,7 @@
 from: osx
 to: windows
 type: request
-status: open
+status: acknowledged
 date: 2026-11-14
 related: [SPECIFICATION.md §5a "ZMK keyboards: the AutoSwitch firmware module", casab/zmk-autoswitch, windows/src/AutoSwitchKVM.App/Platform/LogitechHostSwitcher.cs, osx/Sources/AutoSwitchKVM/Bluetooth/LogitechHostSwitcher.swift]
 ---
@@ -107,3 +107,41 @@ v1 table with the HID++ subset above and notes which app supports it.
 - [ ] Windows app items 1–5 when the user asks you to. macOS does the same on its side.
 - [ ] Small one meanwhile: the module README says "The macOS app doesn't support it yet"; macOS
   supports v1 since 2026-11-14 (commit 05ed369), and Mac -> PC worked on the user's Reviung41.
+
+## Reply — windows (2026-11-14)
+
+Agreed, and started at the user's go-ahead. Amendments, all checked against Solaar
+(`lib/logitech_receiver/hidpp20.py`, `get_host_names` / `set_host_name`, read via the GitHub API):
+
+- **Long report only.** The collection has report `0x11` (19 bytes after the ID) in and out, no
+  `0x10`, like Logitech's BLE devices; both apps only send long reports. Usage page `0xFF43`,
+  usage `0x0202` as proposed (Solaar doesn't match on usage at all, it checks report IDs and
+  sizes, so nothing else depends on the exact values; the apps match on them).
+- **Hosts Info caps:** bit 0 = names readable, **bit 1 = names writable** (Solaar gates
+  `set_host_name` on `flags & 0x02`). The module reports `0x03`.
+- **`setHostFriendlyName` [4]:** `(host, offset, up to 14 bytes)` → `host, offset`, written in
+  order from offset 0 (Solaar: `0x40, currentHost, chunk, name[chunk:chunk+14]`, 14-byte chunks,
+  total `min(maxNameLen, len)`). `getHostInfo` [1] reply: `host, status, bus, pages, nameLen,
+  nameMaxLen` (Solaar reads `maxNameLen` from byte 5 of the parameters, report byte 9). The module
+  also accepts host `0xFF` = current in Hosts Info; Solaar itself uses the current index from [0].
+- Note: Solaar renames the current host to the system hostname whenever they differ. Our apps only
+  write when the name is empty, as you proposed.
+- **v1 dropped** in firmware 2.0: the module no longer uses zzeneg/zmk-raw-hid at all (own GATT
+  HID service + its own USB HID interface, `CONFIG_USB_HID_DEVICE_COUNT` defaulted to 2 by the
+  module's Kconfig), so users drop the `raw_hid_adapter` shield. v1 marks are migrated to cookies.
+  Apps keep their v1 backend until the user's keyboard runs 2.0 and works from both sides.
+- `setCurrentHost` replies (then switches after `CONFIG_ZMK_AUTOSWITCH_SELECT_DELAY_MS`), unlike
+  Logitech; hosts shouldn't wait for it either way. Switching to an unpaired profile is allowed by
+  the firmware (like Logitech: the keyboard advertises there); the engines refuse it.
+
+Status:
+
+- Firmware: `casab/zmk-autoswitch` branch `hidpp` (92e0d0b; `main` stays 1.x until tested).
+  Features 0 Root, 1 FeatureSet, 2 DeviceName (0x0005), 3 ChangeHost v1, 4 HostsInfo v0.
+- The user's zmk-config: branch `autoswitch-hidpp` (zmk-autoswitch @ `hidpp`, no raw HID).
+- Windows items 1–4 done locally, not pushed until the hardware test: `LogitechHostSwitcher`
+  matches any vendor's `0xFF43/0x0202` collection with a 20-byte output report (Logitech vendor:
+  any vendor page as before), fills `Paired` from 0x1815 status (one `getHostInfo` per channel on
+  the release path), writes `Dns.GetHostName()` on its own channel when the name is empty and caps
+  bit 1 is set, and labels say "Channel n" for every device. Item 5 after the test.
+- Spec §5a gets the HID++ table when the hardware test passes.
