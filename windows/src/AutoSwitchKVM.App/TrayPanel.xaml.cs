@@ -25,6 +25,8 @@ public sealed partial class TrayPanel : Window
 
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool GetCursorPos(out POINT pt);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [StructLayout(LayoutKind.Sequential)] private struct POINT { public int X, Y; }
 
     public TrayPanel()
@@ -69,8 +71,15 @@ public sealed partial class TrayPanel : Window
             // Place with the last known content height (or a generous first guess); Root's
             // SizeChanged then fits the window to the laid-out content.
             Place(_contentHeight > 0 ? _contentHeight : 520);
-            AppWindow.Show();
+            AppWindow.Show(activateWindow: true);
             Activate();
+            // The panel hides when it loses focus, so it has to get focus first. Since Windows App
+            // SDK 2.6.5, Activate() alone left it without focus (seen 2026-11-14): it stayed open
+            // until clicked once, then clicked away. The tray click grants this process the right
+            // to set the foreground window.
+            var hwnd = WindowNative.GetWindowHandle(this);
+            if (GetForegroundWindow() != hwnd && !SetForegroundWindow(hwnd))
+                Support.Log.Warn("ui", "tray panel could not take focus; it hides on the next click outside it only after it is clicked");
         }
         catch (Exception ex)
         {
