@@ -33,6 +33,9 @@ GitHub release (and from there into the in-app update notes).
   it comes to this PC while the KVM is on the other computer, or pulls it back when it leaves while
   the KVM is here. A ZMK keyboard is no longer pulled back to the PC a few seconds after the KVM
   leaves.
+- Starting AutoSwitch while the KVM is on the other computer no longer sends your keyboard away:
+  a channel-switching keyboard stays on whichever computer it's on. The trackpad is still
+  released. This PC's name is written in capitals, as Windows gives it to Logitech keyboards.
 
 ### macOS
 

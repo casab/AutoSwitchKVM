@@ -97,7 +97,7 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
                     Request(s, fi, 3, new[] { (byte)ch.Current, HostChannels.AutoSwitchMark });
                     Log.Info("hidpp", $"{address}: marked channel {ch.Current + 1} as this PC's (for the other computer's AutoSwitch)");
                 }
-                WriteNameIfEmpty(s, address, ch.Current);
+                WriteOwnName(s, address, ch.Current);
                 return (object?)true;
             }), ct);
         }
@@ -176,19 +176,32 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
         return paired;
     }
 
+    /// This PC's name as written on a channel: in capitals, the way Windows gives its name to a
+    /// Logitech keyboard at pairing (the K380 shows "NAME-DESKTOP"), so ZMK keyboards match.
+    internal static string ComputerName() => System.Net.Dns.GetHostName().ToUpperInvariant();
+
     /// Write this PC's name on its channel when the device supports writing names (Hosts Info caps
-    /// bit 1) and has none stored there. Never overwrites a name: Logitech devices name their
-    /// channels themselves. Best effort.
-    private void WriteNameIfEmpty(HidStream s, string address, int channel)
+    /// bit 1) and has none stored there. A name is never overwritten (Logitech devices name their
+    /// channels themselves), except this PC's own name in other letter case, which is rewritten
+    /// in capitals once (afterwards it matches exactly). Best effort.
+    private void WriteOwnName(HidStream s, string address, int channel)
     {
         var hi = HostsInfoIndex(s, address);
         if (hi == 0) return;
         var info = Request(s, hi, 0, Array.Empty<byte>());
         if (info is null || (info[4] & 0x02) == 0) return;
         var hostInfo = Request(s, hi, 1, new[] { (byte)channel });
-        if (hostInfo is null || hostInfo[5] == 0 || hostInfo[8] != 0) return;   // unpaired, or named already
-        var bytes = NameBytes(System.Net.Dns.GetHostName(), hostInfo[9]);
+        if (hostInfo is null || hostInfo[5] == 0) return;   // unpaired
+        var bytes = NameBytes(ComputerName(), hostInfo[9]);
         if (bytes.Length == 0) return;
+        var wanted = System.Text.Encoding.UTF8.GetString(bytes);
+        var rewrite = false;
+        if (hostInfo[8] != 0)
+        {
+            var stored = ReadName(s, hi, (byte)channel, hostInfo[8]);
+            if (stored is null || stored == wanted || !string.Equals(stored, wanted, StringComparison.OrdinalIgnoreCase)) return;
+            rewrite = true;   // this PC's name in other letter case
+        }
         for (var offset = 0; offset < bytes.Length; offset += 14)
         {
             var args = new byte[16];
@@ -201,7 +214,23 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
                 return;
             }
         }
-        Log.Info("hidpp", $"{address}: named channel {channel + 1} after this PC");
+        Log.Info("hidpp", rewrite
+            ? $"{address}: rewrote this PC's name on channel {channel + 1} in capitals"
+            : $"{address}: named channel {channel + 1} after this PC");
+    }
+
+    /// A channel's stored name (Hosts Info [3] in 14-byte pieces), or null when a piece fails.
+    private static string? ReadName(HidStream s, byte hi, byte channel, int length)
+    {
+        length = Math.Min(length, 64);
+        var bytes = new List<byte>();
+        for (int offset = 0; offset < length; offset += 14)
+        {
+            var piece = Request(s, hi, 3, new[] { channel, (byte)offset });
+            if (piece is null) return null;
+            bytes.AddRange(piece.Skip(6).Take(Math.Min(14, length - offset)));
+        }
+        return System.Text.Encoding.UTF8.GetString(bytes.ToArray()).TrimEnd('\0').Trim();
     }
 
     /// `name` as UTF-8, cut to at most `max` bytes without splitting a character.

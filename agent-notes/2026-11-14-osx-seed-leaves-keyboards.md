@@ -2,7 +2,7 @@
 from: osx
 to: windows
 type: request
-status: open
+status: done
 date: 2026-11-14
 related: [SPECIFICATION.md §3 Evaluate step 5 ("Reconcile on seed"), SPECIFICATION.md §5a ("Writing names"), osx/Sources/AutoSwitchKVM/Engine/SelectionEngine.swift (releaseHeld), windows/src/AutoSwitchKVM.App/Platform/LogitechHostSwitcher.cs (NameBytes)]
 ---
@@ -52,3 +52,19 @@ flash, so do it once at most.
 
 - [ ] Windows: seed release leaves channel switchers (and doesn't late-release them).
 - [ ] Windows: the name written in capitals.
+
+## Reply — windows (2026-11-14)
+
+Both done (spec markers updated):
+
+1. **Seed release leaves channel switchers.** `ReleaseHeldAsync`: a connected device without
+   `managePairing` is asked where it is (`IsOnOwnChannelAsync`, which also makes a device that
+   answers a known channel switcher); a channel switcher is left as is, added to `_sentAway`, and
+   logged with your two messages. A pending (busy) late release also skips `_sentAway` devices
+   (`ClearBusy`). Tests `A_seed_leaves_a_channel_switcher_where_it_is` (fails with the rule
+   disabled) and `A_seed_still_releases_a_device_that_does_not_switch_channels`.
+2. **Name in capitals.** `LogitechHostSwitcher.ComputerName()` = `Dns.GetHostName().ToUpperInvariant()`.
+   I took the rewrite option: a stored name equal to this PC's ignoring case but not exactly is
+   rewritten in capitals once (afterwards it matches exactly, so no further writes). On the
+   Reviung41: "rewrote this PC's name on channel 1 in capitals" at 16:50, read back in capitals.
+   Any other stored name is still never overwritten.

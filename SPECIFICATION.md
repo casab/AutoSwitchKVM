@@ -142,7 +142,7 @@ controller** (the operations in §5). It owns no platform APIs directly.
    switch to the other host → unpause", or the app starting while switched away (crash, reboot),
    left the device bonded here and the other host locked out. Consequence: a manual connect made
    while switched away is released by the next seed (the KVM decides). **Except a channel-switching
-   device** (macOS 2026-11-14; Windows pending): it is left on whatever channel it's on, and not
+   device** (macOS and Windows 2026-11-14): it is left on whatever channel it's on, and not
    late-released afterwards either (treated as "sent away"). Nobody watched the KVM leave, so a
    keyboard on this host's channel was most likely put there by hand (the user types on both
    computers), and it holds no bond the other host waits for. A relaunch had sent the Reviung41 off
@@ -467,7 +467,8 @@ so the never-to-an-unpaired-channel rule and the automatic fallback apply to eve
 Hosts Info. **Writing names** (Windows and macOS 2026-11-14): when marking its channel, a host writes
 its own name there (Windows: `Dns.GetHostName()` in capitals, as Windows gives its name to a
 Logitech keyboard at pairing, e.g. the K380's "ENGIN-DESKTOP", so a ZMK keyboard shows the same;
-requested 2026-11-14, Windows pending; macOS: the computer name, e.g. "…'s MacBook Pro", as macOS
+requested 2026-11-14, Windows done; a stored name equal to this PC's ignoring case is rewritten
+in capitals once, the only overwrite; macOS: the computer name, e.g. "…'s MacBook Pro", as macOS
 gives it at pairing;
 cut to the name max length at a character boundary) if
 the device allows writing (caps bit 1) and the channel has no name. Never overwrite a name:

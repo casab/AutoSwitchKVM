@@ -345,6 +345,35 @@ public class ChannelSwitchTests
         Assert.DoesNotContain(bt.Calls, c => c.StartsWith("connect"));
     }
 
+    [Fact]
+    public async Task A_seed_leaves_a_channel_switcher_where_it_is()
+    {
+        var engine = MakeLinked(out var bt, out var hs, out var dev);   // on this PC's channel, linked
+        var btCalls = bt.Calls.Count;
+        await engine.SeedAsync();                        // the app starts while the KVM is elsewhere
+        await engine.EvaluateNowAsync();
+
+        Assert.Equal(0, Switches(hs));                   // the user put it here by hand
+        Assert.Equal(btCalls, bt.Calls.Count);           // no disconnect either
+
+        bt.FireConnectionChange(K380, connected: false);
+        bt.FireConnectionChange(K380, connected: true);  // its next connect event
+        await engine.PollStatusesAsync();
+        Assert.Equal(0, Switches(hs));                   // and no late release afterwards
+    }
+
+    [Fact]
+    public async Task A_seed_still_releases_a_device_that_does_not_switch_channels()
+    {
+        var engine = Make(out var bt, out var hs, out _, releaseTo: null);
+        hs.SupportedAddress = null;                      // doesn't answer the channel query
+        bt.Connected.Add(Norm(K380));
+        await engine.SeedAsync();
+        await engine.EvaluateNowAsync();
+
+        Assert.Contains(bt.Calls, c => c.StartsWith("disconnect"));
+    }
+
     [Theory]
     [InlineData(new[] { "my-desktop", null, null }, new[] { true, true, false }, 0)]
     [InlineData(new[] { "MY-DESKTOP", "Mac", null }, new[] { true, true, false }, 0)]   // case-insensitive

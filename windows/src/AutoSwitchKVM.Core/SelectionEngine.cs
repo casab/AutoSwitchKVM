@@ -1224,7 +1224,11 @@ public sealed class SelectionEngine
 
     /// Spec §3 Evaluate step 5: after a seed with the source absent, release what this host may
     /// still hold: disconnect connected devices, unpair managePairing ones (idempotent). Quiet:
-    /// no "Disconnected" notice unless the device was actually connected.
+    /// no "Disconnected" notice unless the device was actually connected. A channel-switching
+    /// device is left on whatever channel it's on (and not late-released after): nobody watched
+    /// the KVM leave, the user switches keyboards by hand while using both computers, and it holds
+    /// no bond the other computer waits for (2026-11-14: a relaunch sent the Reviung41 off the Mac
+    /// while the user typed on it).
     private async Task ReleaseHeldAsync(Run run)
     {
         foreach (var device in ReleaseOrder())
@@ -1242,6 +1246,18 @@ public sealed class SelectionEngine
             }
             var connected = await SafeIsConnectedAsync(device);
             if (!device.ManagePairing && !connected) continue;   // nothing held
+            if (!device.ManagePairing)
+            {
+                var here = await IsOnOwnChannelAsync(device);
+                if (IsKnownChannelSwitcher(device))
+                {
+                    _sentAway.Add(device.Id);   // no late release either
+                    Info(here == false
+                        ? $"{device.Name}: already on another computer's channel; nothing to release"
+                        : $"{device.Name}: switches channels; leaving it where it is (press its channel key to move it)");
+                    continue;
+                }
+            }
             MarkBusy(device.Id);
             try { await DisconnectOneAsync(device, run, notify: connected, automatic: true); }
             finally { ClearBusy(device.Id); }
@@ -1647,7 +1663,7 @@ public sealed class SelectionEngine
         if (n <= 1) _busyDevices.Remove(id);
         else _busyDevices[id] = n - 1;
         // A late release deferred because the device was busy (spec §3 Disconnect flow, late release).
-        if (!_busyDevices.ContainsKey(id) && _lateReleasePending.Remove(id) && !Selected)
+        if (!_busyDevices.ContainsKey(id) && _lateReleasePending.Remove(id) && !Selected && !_sentAway.Contains(id))
             _ = RunLoggedAsync(() => SendOnIfStillHereAsync(id), "late release once free");
     }
 
