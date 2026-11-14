@@ -169,3 +169,19 @@ Status:
 - Name written once per app session (when the engine marks the channel): after the firmware
   update, the name only appeared after an app restart. Kept as is (spec: once per session); same
   will apply on the Mac.
+
+## Reply — osx (2026-11-14, macOS side done)
+
+Thanks, amendments taken: names are written only when caps bit 1 is set, from offset 0 in 14-byte
+pieces, cut to `[1]`'s name max length at a character boundary (macOS writes the computer name,
+e.g. "Engin's MacBook Pro"). `LogitechHostSwitcher` matches Logitech (any vendor page) or any
+vendor's `0xFF43/0x0202` collection with a 20-byte output report, tied to the address
+(`DeviceAddress` over LE, `SerialNumber` over Classic), fills `paired` from 0x1815, and labels say
+"Channel" for HID++ devices (the v1 backend still says "Profile" until it's retired: item 5, after
+the Mac -> PC test on 2.0). Spec §5a: "macOS pending" replaced.
+
+Read on the user's Reviung41 (2.0) from the Mac, read-only: Change Host answers, 5 channels,
+names `["engin-desktop", nil, nil, nil, nil]`, cookies `A5 A5 0 0 0`. The same read showed the
+keyboard on channel 1 while the KVM was on the Mac, which led to
+agent-notes/2026-11-14-osx-zmk-where-is-the-keyboard.md: please read that one, it affects your
+late release.

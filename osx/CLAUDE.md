@@ -120,7 +120,11 @@ Single executable target, organized by folder under `Sources/AutoSwitchKVM/`:
   is one `IOHIDDevice` whose `SerialNumber` is its address; the HID++ collection (usage page
   0xFF00) is part of it and takes 20-byte output report 0x11 (device index 0xFF, our software ID
   0x0B). Replies come through an input-report callback on the main run loop (awaited, never
-  spun); calls are serialized. `ZmkHostSwitcher` + `ZmkHostProtocol` speak the AutoSwitch ZMK
+  spun); calls are serialized. `LogitechHostSwitcher` also talks to other vendors' devices
+  that carry Logitech's BLE HID++ collection (0xFF43/0x0202, address in `DeviceAddress`; the ZMK
+  module v2 proposal), never to other vendor pages (the Magic Trackpad has a 0xFF00 one); it fills
+  `paired` from 0x1815 status and writes the Mac's name to an unnamed channel when it marks.
+  `ZmkHostSwitcher` + `ZmkHostProtocol` (v1, until the keyboard is reflashed) speak the AutoSwitch ZMK
   module's protocol (spec §5a, raw HID 0xFF60/0x61, 32-byte reports, no report ID); the app passes
   `CompositeHostSwitcher([Logitech, ZMK])` (first backend that answers owns the address). A device
   that reports pairing per channel (`HostChannels.paired`, ZMK) has "profiles", an
@@ -280,8 +284,16 @@ the new profile but does not force-disconnect the previous profile's devices.
   already registered), `disconnect` of a connected LE device throws an explanation, and
   `pairedDevices` adds the LE devices only `system_profiler` lists. Status of LE devices comes from
   the 10 s poll (no connect notifications). The connect-wait path is not yet verified in the app.
-  After a switch the LE keyboard stayed registered ~1.6 s, so a "connected" report within
-  `channelSwitchLingerMs` (3 s) of sending a device away is not taken as a late return.
+  **ZMK keeps its LE link to every computer after switching profile** (hardware 2026-11-14:
+  "connected" for minutes), and zmk-autoswitch 2.0 answers HID++ over that inactive link. So for a
+  device that answers the channel query, "here" = its current channel is this Mac's
+  (`isOnOwnChannel`; this Mac's channel from `HostChannels.ownChannel`: the channel named after
+  this Mac, else the only unnamed paired one, else the one seen at a release; `ownChannels`, per
+  session). It gates the arrival wait, marking, the status poll, the release (`.alreadyAway`:
+  nothing to send) and the late release. **The user switches keyboards by hand while using both
+  computers:** a device this Mac sent away that comes back while the KVM is elsewhere is left
+  there (`sentAway`, cleared when the KVM returns), and a channel switcher that leaves while the
+  KVM is here isn't auto-reconnected. Only a device the release couldn't send gets a late release.
 - **Don't call a channel-switching device on arrival** (`switchesChannels` →
   `waitForChannelArrival`). On hardware, three `openConnection` page timeouts to a K380 still on
   the PC's channel kept it out ~20 s (it connected *incoming* only between our pages). Waiting,

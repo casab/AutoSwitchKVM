@@ -434,7 +434,8 @@ final class AppController: ObservableObject {
     /// Settings, and tell the engine it switches channels.
     private func noteChannels(_ ch: HostChannels, address: String) async {
         let key = DeviceIdentityReader.normalize(address)
-        handoff[key] = .channelSwitch(ch)
+        let vendorID = await identities.identity(address: address, name: "").vendorID
+        handoff[key] = .channelSwitch(ch, vendorID: vendorID)
         let devices = store.config.devices.filter { DeviceIdentityReader.normalize($0.address) == key }
         for device in devices {
             channelInfo[device.id] = ch
@@ -482,7 +483,7 @@ final class AppController: ObservableObject {
         if assessment.type == .devicePicksHost || identity.vendorID == HandoffCatalog.logitech {
             do {
                 if let ch = try await withTimeout(3, { try await self.hostSwitcher.channels(address) }) {
-                    assessment = .channelSwitch(ch)
+                    assessment = .channelSwitch(ch, vendorID: identity.vendorID)
                     await noteChannels(ch, address: address)
                 }
             } catch {

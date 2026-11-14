@@ -217,7 +217,26 @@ controller** (the operations in §5). It owns no platform APIs directly.
   control channel can appear a moment after its connection. On macOS the query 7 ms after the
   HID connection found nothing, and the K380 was stranded. Retry for a few seconds (macOS: up to
   5 s, every 0.5 s) while it stays connected and the KVM stays away. If it never answers, warn
-  ("press its channel key").
+  ("press its channel key"). **Only a device the release couldn't send** (macOS 2026-11-14): one
+  this host sent away and that comes back while the KVM is elsewhere was brought back on purpose
+  (its channel key, or the other host), so it is left here. The user switches keyboards by hand
+  while using both computers.
+- **Where a channel-switching device is** (macOS 2026-11-14; hardware: zmk-autoswitch 1.x and
+  2.0 on the Reviung41). A ZMK keyboard keeps its Bluetooth LE link to every paired host after a
+  profile switch, for minutes, so "connected" doesn't mean it's on this host, and module 2.0
+  answers HID++ over that inactive link (1.x stayed silent). So for a device that answers the
+  channel query, **"here" = its current channel is this host's channel**. This host's channel: the
+  one carrying this host's name (Hosts Info), else the only paired channel without a name (the
+  other host named its own), else the current channel seen at a release while the KVM was here;
+  kept for the session. When it isn't known, the link decides, as before. "Here" gates: the
+  arrival wait (connected only once it's on this host's channel), marking (never mark another
+  host's channel), the status poll (a lingering link reads as disconnected), the release (a device
+  already on another host's channel: nothing to send or disconnect), and the late release (only a
+  device on this host's channel is sent on; Automatic would otherwise pick this host's own marked
+  channel and pull the keyboard back). A device that answers the query on its first connect of a
+  session is treated as a channel switcher right away (waited for, not called). **Leaving while
+  the KVM is here** (its channel key): not an unexpected drop, so no auto-reconnect; it stays where
+  the user put it.
 
 ### Manual actions (ignore selection/source; act on all configured devices)
 - **Connect all now**, **Disconnect all now**.
@@ -390,7 +409,7 @@ in Add device and in each device's settings, and say plainly what AutoSwitch can
 | 1 | **Hands off by pairing** | One pairing. Once the current host removes it, the next host can pair with no button press. | **Supported** (macOS, Windows): `managePairing` on; unpair on leave, pair on arrive. |
 | 2 | **Picks the computer itself** | A pairing per host slot (ZMK/QMK profiles, Logitech Easy-Switch); a key on the device chooses the host. | **Not possible** from any host: a host can't change the device's slot, and unpairing breaks that slot (re-pair from the device). Status only. Workarounds: the device's own switch key, or USB through the KVM. |
 | 3 | **Re-pairs by hand** | Remembers one Bluetooth host; changing hosts needs pairing mode on the device (Xbox, PlayStation, Nintendo controllers). | **Not possible** automatically: after an unpair the device still points at the old host, and the new host can't pair until the user enters pairing mode. Status only. Workarounds: keep it on one computer, or connect it by cable through the KVM. |
-| 5 | **Switches channel on request** | A type 2 device whose connected host can tell it to change slot: Logitech Easy-Switch devices with HID++ 2.0 feature **0x1814 "Change Host"** (`getHostInfo`, `setCurrentHost(n)`, `getCookies`, `setCookie(n, b)`), and ZMK keyboards running the AutoSwitch firmware module, which speaks the same HID++ subset since 2.0 (below; Windows 2026-11-14, macOS pending). | **Supported on release** (Windows and macOS implemented 2026-11-13): the leaving host sends it to the other host's channel; pairings untouched; `managePairing` off. Only the host it's connected to can send the command, so each host does its own release. See the Disconnect flow. |
+| 5 | **Switches channel on request** | A type 2 device whose connected host can tell it to change slot: Logitech Easy-Switch devices with HID++ 2.0 feature **0x1814 "Change Host"** (`getHostInfo`, `setCurrentHost(n)`, `getCookies`, `setCookie(n, b)`), and ZMK keyboards running the AutoSwitch firmware module, which speaks the same HID++ subset since 2.0 (below; Windows and macOS 2026-11-14). | **Supported on release** (Windows and macOS implemented 2026-11-13): the leaving host sends it to the other host's channel; pairings untouched; `managePairing` off. Only the host it's connected to can send the command, so each host does its own release. See the Disconnect flow. |
 | 4 | **Joins whichever computer connects** | Remembers several hosts and connects to the one that asks (many headphones/speakers, some mice). | **macOS: supported** with `managePairing` off (disconnect on leave, connect on arrive). **Windows: not yet**: there is no public API to disconnect a Bluetooth device without unpairing it (a future option for Classic devices: toggling the device's services with `BluetoothSetServiceState`). |
 
 **Classification** (best effort, shown with its confidence: *known* model, *likely* from vendor or
@@ -428,10 +447,11 @@ bus, pages, name length, name max length; `[3](host, offset)` → host, offset, 
 `[4](host, offset, up to 14 bytes)` writes a name in 14-byte pieces from offset 0. Verified on the
 K380 (feature index 8, v0, names for all 3 channels; a stale pairing keeps its old name). Names are
 shown in the channel choice ("Channel 2 · name") and read for Settings only. **Pairing** fills
-`HostChannels.Paired` (one `[1]` request per channel, on the release path too; Windows 2026-11-14),
+`HostChannels.Paired` (one `[1]` request per channel, on the release path too; Windows and macOS 2026-11-14),
 so the never-to-an-unpaired-channel rule and the automatic fallback apply to every device with
-Hosts Info. **Writing names** (Windows 2026-11-14): when marking its channel, a host writes its own
-name there (Windows: `Dns.GetHostName()`, cut to the name max length at a character boundary) if
+Hosts Info. **Writing names** (Windows and macOS 2026-11-14): when marking its channel, a host writes
+its own name there (Windows: `Dns.GetHostName()`; macOS: the computer name, e.g. "…'s MacBook Pro";
+cut to the name max length at a character boundary) if
 the device allows writing (caps bit 1) and the channel has no name. Never overwrite a name:
 Logitech devices name their channels themselves.
 

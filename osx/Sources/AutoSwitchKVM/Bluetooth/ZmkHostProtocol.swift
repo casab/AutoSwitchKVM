@@ -54,6 +54,6 @@ enum ZmkHostProtocol {
         let bits = Int(reply[7]) | Int(reply[8]) << 8
         return HostChannels(
             count: count, current: active, marks: Array(reply[9..<9 + count]),
-            paired: (0..<count).map { bits & (1 << $0) != 0 })
+            paired: (0..<count).map { bits & (1 << $0) != 0 }, noun: "Profile")
     }
 }

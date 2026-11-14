@@ -49,13 +49,21 @@ struct HandoffAssessment: Equatable, Sendable {
         type: .channelSwitch, confidence: .known,
         reason: "Logitech Easy-Switch device that answers the Change Host command.")
 
-    /// The device answered a channel query: type 5, known. A device that reports pairing per
-    /// channel is a ZMK keyboard running the AutoSwitch firmware module.
-    static func channelSwitch(_ channels: HostChannels) -> HandoffAssessment {
-        guard channels.paired != nil else { return .channelSwitch }
+    /// The device answered a channel query: type 5, known. The wording follows the protocol: the
+    /// ZMK module's v1 ("profiles"), HID++ on a Logitech device, or HID++ on another vendor's
+    /// device (the ZMK module v2).
+    static func channelSwitch(_ channels: HostChannels, vendorID: UInt16?) -> HandoffAssessment {
+        if channels.noun == "Profile" {
+            return HandoffAssessment(
+                type: .channelSwitch, confidence: .known,
+                reason: "ZMK keyboard with the AutoSwitch firmware module: \(channels.count) Bluetooth profiles.")
+        }
+        if vendorID == nil || vendorID == HandoffCatalog.logitech { return .channelSwitch }
         return HandoffAssessment(
             type: .channelSwitch, confidence: .known,
-            reason: "ZMK keyboard with the AutoSwitch firmware module: \(channels.count) Bluetooth profiles.")
+            reason:
+                "Answers the HID++ Change Host command (\(channels.count) channels), like a Logitech Easy-Switch device."
+        )
     }
 }
 

@@ -41,10 +41,13 @@ struct HostChannels: Equatable, Sendable {
     let count: Int
     let current: Int
     let marks: [UInt8]
-    /// Per channel: is it paired with a host? nil when the protocol doesn't say (Logitech's Change
-    /// Host). The ZMK module reports it, and an unpaired profile is never a target: the keyboard
-    /// would just advertise there for a new pairing. Its channels are called "profiles".
+    /// Per channel: is it paired with a host? nil when the device doesn't say. HID++ devices with
+    /// Hosts Info (0x1815) and the ZMK module report it, and an unpaired channel is never a target:
+    /// the device would just advertise there for a new pairing.
     var paired: [Bool]? = nil
+    /// What the device calls its channels in Settings and the log: "Channel" (HID++), or
+    /// "Profile" (the ZMK module's protocol v1, whose channels are Bluetooth profiles).
+    var noun = "Channel"
 
     /// Whether channel `n` is known to be unpaired.
     func isUnpaired(_ n: Int) -> Bool {
@@ -71,9 +74,6 @@ struct HostChannels: Equatable, Sendable {
         return anyOtherMarked ? nil : onlyOtherPairedChannel
     }
 
-    /// "Channel" (Logitech) or "Profile" (ZMK: devices that report pairing per channel).
-    var noun: String { paired == nil ? "Channel" : "Profile" }
-
     /// The single other channel marked by AutoSwitch, or nil if none (or several: ambiguous).
     var markedOtherChannel: Int? {
         let marked = (0..<min(count, marks.count)).filter { $0 != current && marks[$0] == Self.autoSwitchMark }
@@ -85,6 +85,23 @@ struct HostChannels: Equatable, Sendable {
     static func label(_ channel: Int, names: [String?]?, noun: String = "Channel") -> String {
         let name = names.flatMap { channel < $0.count ? $0[channel] : nil }
         return name.map { "\(noun) \(channel + 1) · \($0)" } ?? "\(noun) \(channel + 1)"
+    }
+
+    /// This host's channel from the names the device stores (HID++ Hosts Info): the one channel
+    /// carrying `myName`; else, when pairing is known, the only paired channel without a name (the
+    /// other computers' AutoSwitch named theirs). nil when that doesn't single one out.
+    static func ownChannel(names: [String?]?, paired: [Bool]?, myName: String) -> Int? {
+        guard let names else { return nil }
+        let mine = names.indices.filter { names[$0].map { nameMatches($0, myName) } ?? false }
+        if mine.count == 1 { return mine[0] }
+        guard mine.isEmpty, let paired else { return nil }
+        let unnamed = paired.indices.filter { paired[$0] && ($0 >= names.count || names[$0] == nil) }
+        return unnamed.count == 1 ? unnamed[0] : nil
+    }
+
+    /// A stored name is this computer's: equal, or a cut-down copy (devices cap the length).
+    static func nameMatches(_ stored: String, _ myName: String) -> Bool {
+        stored == myName || (stored.count >= 8 && myName.hasPrefix(stored))
     }
 
     /// A channel name from Hosts Info name pieces (UTF-8, `length` bytes in all): trailing NULs

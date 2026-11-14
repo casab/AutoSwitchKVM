@@ -37,6 +37,7 @@ final class ChannelSwitchTests: XCTestCase {
         let engine = SelectionEngine(store: store, usb: MockUSBMonitor(), bt: bt, hostSwitcher: switcher)
         engine.sleepHook = { _ in }
         engine.lateReleaseMinInterval = 0
+        engine.thisComputerName = "Test Mac"
         engine.refreshMonitoring()  // so the mock's connect events reach the engine
         return Fixture(engine: engine, bt: bt, switcher: switcher, store: store)
     }
@@ -71,6 +72,7 @@ final class ChannelSwitchTests: XCTestCase {
 
     func testConnectedWhileSelectedMarksThisComputersChannelOnce() async {
         let f = make()
+        f.bt.preset(paired: true, connected: true, addr)  // it's on this Mac
         await arrive(f)
         XCTAssertEqual(f.switcher.calls.filter { $0.hasPrefix("mark:") }, ["mark:\(digits):1"])
         XCTAssertEqual(f.switcher.marks[1], HostChannels.autoSwitchMark)
@@ -124,30 +126,120 @@ final class ChannelSwitchTests: XCTestCase {
     /// The keyboard was asleep at the switch and woke up on this Mac's channel: send it on.
     func testADeviceThatConnectsWhileSwitchedAwayIsSentOn() async {
         let f = make(releaseToChannel: 1)
-        f.engine.channelSwitchLingerMs = 0  // it wakes up later, not while its link is closing
         await arrive(f)
+        f.switcher.reachable = false  // asleep: the release can't send it
         await leave(f)
         let switches = f.switcher.calls.filter { $0.hasPrefix("switch:") }.count
+        XCTAssertEqual(switches, 0)
 
-        f.switcher.current = 1  // it came back to this Mac's channel on its own
+        f.switcher.reachable = true  // it wakes up, still on this Mac's channel
         f.bt.simulateConnection(addr)
         await settle()
         XCTAssertEqual(f.switcher.calls.filter { $0.hasPrefix("switch:") }.count, switches + 1, "\(f.switcher.calls)")
     }
 
-    /// Hardware 2026-11-14 (Reviung41 over LE): still reported connected 1.6 s after it was sent
-    /// away. That's its link closing, not the device coming back: no second send.
-    func testAConnectionReportedRightAfterTheSwitchIsNotALateRelease() async {
+    /// Hardware 2026-11-14 (Reviung41 over LE): ZMK keeps its link to this Mac after switching
+    /// profile, so the Mac keeps seeing it connected while it doesn't answer. No second send.
+    func testALingeringLinkAfterTheSwitchIsNotALateRelease() async {
         let f = make(releaseToChannel: 1)
         await arrive(f)
         await leave(f)
         let switches = f.switcher.calls.filter { $0.hasPrefix("switch:") }.count
         XCTAssertEqual(switches, 1)
 
-        f.switcher.current = 1
+        f.switcher.reachable = false  // active on the other computer: HID traffic goes there
         f.bt.simulateConnection(addr)
-        await settle()
+        for _ in 0..<200 { await Task.yield() }
         XCTAssertEqual(f.switcher.calls.filter { $0.hasPrefix("switch:") }.count, switches, "\(f.switcher.calls)")
+    }
+
+    /// Firmware that answers over an inactive link reports the other computer's channel: leave it.
+    /// Without the guard, Automatic would pick this Mac's marked channel and pull it back.
+    func testALateReleaseLeavesADeviceThatIsOnTheOtherComputersChannel() async {
+        let f = make()
+        f.switcher.marks = [HostChannels.autoSwitchMark, 0, 0]  // Windows marked channel 1
+        await arrive(f)  // seen here on channel 2, which the Mac marks
+        await leave(f)  // sent to channel 1: the fake now reports current 0
+        XCTAssertEqual(f.switcher.calls.filter { $0.hasPrefix("switch:") }, ["switch:\(digits):0"])
+        let switches = 1
+
+        f.bt.simulateConnection(addr)
+        for _ in 0..<200 { await Task.yield() }
+        XCTAssertEqual(f.switcher.calls.filter { $0.hasPrefix("switch:") }.count, switches, "\(f.switcher.calls)")
+    }
+
+    // MARK: - Where the device is (hardware 2026-11-14: ZMK keeps its link to every computer)
+
+    /// The user brings it back by hand while the KVM is on the other computer: leave it here.
+    func testADeviceBroughtBackWhileTheKVMIsAwayIsLeftHere() async {
+        let f = make(releaseToChannel: 1)
+        f.bt.preset(paired: true, connected: true, addr)
+        await arrive(f)
+        await leave(f)
+        XCTAssertEqual(f.switcher.calls.filter { $0.hasPrefix("switch:") }.count, 1)
+
+        f.switcher.current = 1  // its channel key
+        f.bt.simulateConnection(addr)
+        for _ in 0..<200 { await Task.yield() }
+        XCTAssertEqual(f.switcher.calls.filter { $0.hasPrefix("switch:") }.count, 1, "\(f.switcher.calls)")
+    }
+
+    private func makeNamed() -> Fixture {
+        let f = make()
+        f.switcher.names = ["PC", "Test Mac", nil]
+        f.switcher.paired = [true, true, false]
+        f.switcher.marks = [HostChannels.autoSwitchMark, HostChannels.autoSwitchMark, 0]
+        return f
+    }
+
+    /// Already on the other computer's channel when the KVM leaves (switched by hand; its link to
+    /// this Mac is still up): nothing to send, nothing to disconnect.
+    func testAReleaseLeavesADeviceAlreadyOnTheOtherComputersChannel() async {
+        let f = makeNamed()
+        f.bt.preset(paired: true, connected: true, addr)
+        await arrive(f)
+        f.switcher.current = 0  // its channel key: on the PC now, link to the Mac still up
+        let btCalls = f.bt.calls.count
+        await leave(f)
+        XCTAssertFalse(f.switcher.calls.contains { $0.hasPrefix("switch:") }, "\(f.switcher.calls)")
+        XCTAssertEqual(f.bt.calls.count, btCalls, "no disconnect: \(f.bt.calls)")
+    }
+
+    /// The link is up the whole time, but the keyboard is still on the PC's channel: it counts as
+    /// arrived only once it's on this Mac's, and only this Mac's channel is marked.
+    func testArrivalWaitsUntilTheDeviceIsOnThisMacsChannel() async {
+        let f = makeNamed()
+        f.switcher.current = 0
+        f.bt.preset(paired: true, connected: true, addr)
+        var polls = 0
+        var statusBeforeSwitch: DeviceStatus?
+        f.engine.sleepHook = { [switcher = f.switcher, engine = f.engine, id = f.device.id] _ in
+            polls += 1
+            if polls == 3 {
+                statusBeforeSwitch = engine.statuses[id]
+                switcher.current = 1  // the PC's AutoSwitch sent it here
+            }
+        }
+        await arrive(f)
+        XCTAssertGreaterThanOrEqual(polls, 3)
+        XCTAssertNotEqual(statusBeforeSwitch, .connected)
+        XCTAssertEqual(f.engine.statuses[f.device.id], .connected)
+        XCTAssertFalse(f.bt.calls.contains { $0.hasPrefix("connect:") }, "never called: \(f.bt.calls)")
+        XCTAssertFalse(f.switcher.calls.contains("mark:\(digits):0"), "\(f.switcher.calls)")
+    }
+
+    /// Switched to the other computer by hand while the KVM is here: no auto-reconnect.
+    func testAChannelSwitcherLeavingWhileTheKVMIsHereIsNotPulledBack() async {
+        let f = make(releaseToChannel: 1)
+        f.bt.preset(paired: true, connected: true, addr)
+        await arrive(f)
+        XCTAssertEqual(f.engine.statuses[f.device.id], .connected)
+        let btCalls = f.bt.calls.count
+
+        f.bt.simulateConnectionDrop(addr)
+        for _ in 0..<200 { await Task.yield() }
+        XCTAssertFalse(f.bt.calls.dropFirst(btCalls).contains { $0.hasPrefix("connect:") }, "\(f.bt.calls)")
+        XCTAssertFalse(f.switcher.calls.contains { $0.hasPrefix("switch:") })
     }
 
     // MARK: - Arrival: wait, don't call (hardware 2026-11-13: paging a K380 kept it out ~20 s)
@@ -177,8 +269,10 @@ final class ChannelSwitchTests: XCTestCase {
     func testAReleaseTeachesTheEngineToWaitNextTime() async {
         let f = make()
         f.switcher.marks = [HostChannels.autoSwitchMark, 0, 0]
+        f.switcher.reachable = false  // on the other computer: doesn't answer here
         await arrive(f)  // unknown yet: connected the usual way
         XCTAssertTrue(f.bt.calls.contains("connect:\(addr)"))
+        f.switcher.reachable = true
         await leave(f)  // answers the query, gets switched
         XCTAssertTrue(f.engine.switchesChannels(f.device))
 
@@ -256,9 +350,9 @@ final class ChannelSwitchTests: XCTestCase {
     /// It lands while the KVM is away, but its control channel needs a moment: keep asking.
     func testALateReleaseKeepsAskingUntilTheDeviceAnswers() async {
         let f = make(releaseToChannel: 1)
-        f.engine.channelSwitchLingerMs = 0  // it lands later, not while its link is closing
         f.engine.channelArrivalWaitMs = 1000
         await arrive(f)
+        f.switcher.reachable = false  // asleep at the release: not sent
         await leave(f)
         let switches = f.switcher.calls.filter { $0.hasPrefix("switch:") }.count
 

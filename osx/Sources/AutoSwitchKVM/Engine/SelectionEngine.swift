@@ -281,7 +281,7 @@ final class SelectionEngine: ObservableObject {
             // A busy device's events are its operation's business, with one exception: a channel-
             // switching device that lands here while the KVM is away (e.g. during its arrival wait)
             // must still be sent on once it's free, or it's stranded here (hardware, 2026-11-13).
-            if connected, !selected, presenceEvaluated, switchesChannels(device) {
+            if connected, !selected, presenceEvaluated, switchesChannels(device), !sentAway.contains(device.id) {
                 lateReleasePending.insert(device.id)
                 Log.engine.debug(
                     "\(device.name): connected while busy and the KVM is elsewhere; sending it on when free")
@@ -299,7 +299,9 @@ final class SelectionEngine: ObservableObject {
                 setStatus(device.id, .bluetoothOff)
                 continue
             }
-            let connected = await bt.isConnected(device.normalizedAddress)
+            var connected = await bt.isConnected(device.normalizedAddress)
+            // A ZMK keyboard keeps its link while on another computer's channel: not here.
+            if connected, switchesChannels(device), await isOnOwnChannel(device) == false { connected = false }
             guard !isBusy(device.id) else { continue }  // an operation started while we were asking
             updateStatus(device, connected: connected, origin: "poll")
         }
@@ -318,6 +320,12 @@ final class SelectionEngine: ObservableObject {
         }
 
         if !connected, old == .connected, selected, bluetoothPowered, device.enabled, !suspended {
+            if switchesChannels(device) {
+                // Its channel key, or the other computer's AutoSwitch: the user's choice. Don't
+                // pull it back (they use it on both computers, 2026-11-14).
+                Log.engine.log("\(device.name): went to another computer while the KVM is here; leaving it there")
+                return
+            }
             Log.engine.log("\(device.name): dropped unexpectedly while the source is present")
             onUnexpectedDisconnect?(device)
             maybeAutoReconnect(device)
@@ -518,6 +526,7 @@ final class SelectionEngine: ObservableObject {
     func evaluateNow() async {
         let present = !presentKeys.isEmpty
         selected = present  // always reflect real presence for the UI
+        if present { sentAway.removeAll() }
 
         let wouldAct = present != automationActed || (!present && reconcileOnSeed)
         if suspended {
@@ -771,6 +780,8 @@ final class SelectionEngine: ObservableObject {
         // Spec §5a type 5: a device that switches channel on request comes over by itself when the
         // other computer sends it here. Calling it meanwhile only gets in its way (seen on
         // hardware: three page timeouts kept a K380 out for ~20 s), so wait for it instead.
+        // A device that answers the channel query is one, even before it was seen this session.
+        if !device.managePairing, !switchesChannels(device) { _ = await isOnOwnChannel(device) }
         if switchesChannels(device) {
             await waitForChannelArrival(device, run: run, respectSelection: respectSelection, start: start)
             return
@@ -1110,6 +1121,9 @@ final class SelectionEngine: ObservableObject {
                 setStatus(device.id, .disconnected)
                 if notify { onNotice?("Switched", "\(name) went to the other computer") }
                 return
+            case .alreadyAway:
+                setStatus(device.id, .disconnected)
+                return
             case .abandoned:
                 return
             case .unreachable, .notPossible:
@@ -1306,7 +1320,7 @@ final class SelectionEngine: ObservableObject {
                 markAborted(device.id)
                 return
             }
-            if await bt.isConnected(addr), await bt.isHIDReady(addr) != false {
+            if await bt.isConnected(addr), await bt.isHIDReady(addr) != false, await isOnOwnChannel(device) != false {
                 let timeline = run.since.map { "; \(Elapsed.since($0)) after the source appeared" } ?? ""
                 Log.engine.log(
                     "\(device.name): connected ✓ (came over from the other computer) in \(Elapsed.since(start))\(timeline)"
@@ -1329,15 +1343,17 @@ final class SelectionEngine: ObservableObject {
         await switchChannel(device, why: why) == .sent
     }
 
-    private enum ChannelSwitchResult { case sent, unreachable, notPossible, abandoned }
+    private enum ChannelSwitchResult { case sent, alreadyAway, unreachable, notPossible, abandoned }
 
     /// `.unreachable`: the device's control channel didn't answer (not connected here, or not
     /// ready yet: macOS registers the HID device a moment after the Bluetooth connection).
     /// `.notPossible`: it answered, but the target is unknown or the switch failed (logged).
     /// `abortIf`: checked right after the channel query (the query takes a moment; a release must
     /// not send the device away if the KVM came back meanwhile). Non-nil → `.abandoned`.
+    /// `.alreadyAway`: it answered from another computer's channel (a ZMK keyboard keeps its link
+    /// to this Mac and answers over it): nothing to send. `lateRelease`: the KVM was already away.
     private func switchChannel(
-        _ device: BTDevice, why: String, abortIf: (() -> String?)? = nil
+        _ device: BTDevice, why: String, lateRelease: Bool = false, abortIf: (() -> String?)? = nil
     ) async -> ChannelSwitchResult {
         guard let hostSwitcher else { return .unreachable }
         let addr = device.normalizedAddress
@@ -1350,6 +1366,16 @@ final class SelectionEngine: ObservableObject {
         }
         guard let ch = channels else { return .unreachable }  // no channel switching, or not reachable here
         channelSwitchers.insert(device.id)
+        if let own = await ownChannel(device, ch) {
+            if ch.current != own {
+                Log.engine.log(
+                    "\(device.name): already on \(ch.noun.lowercased()) \(ch.current + 1), not this Mac's "
+                        + "(\(own + 1)); nothing to send")
+                return .alreadyAway
+            }
+        } else if !lateRelease {
+            ownChannels[device.id] = ch.current  // released while here: it was on this Mac's channel
+        }
         if let stop = abortIf?() {
             Log.engine.log("\(device.name): not sent to the other computer: \(stop)")
             return .abandoned
@@ -1390,7 +1416,7 @@ final class SelectionEngine: ObservableObject {
             return .notPossible
         }
         Log.engine.log("\(device.name): sent to \(ch.noun.lowercased()) \(target + 1) (\(why))")
-        channelSwitchSent[device.id] = .now
+        sentAway.insert(device.id)
         return .sent
     }
 
@@ -1407,17 +1433,24 @@ final class SelectionEngine: ObservableObject {
             let addr = device.normalizedAddress
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                if await self.isOnOwnChannel(device) == false {
+                    self.channelMarked.remove(id)  // mark it once it's really here
+                    Log.engine.debug("\(device.name): linked, but on another computer's channel; not marking")
+                    return
+                }
                 do {
                     let marked = try await withTimeout(self.store.config.btCallTimeoutSecs) {
                         try await hostSwitcher.markCurrentChannel(addr)
                     }
                     if let marked {
                         self.channelSwitchers.insert(id)
+                        if self.ownChannels[id] == nil { self.ownChannels[id] = marked }
                         Log.engine.log(
                             "\(device.name): marked channel \(marked + 1) as this Mac's (for the other computer's AutoSwitch)"
                         )
-                    } else if try await hostSwitcher.channels(addr) != nil {
+                    } else if let ch = try await hostSwitcher.channels(addr) {
                         self.channelSwitchers.insert(id)  // already marked: still a channel switcher
+                        if self.ownChannels[id] == nil { self.ownChannels[id] = ch.current }
                     }
                 } catch {
                     self.channelMarked.remove(id)
@@ -1427,10 +1460,10 @@ final class SelectionEngine: ObservableObject {
             return
         }
         guard presenceEvaluated, !store.config.paused, !suspended else { return }
-        if let sent = channelSwitchSent[id], sent.duration(to: .now) < .milliseconds(channelSwitchLingerMs) {
-            Log.engine.debug(
-                "\(device.name): still reported connected \(Elapsed.since(sent)) after it was sent away; "
-                    + "its connection is closing")
+        if sentAway.contains(id) {
+            // This Mac sent it away, and it came back: its channel key, or the other computer's
+            // AutoSwitch. The user's choice (they use it on both computers, 2026-11-14).
+            Log.engine.log("\(device.name): back on this Mac while the KVM is elsewhere; leaving it here")
             return
         }
         if isBusy(id) {
@@ -1443,11 +1476,56 @@ final class SelectionEngine: ObservableObject {
         startLateRelease(device)
     }
 
-    /// When each device was last sent to another channel. Its connection lingers a moment after
-    /// that (an LE keyboard's HID services stayed registered ~1.6 s on hardware, 2026-11-14), and a
-    /// status report in that window isn't the device coming back.
-    private var channelSwitchSent: [UUID: ContinuousClock.Instant] = [:]
-    var channelSwitchLingerMs = 3000
+    /// Devices this Mac sent to another channel since the KVM left (cleared when it returns). One
+    /// that comes back meanwhile was brought back on purpose (its channel key, or the other
+    /// computer), so it is left here: only a device the release couldn't send (e.g. asleep at the
+    /// switch) gets a late release.
+    private var sentAway = Set<UUID>()
+    /// This Mac's channel per device: the channel carrying this Mac's name, else the only paired
+    /// channel without a name, else as seen while the KVM was here. Kept for the session.
+    private var ownChannels: [UUID: Int] = [:]
+    /// This Mac's name as a device stores it (HID++ Hosts Info); tests set their own.
+    var thisComputerName = LogitechHostSwitcher.computerName()
+
+    /// Whether a channel-switching device is on this Mac's channel. nil when it can't tell (it
+    /// doesn't answer, or this Mac's channel isn't known): callers then trust the link. A ZMK
+    /// keyboard keeps its link to every paired computer and, with module 2.0, answers over it, so
+    /// a link alone doesn't mean the keyboard is here (hardware 2026-11-14).
+    func isOnOwnChannel(_ device: BTDevice) async -> Bool? {
+        guard let hostSwitcher, !device.managePairing else { return nil }
+        let addr = device.normalizedAddress
+        let channels: HostChannels?
+        do {
+            channels = try await withTimeout(store.config.btCallTimeoutSecs) { try await hostSwitcher.channels(addr) }
+        } catch {
+            Log.engine.debug("\(device.name): channel query failed: \(Failure(error).summary)")
+            return nil
+        }
+        guard let ch = channels else { return nil }
+        channelSwitchers.insert(device.id)
+        guard let own = await ownChannel(device, ch) else { return nil }
+        return ch.current == own
+    }
+
+    /// This Mac's channel for the device (see `ownChannels`), resolved from its stored names once.
+    private func ownChannel(_ device: BTDevice, _ ch: HostChannels) async -> Int? {
+        if let own = ownChannels[device.id] { return own }
+        guard let hostSwitcher else { return nil }
+        let addr = device.normalizedAddress
+        let names: [String?]?
+        do {
+            names = try await withTimeout(store.config.btCallTimeoutSecs) { try await hostSwitcher.channelNames(addr) }
+        } catch {
+            Log.engine.debug("\(device.name): channel names query failed: \(Failure(error).summary)")
+            return nil
+        }
+        guard let own = HostChannels.ownChannel(names: names, paired: ch.paired, myName: thisComputerName) else {
+            return nil
+        }
+        ownChannels[device.id] = own
+        Log.engine.debug("\(device.name): this Mac's \(ch.noun.lowercased()) is \(own + 1) (from the names it stores)")
+        return own
+    }
 
     /// Devices that connected here while the KVM was away, while busy: sent on once freed.
     private var lateReleasePending = Set<UUID>()
@@ -1473,11 +1551,13 @@ final class SelectionEngine: ObservableObject {
                     Log.engine.debug("\(device.name): late release stopped: the KVM came back")
                     return
                 }
-                switch await self.switchChannel(device, why: "it connected here while the KVM is elsewhere") {
+                switch await self.switchChannel(
+                    device, why: "it connected here while the KVM is elsewhere", lateRelease: true)
+                {
                 case .sent:
                     self.setStatus(id, .disconnected)
                     return
-                case .notPossible, .abandoned:
+                case .alreadyAway, .notPossible, .abandoned:
                     return  // logged by switchChannel
                 case .unreachable:
                     guard attempt < tries, await self.bt.isConnected(addr) else { break }

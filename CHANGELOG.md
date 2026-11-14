@@ -33,9 +33,16 @@ GitHub release (and from there into the in-app update notes).
 ### macOS
 
 - ZMK keyboards with the AutoSwitch firmware module follow the KVM from the Mac too: the Mac
-  switches the keyboard to the other computer's Bluetooth profile. Device settings list the
-  profiles and mark the empty ones. A keyboard paired with just two computers works without setup.
+  switches the keyboard to the other computer's Bluetooth profile. Device settings list its
+  channels and mark the empty ones. A keyboard paired with just two computers works without setup.
 - Bluetooth LE keyboards (such as ZMK keyboards) can be added, and show as connected.
+- ZMK keyboards with zmk-autoswitch 2.0 work too, and channel-switching keyboards show which
+  computer each channel belongs to: AutoSwitch writes this Mac's name on its own channel when the
+  keyboard has none there. Settings flags channels that aren't paired with anything, on Logitech
+  keyboards too, and never sends a keyboard to one.
+- A keyboard you switch by hand stays where you put it: AutoSwitch no longer sends it back when
+  it comes to the Mac while the KVM is on the other computer, or pulls it back when it leaves while
+  the KVM is here.
 
 ## v0.3.1 (2026-11-13)
 
