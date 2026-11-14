@@ -380,14 +380,18 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   Verified both ways with the Mac 2026-11-13. Verified on a K380:
   feature index 7, v1, 3 channels; a direct Bluetooth K380 answers any device index (use 0xFF).
   Reference: `reference_flow/` (gitignored; offline Logitech Flow simulator + HID++ docs).
-- **ZMK keyboards switch through the AutoSwitch firmware module** (spec §5a type 5, 2026-11-13,
-  not yet tried on hardware). `Platform/ZmkHostSwitcher.cs` talks to the firmware module (casab/zmk-autoswitch)
-  over the raw HID collection (usage page 0xFF60, usage 0x61, any vendor; reports are 32 bytes
-  with no report ID, so HidSharp writes 33 bytes with byte 0 = 0 and reads strip it). Protocol:
-  `Core/ZmkHostProtocol.cs`. The engine gets `CompositeHostSwitcher(Logitech, Zmk)`; channel names
-  (0x1815) are Logitech-only, so `GetChannelNamesAsync` still goes to `LogitechHostSwitcher`. The
-  module reports which profiles are paired (`HostChannels.Paired`), and the engine refuses an
-  unpaired target. Firmware build: `ci/build.sh` in that repo, in Docker (see its README).
+- **ZMK keyboards speak HID++ through the AutoSwitch firmware module 2.0** (casab/zmk-autoswitch;
+  spec §5a type 5; tried on the Reviung41 2026-11-14, PC -> Mac). `LogitechHostSwitcher` handles
+  them: it accepts a Logitech device's vendor collection (any vendor page) or any vendor's BLE
+  HID++ collection (usage page 0xFF43, usage 0x0202, 20-byte output report), never other vendor
+  collections (the Magic Trackpad has one at 0xFF00). It fills `HostChannels.Paired` from Hosts
+  Info 0x1815 (one request per channel) and, when marking, writes `Dns.GetHostName()` on this
+  PC's channel if the device allows it and the name is empty. A channel is marked (and named)
+  once per app session: after a firmware update or re-pair, restart the app. The 1.x backend
+  (`Platform/ZmkHostSwitcher.cs`, raw HID 0xFF60/0x61, `Core/ZmkHostProtocol.cs`) stays behind it
+  in `CompositeHostSwitcher(Logitech, Zmk)` until no keyboard runs 1.x. Firmware build:
+  `ci/build.sh` in that repo, in Docker (see its README). To probe a keyboard by hand, a 40-line
+  HidSharp console app that writes `11 FF <index> <fn<<4|0B> …` and prints the reply is enough.
 - **Toasts need Windows App SDK 2.6.5+ in the installed (self-contained) build.** Up to 2.3.1,
   `AppNotificationManager.Register()` failed with 0x8007007E in every Velopack build (v0.1.1-v0.3.1)
   while dev builds (framework-dependent) worked: the runtime's `IsSelfContained()` loads

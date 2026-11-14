@@ -202,8 +202,8 @@ controller** (the operations in §5). It owns no platform APIs directly.
   marked by AutoSwitch; with no other channel marked at all and the device reporting pairing,
   the single other paired channel, Windows 2026-11-14, macOS 2026-11-14) and stop: no disconnect, no unpair. If the target is unknown or the switch
   fails, warn and fall through to the usual release. **Never send a device to a channel it
-  reports as unpaired** (the ZMK module reports pairing per profile; Logitech's Change Host
-  doesn't): it would only advertise there for a new pairing. Warn instead (Windows 2026-11-13, macOS 2026-11-14).
+  reports as unpaired** (pairing comes from HID++ Hosts Info 0x1815 or the ZMK module 1.x; a
+  device without either doesn't say): it would only advertise there for a new pairing. Warn instead (Windows 2026-11-13, macOS 2026-11-14).
 - **Disconnect**; if `managePairing`, then **unpair** (remove the bond). Set status `disconnected`.
 - **Marking** (type 5): whenever such a device becomes connected while this host is selected, mark
   this host's channel (once per session) so the other host can find it.
@@ -390,7 +390,7 @@ in Add device and in each device's settings, and say plainly what AutoSwitch can
 | 1 | **Hands off by pairing** | One pairing. Once the current host removes it, the next host can pair with no button press. | **Supported** (macOS, Windows): `managePairing` on; unpair on leave, pair on arrive. |
 | 2 | **Picks the computer itself** | A pairing per host slot (ZMK/QMK profiles, Logitech Easy-Switch); a key on the device chooses the host. | **Not possible** from any host: a host can't change the device's slot, and unpairing breaks that slot (re-pair from the device). Status only. Workarounds: the device's own switch key, or USB through the KVM. |
 | 3 | **Re-pairs by hand** | Remembers one Bluetooth host; changing hosts needs pairing mode on the device (Xbox, PlayStation, Nintendo controllers). | **Not possible** automatically: after an unpair the device still points at the old host, and the new host can't pair until the user enters pairing mode. Status only. Workarounds: keep it on one computer, or connect it by cable through the KVM. |
-| 5 | **Switches channel on request** | A type 2 device whose connected host can tell it to change slot: Logitech Easy-Switch devices with HID++ 2.0 feature **0x1814 "Change Host"** (`getHostInfo`, `setCurrentHost(n)`, `getCookies`, `setCookie(n, b)`), and ZMK keyboards running the AutoSwitch firmware module (below; Windows 2026-11-13, macOS 2026-11-14). | **Supported on release** (Windows and macOS implemented 2026-11-13): the leaving host sends it to the other host's channel; pairings untouched; `managePairing` off. Only the host it's connected to can send the command, so each host does its own release. See the Disconnect flow. |
+| 5 | **Switches channel on request** | A type 2 device whose connected host can tell it to change slot: Logitech Easy-Switch devices with HID++ 2.0 feature **0x1814 "Change Host"** (`getHostInfo`, `setCurrentHost(n)`, `getCookies`, `setCookie(n, b)`), and ZMK keyboards running the AutoSwitch firmware module, which speaks the same HID++ subset since 2.0 (below; Windows 2026-11-14, macOS pending). | **Supported on release** (Windows and macOS implemented 2026-11-13): the leaving host sends it to the other host's channel; pairings untouched; `managePairing` off. Only the host it's connected to can send the command, so each host does its own release. See the Disconnect flow. |
 | 4 | **Joins whichever computer connects** | Remembers several hosts and connects to the one that asks (many headphones/speakers, some mice). | **macOS: supported** with `managePairing` off (disconnect on leave, connect on arrive). **Windows: not yet**: there is no public API to disconnect a Bluetooth device without unpairing it (a future option for Classic devices: toggling the device's services with `BluetoothSetServiceState`). |
 
 **Classification** (best effort, shown with its confidence: *known* model, *likely* from vendor or
@@ -411,55 +411,69 @@ device or LE appearance: input, game controller, audio). Rules, first match wins
 
 Type 5 is detected live, not by these rules: for a Logitech device (or any type 2 device), ask it
 over HID++ for feature 0x1814 while it's connected. A device that answers is type 5, *known*. The
-HID++ endpoint is the device's vendor collection (usage page `0xFF00`, 20-byte long report `0x11`,
-device index `0xFF` for a direct Bluetooth connection). Verified on a Logitech K380 (Classic):
-feature index 7, version 1, 3 channels. **Channel marks:** each AutoSwitch writes cookie `0xA5` on
-its own channel (the firmware clears a channel's cookie when a new host pairs there), so the
-leaving host can find the other host's channel without configuration.
-**Channel names** (Windows and macOS 2026-11-13): HID++ feature **0x1815 "Hosts Info"** stores the name
-each channel's host gave itself when it paired (Windows: the computer name; macOS: the computer
-name, e.g. "…'s MacBook Pro"). Layout as in Solaar: `[0]` → caps (bit 0 = names), ?, hosts,
-current; `[1](host)` → host, status (0 = not paired), ?, ?, name length; `[3](host, offset)` →
-host, offset, up to 14 name bytes. Verified on the K380 (feature index 8, v0, names for all 3
-channels; a stale pairing keeps its old name). Shown in the channel choice ("Channel 2 · name");
-read for Settings only, never on the release path.
+HID++ endpoint is a vendor collection with a 20-byte long report `0x11` (device index `0xFF` for a
+direct Bluetooth connection): on a Logitech device (`046D`) any vendor usage page (`0xFF00` on the
+K380 over Classic); on any other vendor only the Bluetooth LE HID++ layout, usage page `0xFF43` /
+usage `0x0202` (what the ZMK module presents). **Never probe other vendor collections**: the Magic
+Trackpad has one at `0xFF00`. Match the collection to the device's Bluetooth address. Verified on
+a Logitech K380 (Classic): feature index 7, version 1, 3 channels. **Channel marks:** each
+AutoSwitch writes cookie `0xA5` on its own channel (the firmware clears a channel's cookie when a
+new host pairs there), so the leaving host can find the other host's channel without
+configuration.
+**Channel names and pairing** (Windows and macOS 2026-11-13): HID++ feature **0x1815 "Hosts
+Info"** stores the name each channel's host gave itself, and whether each channel is paired.
+Layout as in Solaar (`hidpp20.py` `get_host_names` / `set_host_name`): `[0]` → caps (bit 0 = names
+readable, bit 1 = names writable), ?, hosts, current; `[1](host)` → host, status (0 = not paired),
+bus, pages, name length, name max length; `[3](host, offset)` → host, offset, up to 14 name bytes;
+`[4](host, offset, up to 14 bytes)` writes a name in 14-byte pieces from offset 0. Verified on the
+K380 (feature index 8, v0, names for all 3 channels; a stale pairing keeps its old name). Names are
+shown in the channel choice ("Channel 2 · name") and read for Settings only. **Pairing** fills
+`HostChannels.Paired` (one `[1]` request per channel, on the release path too; Windows 2026-11-14),
+so the never-to-an-unpaired-channel rule and the automatic fallback apply to every device with
+Hosts Info. **Writing names** (Windows 2026-11-14): when marking its channel, a host writes its own
+name there (Windows: `Dns.GetHostName()`, cut to the name max length at a character boundary) if
+the device allows writing (caps bit 1) and the channel has no name. Never overwrite a name:
+Logitech devices name their channels themselves.
 
-**ZMK keyboards: the AutoSwitch firmware module** ([casab/zmk-autoswitch](https://github.com/casab/zmk-autoswitch); Windows
-implemented 2026-11-13 and tried on hardware 2026-11-14 (PC -> Mac); macOS implemented 2026-11-14, GET_INFO
-verified on the Reviung41, switching not yet tried). ZMK has no host-side way to
-change the Bluetooth profile, so the module adds one. Channels are the keyboard's Bluetooth
-profiles (`BT_SEL 0..n`). Transport: the raw HID collection of
-[zzeneg/zmk-raw-hid](https://github.com/zzeneg/zmk-raw-hid) (usage page `0xFF60`, usage `0x61`,
-32-byte input and output reports, no report ID; over Bluetooth LE as a second HID service, and
-over USB). Any vendor ID; match the collection to the Bluetooth address like the HID++ endpoint.
-Protocol v1, every report (request and reply):
+**ZMK keyboards: the AutoSwitch firmware module** ([casab/zmk-autoswitch](https://github.com/casab/zmk-autoswitch),
+2.0 since 2026-11-14). ZMK has no host-side way to change the Bluetooth profile, so the module
+adds one, and it speaks the same protocol as a Logitech Easy-Switch keyboard: a HID++ 2.0 subset on
+its own vendor collection (usage page `0xFF43`, usage `0x0202`, long report `0x11` only, 19 bytes
+after the ID, in and out), as a second HID service over Bluetooth LE and a second HID interface
+over USB, under the keyboard's own vendor/product ID (never Logitech's). Channels are the
+keyboard's Bluetooth profiles (`BT_SEL 0..n`). Both apps reach it through their HID++ backend.
 
-| Byte | Meaning |
-|---|---|
-| 0-1 | magic `'A' 'S'` (other raw HID traffic is ignored) |
-| 2 | protocol version, `1` |
-| 3 | command; a reply carries `command \| 0x80` |
-| 4.. | arguments; in a reply, byte 4 is the status (0 OK, 1 invalid argument, 2 unsupported) |
+| Index | Feature | Functions |
+|---|---|---|
+| 0 | `0x0000` Root | `getFeature(id)` → index, type, version (index 0 = absent); `getProtocolVersion` → 4, 2, ping |
+| 1 | `0x0001` Feature set | `getCount` → features after the root; `getFeatureId(i)` → id, type, version |
+| 2 | `0x0005` Device name | `getNameLength`, `getName(offset)`, `getType` → 0 (keyboard) |
+| 3 | `0x1814` Change Host v1 | `getHostInfo` → profile count, current, flags 0; `setCurrentHost(n)` replies, then switches ~100 ms later (`CONFIG_ZMK_AUTOSWITCH_SELECT_DELAY_MS`); `getCookies`; `setCookie(n, b)` |
+| 4 | `0x1815` Hosts Info v0 | caps `0x03`; status 1 = paired; names up to 32 UTF-8 bytes; host `0xFF` = current |
 
-- `GET_INFO` (`0x01`) → status, profile count, active profile (0-based), paired bitmask (lo,
-  hi; bit n = profile n is bonded), then one mark byte per profile.
-- `SELECT` (`0x02`) profile → status. The keyboard selects the profile ~100 ms after replying
-  (`CONFIG_ZMK_AUTOSWITCH_SELECT_DELAY_MS`), so the reply reaches this host first.
-- `SET_MARK` (`0x03`) profile, value → status. The counterpart of the HID++ cookie (`0xA5` =
-  AutoSwitch runs here). Stored in the keyboard's settings together with the profile's bonded
-  address; reported as 0 once the profile is bonded to a different host. Fails for an unpaired
-  profile.
+Errors: `0x11, 0xFF, 0xFF, feature index, function | software ID, code` (2 invalid argument,
+3 out of range, 6 invalid feature index, 7 invalid function). Cookies and names are stored with
+the profile's bonded address, read as empty once the profile is bonded to a different host, and
+can't be written for an unpaired profile (error 2). The firmware allows `setCurrentHost` to an
+unpaired profile (the keyboard advertises there, as on Logitech); the engines refuse it. Verified
+on the user's Reviung41 2026-11-14 from Windows: features found at indexes 3 and 4, 5 profiles,
+1.x marks carried over as cookies, name written and read back, PC -> Mac switch.
 
-Reading the reply on Windows: HID reports carry a leading report-ID byte `0` (write 33 bytes,
-strip byte 0 on read).
+Firmware lesson: don't write settings from a settings commit handler (2.0's first build scheduled
+a flash write there while ZMK loaded settings at boot, and the keyboard never started: no USB, no
+Bluetooth). Writes happen only after a host changes something.
 
-On macOS the raw HID service of an LE keyboard is an `IOHIDDevice` of its own (`Transport = "Bluetooth Low
-Energy"`, usage pair 0xFF60/0x61), with no `SerialNumber`: match its `DeviceAddress` property
-(`"e7-99-a2-72-a6-76"`). Reports go as is (32 bytes, output report 0). It answered right after the
-firmware update and re-pair, and needs no Input Monitoring permission (a vendor usage page, not a
-keyboard). macOS can't open or close an LE link: an LE device counts as connected while its HID
-services are registered, "connect" waits for it to connect by itself, and a disconnect fails with
-an explanation.
+**Module 1.x** (2026-11-13, retired by 2.0): its own protocol (`'A' 'S'`, version 1, `GET_INFO` /
+`SELECT` / `SET_MARK`) over [zzeneg/zmk-raw-hid](https://github.com/zzeneg/zmk-raw-hid) (usage page
+`0xFF60`, usage `0x61`, 32-byte reports, no report ID). Both apps keep a v1 backend
+(`ZmkHostSwitcher`) until no keyboard runs 1.x; it answers only when the HID++ backend doesn't.
+
+On macOS a raw HID service of an LE keyboard is an `IOHIDDevice` of its own (`Transport = "Bluetooth
+Low Energy"`), with no `SerialNumber`: match its `DeviceAddress` property (`"e7-99-a2-72-a6-76"`).
+Seen with 1.x: it answered right after the firmware update and re-pair, and needs no Input
+Monitoring permission (a vendor usage page, not a keyboard). macOS can't open or close an LE link:
+an LE device counts as connected while its HID services are registered, "connect" waits for it to
+connect by itself, and a disconnect fails with an explanation.
 
 The type sets the **Manage pairing default** when a device is added (on for type 1 and for unknown
 Classic devices, off otherwise); the user can still change it. Windows: classification is

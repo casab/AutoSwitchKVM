@@ -105,16 +105,15 @@ public sealed class AppController
         }
     }
 
-    /// "Channel 2 · MacBook" style labels for a channel choice: index 0 = automatic. A device that
-    /// reports pairing per channel (the ZMK module) calls them profiles and flags the empty ones.
+    /// "Channel 2 · MacBook" style labels for a channel choice: index 0 = automatic. Channels the
+    /// device reports as unpaired are flagged (Hosts Info, or the ZMK module).
     public static IReadOnlyList<string> ChannelChoiceLabels(string automatic, IReadOnlyList<string?>? names, int count = 3, HostChannels? channels = null)
     {
         var labels = new List<string> { automatic };
-        var noun = channels?.Paired is null ? "Channel" : "Profile";
         for (var i = 0; i < Math.Max(count, names?.Count ?? 0); i++)
         {
             var name = names is not null && i < names.Count ? names[i] : null;
-            var label = name is null ? $"{noun} {i + 1}" : $"{noun} {i + 1} · {name}";
+            var label = name is null ? $"Channel {i + 1}" : $"Channel {i + 1} · {name}";
             if (channels?.Paired is { } paired && i < paired.Count && !paired[i]) label += " (not paired)";
             else if (channels is not null && i == channels.Current) label += " (this PC)";
             labels.Add(label);
@@ -476,9 +475,7 @@ public sealed class AppController
             catch (Exception ex) { Log.Debug("hidpp", $"{name}: channel query failed ({ex.Message})"); }
             if (channels is not null)
                 result = new HandoffAssessment(HandoffType.ChannelSwitch, HandoffConfidence.Known,
-                    channels.Paired is null
-                        ? $"{channels.Count} channels; this PC is channel {channels.Current + 1}."
-                        : $"AutoSwitch firmware module: {channels.Count} Bluetooth profiles; this PC is profile {channels.Current + 1}.");
+                    $"{channels.Count} channels; this PC is channel {channels.Current + 1}.");
             else
                 cache = false;   // maybe just not connected right now: ask again next time
         }

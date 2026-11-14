@@ -15,12 +15,20 @@ namespace AutoSwitchKVM.App.Platform;
 ///   [2] getCookies() -> one byte per host
 ///   [3] setCookie(host, cookie)       (AutoSwitch marks its own channel with HostChannels.AutoSwitchMark)
 ///
-/// The HID++ endpoint is the device's vendor collection (usage page 0xFF00, 20-byte long report
-/// 0x11). It is matched to the Bluetooth address through the device tree: an LE collection
-/// carries the address in its path, a Classic one's parent (BTHENUM\{1124}…) does.
+/// The HID++ endpoint is the device's vendor collection with a 20-byte long report 0x11: on a
+/// Logitech device (vendor 0x046D) any vendor usage page (0xFF00 on the K380 over Classic); on any
+/// other vendor only the Bluetooth LE HID++ collection, usage page 0xFF43 / usage 0x0202, which is
+/// what the zmk-autoswitch module (2.x) presents. Other vendor collections are never probed (the
+/// Magic Trackpad has one at 0xFF00). It is matched to the Bluetooth address through the device
+/// tree: an LE collection carries the address in its path, a Classic one's parent
+/// (BTHENUM\{1124}…) does.
+///
+/// Hosts Info (0x1815), when present, also gives per-channel pairing (HostChannels.Paired) and
+/// lets this PC write its name on its own channel if the device has none stored there.
 public sealed class LogitechHostSwitcher : IHostSwitcher
 {
     private const int LogitechVendor = 0x046D;
+    private const uint HidppLeUsage = 0xFF430202;   // usage page 0xFF43, usage 0x0202
     private const byte LongReport = 0x11;
     private const byte DirectDevice = 0xFF;      // a device connected straight to this host
     private const byte SoftwareId = 0x0B;        // ours; Logitech software uses other IDs
@@ -33,7 +41,7 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
     public async Task<HostChannels?> GetChannelsAsync(string address, CancellationToken ct = default)
     {
         await _lock.WaitAsync(ct);
-        try { return await Task.Run(() => WithEndpoint(address, (s, fi) => ReadChannels(s, fi)), ct); }
+        try { return await Task.Run(() => WithEndpoint(address, (s, fi) => ReadChannels(s, fi, address)), ct); }
         finally { _lock.Release(); }
     }
 
@@ -62,10 +70,14 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
         {
             await Task.Run(() => WithEndpoint(address, (s, fi) =>
             {
-                var ch = ReadChannels(s, fi);
-                if (ch is null || ch.Current >= ch.Marks.Count || ch.Marks[ch.Current] == HostChannels.AutoSwitchMark) return (object?)null;
-                Request(s, fi, 3, new[] { (byte)ch.Current, HostChannels.AutoSwitchMark });
-                Log.Info("hidpp", $"{address}: marked channel {ch.Current + 1} as this PC's (for the other computer's AutoSwitch)");
+                var ch = ReadChannels(s, fi, address);
+                if (ch is null || ch.Current >= ch.Marks.Count) return (object?)null;
+                if (ch.Marks[ch.Current] != HostChannels.AutoSwitchMark)
+                {
+                    Request(s, fi, 3, new[] { (byte)ch.Current, HostChannels.AutoSwitchMark });
+                    Log.Info("hidpp", $"{address}: marked channel {ch.Current + 1} as this PC's (for the other computer's AutoSwitch)");
+                }
+                WriteNameIfEmpty(s, address, ch.Current);
                 return (object?)true;
             }), ct);
         }
@@ -89,13 +101,7 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
         {
             return await Task.Run(() => WithEndpoint(address, (s, _) =>
             {
-                var digits = address.Replace(":", "").Replace("-", "").ToUpperInvariant();
-                if (!_hostsInfoIndex.TryGetValue(digits, out var hi))
-                {
-                    var reply = Request(s, 0x00, 0, new[] { (byte)(HostsInfoFeature >> 8), (byte)(HostsInfoFeature & 0xFF) });
-                    hi = reply is null ? (byte)0 : reply[4];
-                    if (reply is not null) _hostsInfoIndex[digits] = hi;
-                }
+                var hi = HostsInfoIndex(s, address);
                 if (hi == 0) return null;
                 var info = Request(s, hi, 0, Array.Empty<byte>());
                 if (info is null || (info[4] & 0x01) == 0) return null;   // no names on this device
@@ -120,6 +126,71 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
             }), ct);
         }
         finally { _lock.Release(); }
+    }
+
+    /// The Hosts Info feature index (cached per address), 0 when the device doesn't have it.
+    private byte HostsInfoIndex(HidStream s, string address)
+    {
+        var digits = address.Replace(":", "").Replace("-", "").ToUpperInvariant();
+        if (_hostsInfoIndex.TryGetValue(digits, out var hi)) return hi;
+        var reply = Request(s, 0x00, 0, new[] { (byte)(HostsInfoFeature >> 8), (byte)(HostsInfoFeature & 0xFF) });
+        hi = reply is null ? (byte)0 : reply[4];
+        if (reply is not null) _hostsInfoIndex[digits] = hi;
+        return hi;
+    }
+
+    /// Per channel: paired with a host (Hosts Info getHostInfo status), or null when the device
+    /// doesn't have Hosts Info or a query fails. On the release path: one request per channel.
+    private bool[]? ReadPaired(HidStream s, string address, int count)
+    {
+        var hi = HostsInfoIndex(s, address);
+        if (hi == 0) return null;
+        var paired = new bool[count];
+        for (byte h = 0; h < count; h++)
+        {
+            var hostInfo = Request(s, hi, 1, new[] { h });
+            if (hostInfo is null) return null;
+            paired[h] = hostInfo[5] != 0;
+        }
+        return paired;
+    }
+
+    /// Write this PC's name on its channel when the device supports writing names (Hosts Info caps
+    /// bit 1) and has none stored there. Never overwrites a name: Logitech devices name their
+    /// channels themselves. Best effort.
+    private void WriteNameIfEmpty(HidStream s, string address, int channel)
+    {
+        var hi = HostsInfoIndex(s, address);
+        if (hi == 0) return;
+        var info = Request(s, hi, 0, Array.Empty<byte>());
+        if (info is null || (info[4] & 0x02) == 0) return;
+        var hostInfo = Request(s, hi, 1, new[] { (byte)channel });
+        if (hostInfo is null || hostInfo[5] == 0 || hostInfo[8] != 0) return;   // unpaired, or named already
+        var bytes = NameBytes(System.Net.Dns.GetHostName(), hostInfo[9]);
+        if (bytes.Length == 0) return;
+        for (var offset = 0; offset < bytes.Length; offset += 14)
+        {
+            var args = new byte[16];
+            args[0] = (byte)channel;
+            args[1] = (byte)offset;
+            Array.Copy(bytes, offset, args, 2, Math.Min(14, bytes.Length - offset));
+            if (Request(s, hi, 4, args) is null)
+            {
+                Log.Debug("hidpp", $"{address}: writing this PC's name on channel {channel + 1} failed");
+                return;
+            }
+        }
+        Log.Info("hidpp", $"{address}: named channel {channel + 1} after this PC");
+    }
+
+    /// `name` as UTF-8, cut to at most `max` bytes without splitting a character.
+    internal static byte[] NameBytes(string name, int max)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(name.Trim());
+        if (bytes.Length <= max) return bytes;
+        var n = Math.Max(max, 0);
+        while (n > 0 && (bytes[n] & 0xC0) == 0x80) n--;   // bytes[n] continues a character: back up
+        return bytes[..n];
     }
 
     // ---- HID++ plumbing ----
@@ -155,14 +226,14 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
         }
     }
 
-    private static HostChannels? ReadChannels(HidStream s, byte fi)
+    private HostChannels? ReadChannels(HidStream s, byte fi, string address)
     {
         var info = Request(s, fi, 0, Array.Empty<byte>());
         if (info is null) return null;
         int count = info[4], current = info[5];
         var cookies = Request(s, fi, 2, Array.Empty<byte>());
         var marks = cookies is null ? new byte[count] : cookies.Skip(4).Take(count).ToArray();
-        return new HostChannels(count, current, marks);
+        return new HostChannels(count, current, marks) { Paired = ReadPaired(s, address, count) };
     }
 
     private static void Send(HidStream s, byte featureIndex, byte function, byte[] args)
@@ -194,16 +265,20 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
         return null;
     }
 
-    /// The Logitech HID++ long-report collection that belongs to this Bluetooth address.
+    /// The HID++ long-report collection that belongs to this Bluetooth address.
     private static HidDevice? FindEndpoint(string digits)
     {
-        foreach (var d in DeviceList.Local.GetHidDevices(LogitechVendor))
+        foreach (var d in DeviceList.Local.GetHidDevices())
         {
             try
             {
+                if (!BelongsTo(d.DevicePath, digits)) continue;   // cheap: no device access
                 if (d.GetMaxOutputReportLength() < 20) continue;
-                if (!IsVendorCollection(d)) continue;
-                if (BelongsTo(d.DevicePath, digits)) return d;
+                var usages = d.GetReportDescriptor().DeviceItems.SelectMany(i => i.Usages.GetAllValues()).ToList();
+                var hidpp = d.VendorID == LogitechVendor
+                    ? usages.Any(u => (u >> 16) >= 0xFF00)
+                    : usages.Contains(HidppLeUsage);
+                if (hidpp) return d;
             }
             catch (Exception ex)
             {
@@ -212,9 +287,6 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
         }
         return null;
     }
-
-    private static bool IsVendorCollection(HidDevice d) =>
-        d.GetReportDescriptor().DeviceItems.Any(i => i.Usages.GetAllValues().Any(u => (u >> 16) >= 0xFF00));
 
     /// LE collections carry the address in their path; for Classic, the collection's parent is the
     /// device's BTHENUM HID node, whose instance ID ends with the address.

@@ -145,3 +145,27 @@ Status:
   the release path), writes `Dns.GetHostName()` on its own channel when the name is empty and caps
   bit 1 is set, and labels say "Channel n" for every device. Item 5 after the test.
 - Spec §5a gets the HID++ table when the hardware test passes.
+
+## Update — windows (2026-11-14, firmware 2.0 on main, Windows done)
+
+- **zmk-autoswitch 2.0 is on `main`** (9879970), and the user's Reviung41 runs it (zmk-config
+  `master` points at it; `zmk-raw-hid` and the `raw_hid_adapter` shield are gone). Re-paired on
+  both computers. Over BLE from Windows: Change Host at index 3, Hosts Info at index 4, 5 profiles,
+  both 1.x marks carried over as cookies (`A5 A5`), profiles 1-2 paired, name written by Windows
+  and read back. **PC -> Mac works** with the HID++ backend. The K380 still works with pairing
+  read from 0x1815 (no channel flagged unpaired).
+- **Spec §5a rewritten**: HID++ endpoint matching (Logitech: any vendor page; others: only
+  `0xFF43/0x0202`), 0x1815 caps bit 1, `[1]` name max length, `[4]` write, pairing on the
+  release path, name writing rule, the module 2.0 table; 1.x kept as a short retired section.
+- **Windows** (pushed with this update): `LogitechHostSwitcher` as described in my reply; labels
+  are "Channel n" for every device. The 1.x backend stays until the Mac reads 2.0.
+- **Your side can start**: the keyboard currently only answers HID++ (1.x is gone from the
+  firmware), so **Mac -> PC is broken until the Mac's HID++ backend accepts the `0xFF43/0x0202`
+  collection**; the user switches back with the `&bt` key meanwhile. Over USB the same collection
+  appears as a second HID interface (report ID `0x11` first).
+- Firmware finding worth knowing: 2.0's first build wrote settings from the settings commit
+  handler at boot and the keyboard never started (no USB, no BLE); bisected on hardware, fixed in
+  a17199f (writes only after a host changes something).
+- Name written once per app session (when the engine marks the channel): after the firmware
+  update, the name only appeared after an app restart. Kept as is (spec: once per session); same
+  will apply on the Mac.

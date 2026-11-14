@@ -212,11 +212,18 @@ Working set with Settings open: ~160 MB. ARM64 Setup.exe: 94.2 to 83.4 MB.
 
 ## ZMK keyboards: the AutoSwitch firmware module
 
-Built 2026-11-13; compiles in CI, **not yet tried on a keyboard**. ZMK keyboards (spec §5a type 2)
-pick their profile themselves and have no host-side switch, so a ZMK module adds one ([casab/zmk-autoswitch](https://github.com/casab/zmk-autoswitch), MIT):
-a ZMK module over zzeneg/zmk-raw-hid (vendor HID 0xFF60/0x61, Bluetooth and USB) speaking the
-AutoSwitch protocol v1 (spec §5a): GET_INFO (profiles, active, paired bitmask, marks), SELECT,
-SET_MARK. It makes the keyboard type 5, and the engine path is the Logitech one.
+ZMK keyboards (spec §5a type 2) pick their profile themselves and have no host-side switch, so a
+ZMK module adds one ([casab/zmk-autoswitch](https://github.com/casab/zmk-autoswitch), MIT). It
+makes the keyboard type 5, and the engine path is the Logitech one.
+
+- **2.0 (2026-11-14, done on Windows, tried on the Reviung41: PC -> Mac):** the module speaks a
+  HID++ 2.0 subset (Change Host 0x1814, Hosts Info 0x1815) on its own BLE HID service / USB
+  interface (usage page 0xFF43, usage 0x0202, report 0x11), so `LogitechHostSwitcher` handles it
+  and channel names work. Agent-note `zmk-hidpp-proposal`. Next: retire the 1.x backend once the
+  Mac reads 2.0 and the keyboard works from both computers.
+- **1.x (2026-11-13, retired):** a ZMK module over zzeneg/zmk-raw-hid (vendor HID 0xFF60/0x61)
+  speaking the AutoSwitch protocol v1: GET_INFO (profiles, active, paired bitmask, marks),
+  SELECT, SET_MARK. Worked both ways on the Reviung41.
 
 - Core: `ZmkHostProtocol` (encode/parse), `CompositeHostSwitcher` (Logitech, then ZMK; the first
   backend that answers owns the device), `HostChannels.Paired` (the engine never switches to an
@@ -225,12 +232,9 @@ SET_MARK. It makes the keyboard type 5, and the engine path is the Logitech one.
   matched to the address like the Logitech one). Settings calls them profiles and flags empty ones.
 - Firmware: its own repository (moved out of `firmware/` 2026-11-13). Its `ci/build.sh` and CI
   build a nice!nano Reviung41 with the module.
-- **To test on hardware:** flash, re-pair on both computers (new HID service), check that Add
-  device shows "Switches channel on request", then switch the KVM both ways. macOS needs the same
-  backend (agent-note `zmk-autoswitch-module`).
-- Open: does Windows expose the raw HID collection over BLE without a reconnect after flashing?
-  Does the reply always arrive before the switch (100 ms delay)? Battery cost of the extra
-  service: none expected (no traffic unless AutoSwitch asks).
+- After flashing, re-pair on both computers (the HID service list changed), then restart the app
+  so it marks and names its channel.
+- Open: battery cost of the extra service: none expected (no traffic unless AutoSwitch asks).
 
 ## Planned: Logitech receivers (Unifying / Bolt)
 

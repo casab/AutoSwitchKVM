@@ -25,6 +25,10 @@ GitHub release (and from there into the in-app update notes).
   the other computer's Bluetooth profile. Device settings list the keyboard's profiles and mark
   the empty ones. A keyboard paired with just two computers works without setup. Tested from
   Windows to Mac; macOS support (Mac to Windows) to follow.
+- Channel-switching keyboards show which computer each channel belongs to: AutoSwitch writes this
+  PC's name on its own channel when the keyboard has none there (ZMK keyboards with
+  zmk-autoswitch 2.0). Settings flags channels that aren't paired with anything, on Logitech
+  keyboards too, and never sends a keyboard to one.
 
 ### macOS
 
