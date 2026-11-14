@@ -2,15 +2,15 @@
 layout: base.njk
 permalink: /devices/
 title: "Which devices can switch? · AutoSwitch KVM"
-description: "Bluetooth devices handle more than one computer in different ways. Here's which ones AutoSwitch KVM can move between your computers, and what to do with the rest."
+description: "Apple Magic accessories, Logitech Easy-Switch devices and ZMK keyboards follow your KVM with AutoSwitch. Here's how each kind of Bluetooth device switches, and easy fixes for the rest."
 ---
 <section class="hero hero--page">
   <div class="wrap wrap--narrow">
     <p class="eyebrow">Device guide</p>
     <h1>Which devices can switch?</h1>
     <p class="lead">
-      It depends on how a device remembers your computers. Find yours below.
-      AutoSwitch also tells you when you add a device.
+      Apple Magic accessories, Logitech Easy-Switch devices and ZMK keyboards all follow your KVM.
+      Find yours below; AutoSwitch also tells you when you add a device.
     </p>
   </div>
 </section>
@@ -33,7 +33,13 @@ description: "Bluetooth devices handle more than one computer in different ways.
       </a>
       <a class="glance__row" role="row" href="#channel">
         <span role="cell" class="glance__kind">Switches channel on request</span>
-        <span role="cell" class="glance__eg">Logitech Easy-Switch (K380, MX…), ZMK with zmk-autoswitch</span>
+        <span role="cell" class="glance__eg">Logitech Easy-Switch (K380, MX…)</span>
+        <span role="cell" class="glance__os"><span class="mark mark--yes" aria-label="yes">✓</span></span>
+        <span role="cell" class="glance__os"><span class="mark mark--yes" aria-label="yes">✓</span></span>
+      </a>
+      <a class="glance__row" role="row" href="#zmk">
+        <span role="cell" class="glance__kind">ZMK keyboards</span>
+        <span role="cell" class="glance__eg">Any ZMK wireless keyboard, with the zmk-autoswitch module</span>
         <span role="cell" class="glance__os"><span class="mark mark--yes" aria-label="yes">✓</span></span>
         <span role="cell" class="glance__os"><span class="mark mark--yes" aria-label="yes">✓</span></span>
       </a>
@@ -45,9 +51,9 @@ description: "Bluetooth devices handle more than one computer in different ways.
       </a>
       <a class="glance__row" role="row" href="#picks">
         <span role="cell" class="glance__kind">Picks the computer itself</span>
-        <span role="cell" class="glance__eg">QMK keyboards, ZMK without the module</span>
-        <span role="cell" class="glance__os"><span class="mark mark--no" aria-label="no">✕</span></span>
-        <span role="cell" class="glance__os"><span class="mark mark--no" aria-label="no">✕</span></span>
+        <span role="cell" class="glance__eg">Other keyboards with host keys</span>
+        <span role="cell" class="glance__os"><span class="mark mark--test" aria-label="with its own key">⌨<small>its key</small></span></span>
+        <span role="cell" class="glance__os"><span class="mark mark--test" aria-label="with its own key">⌨<small>its key</small></span></span>
       </a>
       <a class="glance__row" role="row" href="#repairs">
         <span role="cell" class="glance__kind">Re-pairs by hand</span>
@@ -56,7 +62,7 @@ description: "Bluetooth devices handle more than one computer in different ways.
         <span role="cell" class="glance__os"><span class="mark mark--no" aria-label="no">✕</span></span>
       </a>
     </div>
-    <p class="glance__note">Can't switch? AutoSwitch still shows whether the device is connected, and there's usually an <a href="#tips">easy fix</a>.</p>
+    <p class="glance__note">For the rest, AutoSwitch still shows whether the device is connected, and there's usually an <a href="#tips">easy fix</a>.</p>
   </div>
 </section>
 
@@ -65,7 +71,7 @@ description: "Bluetooth devices handle more than one computer in different ways.
   <div class="wrap">
     <p class="eyebrow">AutoSwitch moves these for you</p>
     <h2>Switch automatically</h2>
-    <ul class="kinds">
+    <ul class="kinds kinds--two">
       <li class="kind kind--yes" id="pairing">
         <svg class="kind__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="7" y="9" width="34" height="27" rx="6"/><path d="M15 40h18"/></svg>
         <h3>Hands off by pairing</h3>
@@ -81,12 +87,22 @@ description: "Bluetooth devices handle more than one computer in different ways.
         <svg class="kind__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="5" y="14" width="38" height="22" rx="5"/><path d="M12 22h0M18 22h0M24 22h0M30 22h0M36 22h0M15 29h18"/><circle cx="14" cy="8" r="2.6"/><circle cx="24" cy="8" r="2.6"/><circle cx="34" cy="8" r="2.6"/></svg>
         <h3>Switches channel on request</h3>
         <p class="kind__one">A channel per computer. AutoSwitch tells the device to hop to the other computer's channel, and finds that channel itself.</p>
-        <ul class="tags"><li>Logitech K380</li><li>Other Easy-Switch keyboards &amp; mice</li><li>ZMK keyboards with zmk-autoswitch</li></ul>
+        <ul class="tags"><li>Logitech K380</li><li>Other Easy-Switch keyboards &amp; mice</li></ul>
         <p class="kind__do"><strong>Setting:</strong> Manage pairing off</p>
         <details class="kind__why">
           <summary>Why it works</summary>
           <p>Logitech's Easy-Switch devices accept a "change host" command from the computer they're connected to. Pairings stay exactly as they are. AutoSwitch checks that your device supports it, and on the Mac it asks once for Input Monitoring.</p>
-          <p>ZMK keyboards learn the same command from the free <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> firmware module: add it to your zmk-config, flash, and pair the keyboard again on each computer. Its Bluetooth profiles become channels, and AutoSwitch writes each computer's name on its own.</p>
+        </details>
+      </li>
+      <li class="kind kind--yes" id="zmk">
+        <svg class="kind__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="4" y="15" width="40" height="20" rx="5"/><path d="M11 22h0M17 22h0M23 22h0M29 22h0M35 22h0M14 28h20"/><path d="M18 9l6-4 6 4"/></svg>
+        <h3>ZMK keyboards</h3>
+        <p class="kind__one">Each Bluetooth profile is a channel. AutoSwitch moves the keyboard to the other computer's profile, names each profile after its computer, and leaves it alone when you switch by hand.</p>
+        <ul class="tags"><li>Any ZMK wireless keyboard</li><li>Split keyboards</li></ul>
+        <p class="kind__do"><strong>Setting:</strong> add the free <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> module once, Manage pairing off</p>
+        <details class="kind__why">
+          <summary>How to set it up</summary>
+          <p>Add <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> to your zmk-config (two lines in <code>west.yml</code>, one in your keyboard's <code>.conf</code>), flash, and pair the keyboard again on each computer, each on its own profile. The module teaches the keyboard the same "change host" command Logitech's keyboards understand.</p>
         </details>
       </li>
       <li class="kind kind--partly" id="connects">
@@ -107,18 +123,18 @@ description: "Bluetooth devices handle more than one computer in different ways.
 {# ---------- Can't be switched ---------- #}
 <section class="section section--tint">
   <div class="wrap">
-    <p class="eyebrow">No app can move these</p>
-    <h2>Can't be switched by an app</h2>
+    <p class="eyebrow">For everything else</p>
+    <h2>Switch these with a key or a cable</h2>
     <ul class="kinds kinds--two">
-      <li class="kind kind--no" id="picks">
+      <li class="kind kind--partly" id="picks">
         <svg class="kind__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="5" y="14" width="38" height="22" rx="5"/><path d="M12 22h0M18 22h0M24 22h0M30 22h0M36 22h0M15 29h18"/><path d="M33 6l4 4-4 4"/></svg>
         <h3>Picks the computer itself</h3>
-        <p class="kind__one">A pairing per computer, and a key on the device chooses one. Only the device can switch.</p>
-        <ul class="tags"><li>QMK keyboards</li><li>ZMK keyboards without the module</li></ul>
-        <p class="kind__do"><strong>What to do:</strong> use its own switch key, or plug it into the KVM by USB. Manage pairing off. For ZMK, add the <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> module and it <a href="#channel">switches channel on request</a>.</p>
+        <p class="kind__one">A pairing per computer, and a key on the device chooses one.</p>
+        <ul class="tags"><li>Multi-device keyboards with host keys</li></ul>
+        <p class="kind__do"><strong>What to do:</strong> press its host key, or plug it into the KVM by USB. Manage pairing off. A ZMK keyboard? It <a href="#zmk">switches automatically</a>.</p>
         <details class="kind__why">
-          <summary>Why not</summary>
-          <p>No computer can change which profile the keyboard uses. Removing the pairing on one computer breaks that profile, and you'd pair it again from the keyboard. The zmk-autoswitch module adds that missing command to ZMK.</p>
+          <summary>Why</summary>
+          <p>These keyboards have no command a computer could send to change their profile, so only their key can. Removing the pairing on one computer would mean pairing it again from the keyboard.</p>
         </details>
       </li>
       <li class="kind kind--no" id="repairs">
@@ -128,7 +144,7 @@ description: "Bluetooth devices handle more than one computer in different ways.
         <ul class="tags"><li>Xbox</li><li>PlayStation</li><li>Nintendo Pro</li></ul>
         <p class="kind__do"><strong>What to do:</strong> keep it on one computer, use a cable through the KVM, or a <a href="#tips">USB adapter</a>.</p>
         <details class="kind__why">
-          <summary>Why not</summary>
+          <summary>Why</summary>
           <p>After a computer removes it, the controller still points at that computer, so the other one can't pair until you press the button.</p>
         </details>
       </li>
@@ -185,7 +201,7 @@ description: "Bluetooth devices handle more than one computer in different ways.
     <ul class="outcomes">
       <li class="outcome outcome--yes"><strong>It pairs</strong> Hands off by pairing: AutoSwitch can switch it.</li>
       <li class="outcome outcome--no"><strong>Only after a button press</strong> Re-pairs by hand.</li>
-      <li class="outcome outcome--no"><strong>It has a computer-switch key</strong> Picks the computer itself (or switches channel: Logitech, ZMK with zmk-autoswitch).</li>
+      <li class="outcome outcome--yes"><strong>It has a computer-switch key</strong> Logitech and ZMK keyboards switch channel; others pick the computer themselves.</li>
     </ul>
     <p class="glance__note">
       AutoSwitch guesses the kind from the device's maker and type, and marks a guess as <em>likely</em>.

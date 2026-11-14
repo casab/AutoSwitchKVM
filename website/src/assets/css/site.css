@@ -357,6 +357,7 @@ a.glance__row:hover { background: var(--bg-tint); }
 .kind--yes { border-top-color: var(--mint); }
 .kind--no { border-top-color: var(--coral); }
 .kind--partly { border-top-color: var(--lemon); }
+.kind code { font-size: .9em; background: var(--mint-soft); padding: 1px 5px; border-radius: 6px; }
 .kind__icon { width: 52px; height: 52px; padding: 10px; border-radius: 16px; fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; margin-bottom: 14px; }
 .kind--yes .kind__icon { background: var(--mint-soft); stroke: var(--mint); }
 .kind--no .kind__icon { background: var(--coral-soft); stroke: var(--coral); }
