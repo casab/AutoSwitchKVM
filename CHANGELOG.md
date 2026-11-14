@@ -29,6 +29,10 @@ GitHub release (and from there into the in-app update notes).
   PC's name on its own channel when the keyboard has none there (ZMK keyboards with
   zmk-autoswitch 2.0). Settings flags channels that aren't paired with anything, on Logitech
   keyboards too, and never sends a keyboard to one.
+- A keyboard you switch by hand stays where you put it: AutoSwitch no longer sends it back when
+  it comes to this PC while the KVM is on the other computer, or pulls it back when it leaves while
+  the KVM is here. A ZMK keyboard is no longer pulled back to the PC a few seconds after the KVM
+  leaves.
 
 ### macOS
 

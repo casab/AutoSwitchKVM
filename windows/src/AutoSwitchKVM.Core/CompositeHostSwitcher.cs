@@ -34,6 +34,21 @@ public sealed class CompositeHostSwitcher : IHostSwitcher
     public async Task MarkCurrentChannelAsync(string address, CancellationToken ct = default) =>
         await (await OwnerAsync(address, ct)).MarkCurrentChannelAsync(address, ct);
 
+    public async Task<int?> GetCurrentChannelAsync(string address, CancellationToken ct = default)
+    {
+        if (_owner.TryGetValue(Key(address), out var owner)) return await owner.GetCurrentChannelAsync(address, ct);
+        return (await GetChannelsAsync(address, ct))?.Current;
+    }
+
+    public async Task<IReadOnlyList<string?>?> GetChannelNamesAsync(string address, CancellationToken ct = default)
+    {
+        if (!_owner.TryGetValue(Key(address), out var owner))
+        {
+            if (await GetChannelsAsync(address, ct) is null || !_owner.TryGetValue(Key(address), out owner)) return null;
+        }
+        return await owner.GetChannelNamesAsync(address, ct);
+    }
+
     private async Task<IHostSwitcher> OwnerAsync(string address, CancellationToken ct)
     {
         if (_owner.TryGetValue(Key(address), out var owner)) return owner;

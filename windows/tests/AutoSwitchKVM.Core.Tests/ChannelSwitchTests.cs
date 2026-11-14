@@ -216,4 +216,153 @@ public class ChannelSwitchTests
 
         Assert.Contains($"switch:{Norm(K380)}:1", hs.Calls);
     }
+
+    // ---- Where the device is (spec §3; hardware 2026-11-14: a ZMK keyboard keeps its link to
+    // every computer, and module 2.0 answers HID++ over the inactive one) ----
+
+    private const string Me = "my-desktop";
+
+    /// Automatic target; channel 1 is this PC's (named after it), channel 2 the other computer's
+    /// (marked, unnamed); the keyboard is on this PC and linked.
+    private static SelectionEngine MakeLinked(out FakeBluetoothController bt, out FakeHostSwitcher hs, out BTDevice dev)
+    {
+        var engine = Make(out bt, out hs, out dev, releaseTo: null);
+        engine.ThisComputerName = Me;
+        hs.Names = new string?[] { Me, null, null };
+        hs.Paired = new[] { true, true, false };
+        hs.Marks = new byte[] { HostChannels.AutoSwitchMark, HostChannels.AutoSwitchMark, 0 };
+        bt.Connected.Add(Norm(K380));
+        return engine;
+    }
+
+    private static int Switches(FakeHostSwitcher hs) => hs.Calls.Count(c => c.StartsWith("switch"));
+
+    [Fact]
+    public async Task A_lingering_link_after_the_switch_does_not_pull_the_device_back()
+    {
+        var engine = MakeLinked(out var bt, out var hs, out _);
+        await ArriveThenLeave(engine);                   // sent to channel 2; its link to this PC stays up
+        Assert.Equal(new[] { $"switch:{Norm(K380)}:1" }, hs.Calls.Where(c => c.StartsWith("switch")));
+
+        bt.FireConnectionChange(K380, connected: false);
+        bt.FireConnectionChange(K380, connected: true);  // the old link reports in again
+        await engine.PollStatusesAsync();
+
+        Assert.Equal(1, Switches(hs));                   // not sent to channel 1 (this PC's own)
+    }
+
+    [Fact]
+    public async Task A_late_release_leaves_a_device_on_the_other_computers_channel()
+    {
+        var engine = MakeLinked(out var bt, out var hs, out _);
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+        hs.Reachable = false;                            // the release can't reach it: not sent
+        engine.HandleUsb(Vendor, Product, added: false);
+        await engine.EvaluateNowAsync();
+        Assert.Equal(0, Switches(hs));
+
+        hs.Reachable = true;
+        hs.Current = 1;                                  // it answers from the other computer's channel
+        bt.Connected.Add(Norm(K380));                    // over the link it keeps to this PC
+        bt.FireConnectionChange(K380, connected: true);
+
+        Assert.Equal(0, Switches(hs));                   // Automatic would have picked channel 1: this PC
+    }
+
+    [Fact]
+    public async Task A_device_brought_back_while_the_KVM_is_away_is_left_here()
+    {
+        var engine = MakeLinked(out var bt, out var hs, out _);
+        await ArriveThenLeave(engine);
+        Assert.Equal(1, Switches(hs));
+
+        hs.Current = 0;                                  // its channel key: back on this PC
+        bt.FireConnectionChange(K380, connected: false);
+        bt.FireConnectionChange(K380, connected: true);
+
+        Assert.Equal(1, Switches(hs));
+    }
+
+    [Fact]
+    public async Task A_release_leaves_a_device_already_on_the_other_computers_channel()
+    {
+        var engine = MakeLinked(out var bt, out var hs, out var dev);
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+        hs.Current = 1;                                  // switched by hand; its link to this PC is up
+        var btCalls = bt.Calls.Count;
+        engine.HandleUsb(Vendor, Product, added: false);
+        await engine.EvaluateNowAsync();
+
+        Assert.Equal(0, Switches(hs));
+        Assert.Equal(btCalls, bt.Calls.Count);           // no disconnect either
+        Assert.Equal(DeviceStatus.Disconnected, engine.Statuses[dev.Id]);
+    }
+
+    [Fact]
+    public async Task Arrival_counts_only_on_this_PCs_channel_and_only_that_channel_is_marked()
+    {
+        var engine = MakeLinked(out var bt, out var hs, out var dev);
+        hs.Current = 1;                                  // linked, but still on the other computer
+        var polls = 0;
+        engine.SleepHook = _ => { if (++polls == 3) hs.Current = 0; return Task.CompletedTask; };
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+
+        Assert.True(polls >= 3);
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses[dev.Id]);
+        Assert.DoesNotContain($"mark:{Norm(K380)}:1", hs.Calls);
+        Assert.DoesNotContain(bt.Calls, c => c.StartsWith("connect"));
+    }
+
+    [Fact]
+    public async Task A_lingering_link_on_another_channel_polls_as_disconnected_without_a_reconnect()
+    {
+        var engine = MakeLinked(out var bt, out var hs, out var dev);
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses[dev.Id]);
+
+        hs.Current = 1;                                  // its channel key, while the KVM stays here
+        await engine.PollStatusesAsync();
+
+        Assert.Equal(DeviceStatus.Disconnected, engine.Statuses[dev.Id]);
+        Assert.DoesNotContain(bt.Calls, c => c.StartsWith("connect"));
+        Assert.Equal(0, Switches(hs));
+    }
+
+    [Fact]
+    public async Task A_channel_switcher_leaving_while_the_KVM_is_here_is_not_pulled_back()
+    {
+        var engine = MakeLinked(out var bt, out var hs, out var dev);
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+
+        bt.Connected.Remove(Norm(K380));                 // a K380 over Classic: the link drops
+        bt.FireConnectionChange(K380, connected: false);
+
+        Assert.DoesNotContain(bt.Calls, c => c.StartsWith("connect"));
+    }
+
+    [Theory]
+    [InlineData(new[] { "my-desktop", null, null }, new[] { true, true, false }, 0)]
+    [InlineData(new[] { "MY-DESKTOP", "Mac", null }, new[] { true, true, false }, 0)]   // case-insensitive
+    [InlineData(new[] { "Mac", "my-deskt", null }, new[] { true, true, false }, 1)]     // cut-down copy, 8+ chars
+    [InlineData(new[] { "Mac", "my-d", null }, new[] { true, true, false }, null)]     // too short to tell
+    [InlineData(new[] { "Mac", null, null }, new[] { true, true, false }, 1)]          // the only unnamed paired one
+    [InlineData(new[] { "Mac", null, null }, new[] { true, true, true }, null)]        // two unnamed: ambiguous
+    public void Own_channel_from_stored_names(string?[] names, bool[] paired, int? expected) =>
+        Assert.Equal(expected, HostChannels.OwnChannel(names, paired, Me));
+
+    [Fact]
+    public void Own_channel_named_twice_is_the_marked_one()
+    {
+        // K380, 2026-11-14: this PC's name on channel 1 and on an old pairing on channel 3.
+        var names = new string?[] { "MY-DESKTOP", "Mac", "MY-DESKTOP" };
+        var paired = new[] { true, true, true };
+        Assert.Equal(0, HostChannels.OwnChannel(names, paired, Me, new byte[] { 0xA5, 0xA5, 0 }));
+        Assert.Null(HostChannels.OwnChannel(names, paired, Me, new byte[] { 0, 0xA5, 0 }));
+        Assert.Null(HostChannels.OwnChannel(names, paired, Me));
+    }
 }

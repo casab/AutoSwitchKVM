@@ -113,6 +113,18 @@ public sealed class SelectionEngine
     private readonly HashSet<Guid> _channelMarked = new();             // marked our channel this session
     private readonly HashSet<Guid> _channelCapable = new();            // answered the channel query this session
     private readonly HashSet<Guid> _lateReleasePending = new();        // waiting for the device to stop being busy
+    /// Devices this PC sent to another channel since the KVM left (cleared when it returns). One
+    /// that comes back meanwhile was brought back on purpose (its channel key, or the other
+    /// computer): it is left here. Only a device the release couldn't send gets a late release.
+    private readonly HashSet<Guid> _sentAway = new();
+    /// This PC's channel per device: the one carrying this PC's name, else the only paired channel
+    /// without a name, else the channel it was on when released while the KVM was here. Per session.
+    private readonly Dictionary<Guid, int> _ownChannels = new();
+    /// Devices whose stored names didn't single out this PC's channel: not asked again this
+    /// session (a full query to a K380 takes ~1.5 s); the next release while here sets it.
+    private readonly HashSet<Guid> _ownUnresolved = new();
+    /// This PC's name as devices store it (HID++ Hosts Info; LogitechHostSwitcher writes the same).
+    internal string ThisComputerName { get; set; } = System.Net.Dns.GetHostName();
 
     /// How long the arrival side waits for a type 5 device the other host is sending over (spec §3
     /// Connect flow), and how often it looks.
@@ -135,25 +147,48 @@ public sealed class SelectionEngine
     private readonly Dictionary<Guid, DateTime> _lastLateRelease = new();
     internal const int LateReleaseMinIntervalSecs = 10;
 
-    /// A device that switches channel on request is sent to the other computer's channel instead
-    /// of being unpaired. True when it was sent; false when it doesn't support it, isn't
-    /// connected here, or the target channel is unknown (the caller then releases it as usual).
-    private async Task<bool> TrySwitchChannelAsync(BTDevice device, string why, bool stopIfSourceBack = false)
+    private enum SwitchResult
     {
-        if (_hostSwitcher is null) return false;
+        NotHandled,    // no channel switching, not reachable, target unknown, or the switch failed
+        Sent,          // sent to the other computer's channel
+        AlreadyAway,   // it answered from another computer's channel: nothing to send
+        KvmBack,       // the KVM came back before it was sent: it stays here
+    }
+
+    /// A device that switches channel on request is sent to the other computer's channel instead
+    /// of being unpaired. NotHandled when it doesn't support it, isn't reachable, or the target is
+    /// unknown (the caller then releases it as usual). AlreadyAway when it is on another
+    /// computer's channel already: a ZMK keyboard keeps its link to this PC after a switch and
+    /// answers over it (hardware 2026-11-14). `lateRelease`: the KVM was already away.
+    private async Task<SwitchResult> SwitchChannelAsync(BTDevice device, string why, bool stopIfSourceBack = false,
+                                                        bool lateRelease = false)
+    {
+        if (_hostSwitcher is null) return SwitchResult.NotHandled;
         HostChannels? ch;
         try { ch = await WithTimeoutAsync(ct => _hostSwitcher.GetChannelsAsync(device.Address, ct)); }
         catch (Exception ex)
         {
             Debug($"{device.Name}: channel query failed: {Classify(ex).Summary}");
-            return false;
+            return SwitchResult.NotHandled;
         }
-        if (ch is null) return false;   // no channel switching, or not connected to this PC
+        if (ch is null) return SwitchResult.NotHandled;   // no channel switching, or not connected to this PC
         _channelCapable.Add(device.Id);
+        if (await OwnChannelAsync(device, ch) is int own)
+        {
+            if (ch.Current != own)
+            {
+                Info($"{device.Name}: already on channel {ch.Current + 1}, not this PC's ({own + 1}); nothing to send");
+                return SwitchResult.AlreadyAway;
+            }
+        }
+        else if (!lateRelease)
+        {
+            _ownChannels[device.Id] = ch.Current;   // released while the KVM was here: this PC's channel
+        }
         if (stopIfSourceBack && SourcePresentNow)
         {
             Debug($"{device.Name}: channel switch skipped: the KVM came back");
-            return true;   // handled: the device stays here, where the KVM is again
+            return SwitchResult.KvmBack;
         }
 
         int? target = device.ReleaseToChannel is int n && n >= 1 && n <= ch.Count ? n - 1 : ch.AutomaticTarget;
@@ -161,26 +196,84 @@ public sealed class SelectionEngine
         {
             Warn($"{device.Name}: it can switch channels, but the other computer's channel isn't known " +
                  "(set it in the device's settings, or run AutoSwitch on the other computer)");
-            return false;
+            return SwitchResult.NotHandled;
         }
         if (ch.Paired is { } paired && target < paired.Count && !paired[target.Value])
         {
             Warn($"{device.Name}: the other computer's channel ({target + 1}) isn't paired with anything; not switching there");
-            return false;
+            return SwitchResult.NotHandled;
         }
         if (target == ch.Current)
         {
             Warn($"{device.Name}: the other computer's channel is set to {target + 1}, but that's this PC's channel; check the setting");
-            return false;
+            return SwitchResult.NotHandled;
         }
         try { await WithTimeoutAsync(ct => _hostSwitcher.SwitchToAsync(device.Address, target.Value, ct)); }
         catch (Exception ex)
         {
             Warn($"{device.Name}: switching to channel {target + 1} failed: {Classify(ex).Summary}");
-            return false;
+            return SwitchResult.NotHandled;
         }
         Info($"{device.Name}: sent to channel {target + 1} ({why})");
-        return true;
+        _sentAway.Add(device.Id);
+        return SwitchResult.Sent;
+    }
+
+    /// Whether a channel-switching device is on this PC's channel. null when that can't be told
+    /// (it doesn't answer, or this PC's channel isn't known): callers then trust the link. A ZMK
+    /// keyboard keeps its link to every paired computer and, with module 2.0, answers over it, so
+    /// a link alone doesn't mean the keyboard is here (spec §3 "Where a channel-switching device is").
+    private async Task<bool?> IsOnOwnChannelAsync(BTDevice device)
+    {
+        if (_hostSwitcher is null || device.ManagePairing) return null;
+        if (_ownChannels.TryGetValue(device.Id, out var known))
+        {
+            // Known: one request for the current channel (the status poll asks every 10 s).
+            int? current;
+            try { current = await WithTimeoutAsync(ct => _hostSwitcher.GetCurrentChannelAsync(device.Address, ct)); }
+            catch (Exception ex)
+            {
+                Debug($"{device.Name}: channel query failed: {Classify(ex).Summary}");
+                return null;
+            }
+            if (current is null) return null;
+            _channelCapable.Add(device.Id);
+            return current == known;
+        }
+        if (_ownUnresolved.Contains(device.Id) && _channelCapable.Contains(device.Id)) return null;   // trust the link
+        HostChannels? ch;
+        try { ch = await WithTimeoutAsync(ct => _hostSwitcher.GetChannelsAsync(device.Address, ct)); }
+        catch (Exception ex)
+        {
+            Debug($"{device.Name}: channel query failed: {Classify(ex).Summary}");
+            return null;
+        }
+        if (ch is null) return null;
+        _channelCapable.Add(device.Id);
+        return await OwnChannelAsync(device, ch) is int own ? ch.Current == own : null;
+    }
+
+    /// This PC's channel for the device (see _ownChannels), resolved from its stored names once.
+    private async Task<int?> OwnChannelAsync(BTDevice device, HostChannels ch)
+    {
+        if (_ownChannels.TryGetValue(device.Id, out var known)) return known;
+        if (_hostSwitcher is null || _ownUnresolved.Contains(device.Id)) return null;
+        IReadOnlyList<string?>? names;
+        try { names = await WithTimeoutAsync(ct => _hostSwitcher.GetChannelNamesAsync(device.Address, ct)); }
+        catch (Exception ex)
+        {
+            Debug($"{device.Name}: channel names query failed: {Classify(ex).Summary}");
+            return null;
+        }
+        if (HostChannels.OwnChannel(names, ch.Paired, ThisComputerName, ch.Marks) is not int own)
+        {
+            _ownUnresolved.Add(device.Id);
+            Debug($"{device.Name}: its stored names don't tell which channel is this PC's; learned at the next release");
+            return null;
+        }
+        _ownChannels[device.Id] = own;
+        Debug($"{device.Name}: this PC's channel is {own + 1} (from the names it stores)");
+        return own;
     }
 
     /// A device became connected. Selected: mark our channel (once per session) so the other
@@ -198,9 +291,18 @@ public sealed class SelectionEngine
             {
                 try
                 {
+                    if (await IsOnOwnChannelAsync(device) == false)
+                    {
+                        _channelMarked.Remove(id);   // mark it once it's really here
+                        Debug($"{device.Name}: linked, but on another computer's channel; not marking");
+                        return;
+                    }
                     await WithTimeoutAsync(ct => _hostSwitcher.MarkCurrentChannelAsync(device.Address, ct));
-                    if (await WithTimeoutAsync(ct => _hostSwitcher.GetChannelsAsync(device.Address, ct)) is not null)
+                    if (await WithTimeoutAsync(ct => _hostSwitcher.GetChannelsAsync(device.Address, ct)) is { } ch)
+                    {
                         _channelCapable.Add(id);
+                        _ownChannels.TryAdd(id, ch.Current);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -211,6 +313,13 @@ public sealed class SelectionEngine
             return;
         }
         if (!_presenceEvaluated || Config.Paused || _suspended) return;
+        if (_sentAway.Contains(id))
+        {
+            // This PC sent it away and it came back: its channel key, or the other computer's
+            // AutoSwitch. The user's choice (they use it on both computers, 2026-11-14).
+            Info($"{device.Name}: back on this PC while the KVM is elsewhere; leaving it here");
+            return;
+        }
         if (IsBusy(id))
         {
             // In a fast bounce the device lands here while a run is still busy with it. Try again
@@ -238,7 +347,7 @@ public sealed class SelectionEngine
             // A known channel switcher: wait (briefly) until it answers. Anything else gets one
             // silent try: it may not switch channels at all (ZMK, controllers).
             if (known && !await WaitForChannelsAsync(device)) return;
-            await TrySwitchChannelAsync(device, "it connected here while the KVM is elsewhere");
+            await SwitchChannelAsync(device, "it connected here while the KVM is elsewhere", lateRelease: true);
         }
         finally { ClearBusy(device.Id); }
     }
@@ -316,7 +425,8 @@ public sealed class SelectionEngine
             // A type 5 device landing here while a run is still busy with it and the KVM has
             // already left (fast bounce): send it on once it's free (ClearBusy).
             if (change.IsConnected && !Selected && _presenceEvaluated && _hostSwitcher is not null
-                && !device.ManagePairing && device.Enabled && _lateReleasePending.Add(device.Id))
+                && !device.ManagePairing && device.Enabled && !_sentAway.Contains(device.Id)
+                && _lateReleasePending.Add(device.Id))
                 Debug($"{device.Name}: connected while switched away, but busy; sending it on once free");
             return;
         }
@@ -343,6 +453,8 @@ public sealed class SelectionEngine
                 Warn($"{device.Name}: status poll failed: {Classify(ex).Summary}");
                 continue;
             }
+            // A ZMK keyboard keeps its link while on another computer's channel: not here.
+            if (connected && IsKnownChannelSwitcher(device) && await IsOnOwnChannelAsync(device) == false) connected = false;
             if (IsBusy(device.Id)) continue;  // an operation started while we were querying
             UpdateStatus(device, connected, "poll");
         }
@@ -363,6 +475,13 @@ public sealed class SelectionEngine
 
         if (!connected && old == DeviceStatus.Connected && Selected && BluetoothPowered && device.Enabled && !_suspended)
         {
+            if (IsKnownChannelSwitcher(device))
+            {
+                // Its channel key, or the other computer's AutoSwitch: the user's choice. Don't
+                // pull it back (they use it on both computers, 2026-11-14).
+                Info($"{device.Name}: went to another computer while the KVM is here; leaving it there");
+                return;
+            }
             Warn($"{device.Name}: dropped unexpectedly while this PC is selected");
             OnUnexpectedDisconnect?.Invoke(device);
             MaybeAutoReconnect(device);
@@ -574,6 +693,7 @@ public sealed class SelectionEngine
         var present = _presentProductIDs.Count > 0;
         Selected = present;                 // always reflect real presence for the UI
         _presenceEvaluated = true;
+        if (present) _sentAway.Clear();
         RaiseChanged();
 
         var wouldAct = present != _automationActed || (!present && _seedReconcilePending);
@@ -804,17 +924,32 @@ public sealed class SelectionEngine
         // over), not connected, and the waits run alongside the others' connects.
         var devices = Config.Devices.Where(d => d.Enabled).ToList();
         var waits = devices.Where(IsKnownChannelSwitcher).Select(d => WaitForArrivalAsync(d, run)).ToList();
-        foreach (var device in devices.Where(d => !IsKnownChannelSwitcher(d)))
+        // A device that answers the channel query is a channel switcher, even before it was seen
+        // this session (spec §3): waited for, not called. Asked alongside the connects below
+        // (a full query to a K380 over Classic takes ~0.5 s), and answered before it's its turn.
+        var unknown = devices.Where(d => !d.ManagePairing && !IsKnownChannelSwitcher(d)).ToList();
+        var probes = unknown.ToDictionary(d => d.Id, d => IsOnOwnChannelAsync(d));
+        foreach (var device in devices.Where(d => d.ManagePairing).Concat(unknown))
         {
             if (StaleReason(run, respectSelection: false) is { } why)
             {
                 Debug($"run #{run.Token}: connect run stopped: {why}");
                 break;
             }
+            if (!device.ManagePairing)
+            {
+                await probes[device.Id];
+                if (IsKnownChannelSwitcher(device))
+                {
+                    waits.Add(WaitForArrivalAsync(device, run));
+                    continue;
+                }
+            }
             MarkBusy(device.Id);
             try { await ConnectOneAsync(device, run, respectSelection: true); }
             finally { ClearBusy(device.Id); }
         }
+        await Task.WhenAll(probes.Values);
         await Task.WhenAll(waits);
     }
 
@@ -835,7 +970,8 @@ public sealed class SelectionEngine
                     Debug($"{device.Name}: arrival wait stopped: {stale}");
                     return;
                 }
-                if (await SafeIsConnectedAsync(device) && await SafeHidReadyAsync(device) != false)
+                if (await SafeIsConnectedAsync(device) && await SafeHidReadyAsync(device) != false
+                    && await IsOnOwnChannelAsync(device) != false)
                 {
                     Info(waited == 0 ? $"{device.Name}: already connected"
                                      : $"{device.Name}: arrived from the other computer after {Ms(sw)}");
@@ -1162,12 +1298,21 @@ public sealed class SelectionEngine
 
         // Spec §5a type 5: send a channel-switching device to the other computer's channel; its
         // pairings stay as they are. Falls through to the usual release when that isn't possible.
-        if (!device.ManagePairing && await TrySwitchChannelAsync(device, "the KVM left this PC", stopIfSourceBack: automatic))
+        if (!device.ManagePairing)
         {
-            if (automatic && SourcePresentNow) return;   // the KVM came back: it stays here
-            SetStatus(device.Id, DeviceStatus.Disconnected);
-            if (notify) OnNotice?.Invoke("Switched", $"{name} went to the other computer");
-            return;
+            switch (await SwitchChannelAsync(device, "the KVM left this PC", stopIfSourceBack: automatic))
+            {
+                case SwitchResult.Sent:
+                    if (automatic && SourcePresentNow) return;   // the KVM came back: it stays here
+                    SetStatus(device.Id, DeviceStatus.Disconnected);
+                    if (notify) OnNotice?.Invoke("Switched", $"{name} went to the other computer");
+                    return;
+                case SwitchResult.AlreadyAway:
+                    SetStatus(device.Id, DeviceStatus.Disconnected);
+                    return;
+                case SwitchResult.KvmBack:
+                    return;
+            }
         }
 
         Failure? disconnectError = null;

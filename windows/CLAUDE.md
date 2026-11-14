@@ -392,6 +392,12 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   in `CompositeHostSwitcher(Logitech, Zmk)` until no keyboard runs 1.x. Firmware build:
   `ci/build.sh` in that repo, in Docker (see its README). To probe a keyboard by hand, a 40-line
   HidSharp console app that writes `11 FF <index> <fn<<4|0B> …` and prints the reply is enough.
+- **"Connected" isn't "here" for a channel switcher** (spec §3 "Where a channel-switching device
+  is"). A ZMK keyboard keeps its LE link to this PC after switching away, and 2.0 answers HID++
+  over it: the engine asks `IsOnOwnChannelAsync` (current channel == this PC's channel, from
+  stored names, the mark as tie-break, or the channel seen at a release). HID++ costs: ~75-100 ms
+  per request to a K380 over Classic, ~30 ms over LE; one HID device enumeration ~100 ms. The
+  Logitech backend locks per device, so a slow K380 doesn't hold the Reviung41 up.
 - **Toasts need Windows App SDK 2.6.5+ in the installed (self-contained) build.** Up to 2.3.1,
   `AppNotificationManager.Register()` failed with 0x8007007E in every Velopack build (v0.1.1-v0.3.1)
   while dev builds (framework-dependent) worked: the runtime's `IsSelfContained()` loads

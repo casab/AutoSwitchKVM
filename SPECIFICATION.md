@@ -217,24 +217,31 @@ controller** (the operations in §5). It owns no platform APIs directly.
   control channel can appear a moment after its connection. On macOS the query 7 ms after the
   HID connection found nothing, and the K380 was stranded. Retry for a few seconds (macOS: up to
   5 s, every 0.5 s) while it stays connected and the KVM stays away. If it never answers, warn
-  ("press its channel key"). **Only a device the release couldn't send** (macOS 2026-11-14): one
+  ("press its channel key"). **Only a device the release couldn't send** (macOS and Windows 2026-11-14): one
   this host sent away and that comes back while the KVM is elsewhere was brought back on purpose
   (its channel key, or the other host), so it is left here. The user switches keyboards by hand
   while using both computers.
-- **Where a channel-switching device is** (macOS 2026-11-14; hardware: zmk-autoswitch 1.x and
-  2.0 on the Reviung41). A ZMK keyboard keeps its Bluetooth LE link to every paired host after a
+- **Where a channel-switching device is** (macOS and Windows 2026-11-14; hardware: zmk-autoswitch
+  1.x and 2.0 on the Reviung41; Windows saw the late release pull the keyboard back to itself ~3 s
+  after every release before this). A ZMK keyboard keeps its Bluetooth LE link to every paired host after a
   profile switch, for minutes, so "connected" doesn't mean it's on this host, and module 2.0
   answers HID++ over that inactive link (1.x stayed silent). So for a device that answers the
   channel query, **"here" = its current channel is this host's channel**. This host's channel: the
-  one carrying this host's name (Hosts Info), else the only paired channel without a name (the
-  other host named its own), else the current channel seen at a release while the KVM was here;
-  kept for the session. When it isn't known, the link decides, as before. "Here" gates: the
+  one carrying this host's name (Hosts Info; several, e.g. a K380 that kept this PC's name on an
+  old pairing: the one of them carrying the AutoSwitch mark; Windows), else the only paired channel
+  without a name (the other host named its own), else the current channel seen at a release while
+  the KVM was here; kept for the session. When it isn't known, the link decides, as before. Cost
+  (Windows): names are read once per session (a full read of a K380 over Classic takes ~1.5 s at
+  ~75-100 ms per HID++ request; ~30 ms over LE); once this host's channel is known, the check is
+  one `getHostInfo`; when the names don't tell, the device isn't asked again until a release sets
+  it. "Here" gates: the
   arrival wait (connected only once it's on this host's channel), marking (never mark another
   host's channel), the status poll (a lingering link reads as disconnected), the release (a device
   already on another host's channel: nothing to send or disconnect), and the late release (only a
   device on this host's channel is sent on; Automatic would otherwise pick this host's own marked
   channel and pull the keyboard back). A device that answers the query on its first connect of a
-  session is treated as a channel switcher right away (waited for, not called). **Leaving while
+  session is treated as a channel switcher right away (waited for, not called; Windows asks
+  alongside the other devices' connects, so a trackpad isn't held up). **Leaving while
   the KVM is here** (its channel key): not an unexpected drop, so no auto-reconnect; it stays where
   the user put it.
 

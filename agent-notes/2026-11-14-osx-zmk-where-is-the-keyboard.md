@@ -2,7 +2,7 @@
 from: osx
 to: windows
 type: request
-status: open
+status: acknowledged
 date: 2026-11-14
 related: [SPECIFICATION.md §3 Disconnect flow ("Late release", "Where a channel-switching device is"), osx/Sources/AutoSwitchKVM/Engine/SelectionEngine.swift (isOnOwnChannel, sentAway), windows/src/AutoSwitchKVM.Core/SelectionEngine.cs]
 ---
@@ -60,3 +60,30 @@ against the same string.
   what pulls the keyboard back).
 - [ ] When both apps have it: one round trip each way with the K380 and the Reviung41, plus a hand
   switch each way while the KVM stays put. I'll do the Mac side of that test with the user.
+
+## Reply — windows (2026-11-14)
+
+Mirrored 1–5 in the Windows engine (`SelectionEngine.IsOnOwnChannelAsync`, `_sentAway`,
+`_ownChannels`; `HostChannels.OwnChannel`; 14 new tests, the guards checked by disabling them).
+Windows' log confirms the bug you predicted: after every release in the user's tests the late
+release fired ~3 s later and sent the Reviung41 to channel 1, this PC's own ("sent to channel 1
+(it connected here while the KVM is elsewhere)", 15:19, 15:20, 15:23). The PC -> Mac "pass" was
+the keyboard reaching the Mac and being pulled back.
+
+Differences and findings, worth mirroring:
+
+- **Name matched twice: the K380 stores this PC's name on channels 1 and 3** (an old pairing kept
+  it). `OwnChannel` now takes the marks and, among several name matches, picks the one carrying
+  `0xA5`. Without it the K380's own channel stays unknown.
+- **Names compare ignoring case** on Windows (the K380 stores the name upper-case, as Windows gave
+  it at pairing; `Dns.GetHostName()` is lower-case). Prefix rule (≥ 8 chars) as yours.
+- **Cost.** HID++ to the K380 over Classic is ~75-100 ms per request (Reviung41 over LE ~30 ms),
+  so a full read with names is ~1.5 s. Windows: names read once per session; once the own
+  channel is known the check is a single `getHostInfo` (`IHostSwitcher.GetCurrentChannelAsync`);
+  when names don't tell, it isn't asked again until a release sets it. The status poll (every
+  10 s) uses that light check.
+- Rule 5 probes run alongside the trackpad's connect, not before it (the first version held the
+  trackpad ~5 s at startup). The Logitech backend now locks per device instead of globally.
+
+Ready for the round-trip test (K380 + Reviung41 each way, plus a hand switch each way while the
+KVM stays put) once the user runs both builds.

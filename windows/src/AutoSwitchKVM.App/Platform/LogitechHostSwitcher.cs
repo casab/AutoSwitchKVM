@@ -35,19 +35,38 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
     private const ushort ChangeHostFeature = 0x1814;
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromMilliseconds(1500);
 
-    private readonly SemaphoreSlim _lock = new(1, 1);
-    private readonly Dictionary<string, byte> _featureIndex = new();   // per address: 0 = not supported
+    // One HID++ conversation per device at a time; devices don't wait for each other (a K380 over
+    // Classic answers in ~75-100 ms per request, and it held the Reviung41 up behind one lock).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
+    private SemaphoreSlim LockFor(string address) =>
+        _locks.GetOrAdd(address.Replace(":", "").Replace("-", "").ToUpperInvariant(), _ => new SemaphoreSlim(1, 1));
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _featureIndex = new();   // per address: 0 = not supported
 
     public async Task<HostChannels?> GetChannelsAsync(string address, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        var gate = LockFor(address);
+        await gate.WaitAsync(ct);
         try { return await Task.Run(() => WithEndpoint(address, (s, fi) => ReadChannels(s, fi, address)), ct); }
-        finally { _lock.Release(); }
+        finally { gate.Release(); }
+    }
+
+    /// Change Host getHostInfo only (one request; ~75 ms to a K380 over Classic, ~30 ms over LE).
+    public async Task<int?> GetCurrentChannelAsync(string address, CancellationToken ct = default)
+    {
+        var gate = LockFor(address);
+        await gate.WaitAsync(ct);
+        try
+        {
+            var reply = await Task.Run(() => WithEndpoint(address, (s, fi) => Request(s, fi, 0, Array.Empty<byte>())), ct);
+            return reply is null ? null : reply[5];
+        }
+        finally { gate.Release(); }
     }
 
     public async Task SwitchToAsync(string address, int channel, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        var gate = LockFor(address);
+        await gate.WaitAsync(ct);
         try
         {
             var done = await Task.Run(() => WithEndpoint(address, (s, fi) =>
@@ -60,12 +79,13 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
                 throw new BluetoothException(BluetoothFailureKind.DeviceNotFound,
                     "the device's Logitech control channel isn't available (not connected to this PC?)");
         }
-        finally { _lock.Release(); }
+        finally { gate.Release(); }
     }
 
     public async Task MarkCurrentChannelAsync(string address, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        var gate = LockFor(address);
+        await gate.WaitAsync(ct);
         try
         {
             await Task.Run(() => WithEndpoint(address, (s, fi) =>
@@ -81,13 +101,13 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
                 return (object?)true;
             }), ct);
         }
-        finally { _lock.Release(); }
+        finally { gate.Release(); }
     }
 
     // ---- Channel names (HID++ 0x1815 "Hosts Info"; Settings only, never on the release path) ----
 
     private const ushort HostsInfoFeature = 0x1815;
-    private readonly Dictionary<string, byte> _hostsInfoIndex = new();   // per address: 0 = not supported
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _hostsInfoIndex = new();   // per address: 0 = not supported
 
     /// The name each channel's host gave itself when it paired (e.g. the computer name), or null
     /// per channel when unknown; null overall when the device doesn't support Hosts Info or isn't
@@ -96,7 +116,8 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
     /// nameLength; [3](host, offset) -> host, offset, up to 14 name bytes.
     public async Task<IReadOnlyList<string?>?> GetChannelNamesAsync(string address, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        var gate = LockFor(address);
+        await gate.WaitAsync(ct);
         try
         {
             return await Task.Run(() => WithEndpoint(address, (s, _) =>
@@ -125,7 +146,7 @@ public sealed class LogitechHostSwitcher : IHostSwitcher
                 return (IReadOnlyList<string?>?)names;
             }), ct);
         }
-        finally { _lock.Release(); }
+        finally { gate.Release(); }
     }
 
     /// The Hosts Info feature index (cached per address), 0 when the device doesn't have it.

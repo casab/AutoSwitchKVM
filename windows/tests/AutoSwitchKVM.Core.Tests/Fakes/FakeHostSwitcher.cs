@@ -34,6 +34,12 @@ public sealed class FakeHostSwitcher : IHostSwitcher
         return Task.CompletedTask;
     }
 
+    /// Names per channel (HID++ Hosts Info); null = the device stores none.
+    public string?[]? Names { get; set; }
+
+    public Task<IReadOnlyList<string?>?> GetChannelNamesAsync(string address, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<string?>?>(Mine(address) && Reachable ? Names?.ToArray() : null);
+
     public Task MarkCurrentChannelAsync(string address, CancellationToken ct = default)
     {
         Calls.Add($"mark:{Norm(address)}:{Current}");
