@@ -141,7 +141,13 @@ controller** (the operations in §5). It owns no platform APIs directly.
    "Disconnected" notification unless the device was actually connected. Without this, "pause →
    switch to the other host → unpause", or the app starting while switched away (crash, reboot),
    left the device bonded here and the other host locked out. Consequence: a manual connect made
-   while switched away is released by the next seed (the KVM decides).
+   while switched away is released by the next seed (the KVM decides). **Except a channel-switching
+   device** (macOS 2026-11-14; Windows pending): it is left on whatever channel it's on, and not
+   late-released afterwards either (treated as "sent away"). Nobody watched the KVM leave, so a
+   keyboard on this host's channel was most likely put there by hand (the user types on both
+   computers), and it holds no bond the other host waits for. A relaunch had sent the Reviung41 off
+   the Mac while the user was typing on it. Cost: a K380 left on this host's channel while the app
+   wasn't running needs its channel key once.
 6. **Device list edits are not a seed** (2026-11-13). Adding, removing, enabling, disabling or
    reordering a device must not re-run the connect flow for the other devices: a full pass puts
    every `managePairing` device through pair + HID check again, and the user sees working devices
@@ -228,10 +234,12 @@ controller** (the operations in §5). It owns no platform APIs directly.
   answers HID++ over that inactive link (1.x stayed silent). So for a device that answers the
   channel query, **"here" = its current channel is this host's channel**. This host's channel: the
   one carrying this host's name (Hosts Info; several, e.g. a K380 that kept this PC's name on an
-  old pairing: the one of them carrying the AutoSwitch mark; Windows), else the only paired channel
+  old pairing: the one of them carrying the AutoSwitch mark), else the only paired channel
   without a name (the other host named its own), else the current channel seen at a release while
-  the KVM was here; kept for the session. When it isn't known, the link decides, as before. Cost
-  (Windows): names are read once per session (a full read of a K380 over Classic takes ~1.5 s at
+  the KVM was here; kept for the session. Names compare ignoring case (the K380 stores the name
+  in capitals, as Windows gave it at pairing), and a stored name of 8+ characters that starts this
+  host's name matches (devices cut names short). When it isn't known, the link decides, as before.
+  Cost: names are read once per session (a full read of a K380 over Classic takes ~1.5 s at
   ~75-100 ms per HID++ request; ~30 ms over LE); once this host's channel is known, the check is
   one `getHostInfo`; when the names don't tell, the device isn't asked again until a release sets
   it. "Here" gates: the
@@ -457,7 +465,10 @@ shown in the channel choice ("Channel 2 · name") and read for Settings only. **
 `HostChannels.Paired` (one `[1]` request per channel, on the release path too; Windows and macOS 2026-11-14),
 so the never-to-an-unpaired-channel rule and the automatic fallback apply to every device with
 Hosts Info. **Writing names** (Windows and macOS 2026-11-14): when marking its channel, a host writes
-its own name there (Windows: `Dns.GetHostName()`; macOS: the computer name, e.g. "…'s MacBook Pro";
+its own name there (Windows: `Dns.GetHostName()` in capitals, as Windows gives its name to a
+Logitech keyboard at pairing, e.g. the K380's "ENGIN-DESKTOP", so a ZMK keyboard shows the same;
+requested 2026-11-14, Windows pending; macOS: the computer name, e.g. "…'s MacBook Pro", as macOS
+gives it at pairing;
 cut to the name max length at a character boundary) if
 the device allows writing (caps bit 1) and the channel has no name. Never overwrite a name:
 Logitech devices name their channels themselves.

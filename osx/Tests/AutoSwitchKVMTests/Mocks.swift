@@ -186,8 +186,12 @@ final class FakeHostSwitcher: HostSwitcher {
             ? HostChannels(count: count, current: current, marks: marks, paired: paired) : nil
     }
 
+    /// How many times the names were read.
+    private(set) var nameReads = 0
+
     func channelNames(_ address: String) async throws -> [String?]? {
-        mine(address) && reachable ? names : nil
+        nameReads += 1
+        return mine(address) && reachable ? names : nil
     }
 
     func switchTo(_ address: String, channel: Int) async throws {

@@ -47,6 +47,9 @@ GitHub release (and from there into the in-app update notes).
 - A keyboard you switch by hand stays where you put it: AutoSwitch no longer sends it back when
   it comes to the Mac while the KVM is on the other computer, or pulls it back when it leaves while
   the KVM is here.
+- Starting AutoSwitch while the KVM is on the other computer no longer sends your keyboard away:
+  a channel-switching keyboard stays on whichever computer it's on. The trackpad is still
+  released.
 
 ## v0.3.1 (2026-11-13)
 

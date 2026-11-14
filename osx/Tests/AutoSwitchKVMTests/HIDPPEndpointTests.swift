@@ -76,4 +76,22 @@ final class HIDPPEndpointTests: XCTestCase {
         XCTAssertNil(HostChannels.ownChannel(names: [me, me], paired: [true, true], myName: me))
         XCTAssertFalse(HostChannels.nameMatches("Engin", me), "too short to be a cut-down copy")
     }
+
+    /// Hardware (Windows, 2026-11-14): the K380 keeps the PC's name on channels 1 and 3 and stores
+    /// it in capitals.
+    func testTheNameTwiceIsSettledByTheMarkAndCaseIsIgnored() {
+        let pc = "engin-desktop"
+        let mark = HostChannels.autoSwitchMark
+        XCTAssertEqual(
+            HostChannels.ownChannel(
+                names: ["ENGIN-DESKTOP", "Mac", "ENGIN-DESKTOP"], paired: nil, marks: [0, mark, mark], myName: pc), 2)
+        XCTAssertNil(
+            HostChannels.ownChannel(
+                names: ["ENGIN-DESKTOP", "Mac", "ENGIN-DESKTOP"], paired: nil, marks: [mark, 0, mark], myName: pc),
+            "both marked: can't tell")
+        XCTAssertNil(
+            HostChannels.ownChannel(names: [pc, "Mac", pc], paired: [true, true, true], marks: [], myName: pc),
+            "no marks: can't tell, and not the unnamed-channel rule either")
+        XCTAssertTrue(HostChannels.nameMatches("ENGIN’S MACBO", "Engin’s MacBook Pro"))
+    }
 }

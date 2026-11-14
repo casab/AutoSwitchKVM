@@ -571,7 +571,10 @@ final class SelectionEngine: ObservableObject {
     /// Spec §3 Evaluate step 5: after a seed with the source absent (launch while switched away,
     /// unpause or wake after the KVM moved, profile switch), release enabled devices this Mac still
     /// holds: disconnect connected ones, unpair bonded managePairing ones. Devices not held are
-    /// skipped; a notice is posted only for a device that was actually connected.
+    /// skipped; a notice is posted only for a device that was actually connected. A channel-
+    /// switching device is left on whatever channel it's on: nobody was watching when the KVM
+    /// left, and the user switches keyboards by hand while using both computers (2026-11-14). It
+    /// holds no bond the other computer waits for.
     private func releaseHeld(run: Run) async {
         let pairedList = await bt.pairedDevices()
         let paired = Set(pairedList.map { $0.address.replacingOccurrences(of: ":", with: "-").lowercased() })
@@ -588,6 +591,22 @@ final class SelectionEngine: ObservableObject {
             }
             markBusy(device.id)
             defer { clearBusy(device.id) }
+            if connected, !device.managePairing {
+                let here = await isOnOwnChannel(device)
+                if switchesChannels(device) {
+                    sentAway.insert(device.id)  // no late release either
+                    Log.engine.log(
+                        here == false
+                            ? "\(device.name): already on another computer's channel; nothing to release"
+                            : "\(device.name): switches channels; leaving it where it is (press its channel key to "
+                                + "move it)")
+                    continue
+                }
+                if let why = staleReason(run, respectSelection: false) {
+                    Log.engine.debug("run #\(run.token): seed release stopped: \(why)")
+                    return
+                }
+            }
             await disconnectOne(device, run: run, notify: connected)
         }
     }
@@ -1479,11 +1498,13 @@ final class SelectionEngine: ObservableObject {
     /// Devices this Mac sent to another channel since the KVM left (cleared when it returns). One
     /// that comes back meanwhile was brought back on purpose (its channel key, or the other
     /// computer), so it is left here: only a device the release couldn't send (e.g. asleep at the
-    /// switch) gets a late release.
+    /// switch) gets a late release. A channel switcher a seed left where it was is in here too.
     private var sentAway = Set<UUID>()
     /// This Mac's channel per device: the channel carrying this Mac's name, else the only paired
     /// channel without a name, else as seen while the KVM was here. Kept for the session.
     private var ownChannels: [UUID: Int] = [:]
+    /// Devices whose stored names were read and didn't single out this Mac's channel.
+    private var namesUntold = Set<UUID>()
     /// This Mac's name as a device stores it (HID++ Hosts Info); tests set their own.
     var thisComputerName = LogitechHostSwitcher.computerName()
 
@@ -1508,9 +1529,11 @@ final class SelectionEngine: ObservableObject {
     }
 
     /// This Mac's channel for the device (see `ownChannels`), resolved from its stored names once.
+    /// When the names don't tell, they aren't read again this session (~1.5 s on a K380 over
+    /// Classic): a release or marking sets it instead. Windows does the same.
     private func ownChannel(_ device: BTDevice, _ ch: HostChannels) async -> Int? {
         if let own = ownChannels[device.id] { return own }
-        guard let hostSwitcher else { return nil }
+        guard let hostSwitcher, !namesUntold.contains(device.id) else { return nil }
         let addr = device.normalizedAddress
         let names: [String?]?
         do {
@@ -1519,7 +1542,13 @@ final class SelectionEngine: ObservableObject {
             Log.engine.debug("\(device.name): channel names query failed: \(Failure(error).summary)")
             return nil
         }
-        guard let own = HostChannels.ownChannel(names: names, paired: ch.paired, myName: thisComputerName) else {
+        guard
+            let own = HostChannels.ownChannel(
+                names: names, paired: ch.paired, marks: ch.marks, myName: thisComputerName)
+        else {
+            namesUntold.insert(device.id)
+            Log.engine.debug(
+                "\(device.name): its stored names don't tell which \(ch.noun.lowercased()) is this Mac's")
             return nil
         }
         ownChannels[device.id] = own
@@ -1578,7 +1607,7 @@ final class SelectionEngine: ObservableObject {
     private func runPendingLateRelease(_ id: UUID) {
         guard lateReleasePending.remove(id) != nil,
             let device = store.config.devices.first(where: { $0.id == id }),
-            !selected, !store.config.paused, !suspended
+            !selected, !store.config.paused, !suspended, !sentAway.contains(id)
         else { return }
         Task { @MainActor [weak self] in
             guard let self, await self.bt.isConnected(device.normalizedAddress) else { return }

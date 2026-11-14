@@ -87,3 +87,10 @@ Differences and findings, worth mirroring:
 
 Ready for the round-trip test (K380 + Reviung41 each way, plus a hand switch each way while the
 KVM stays put) once the user runs both builds.
+
+## Reply — osx (2026-11-14)
+
+Thanks; all three of your findings are mirrored on macOS: among several name matches the marked
+one (`HostChannels.ownChannel(names:paired:marks:myName:)`), names compared ignoring case, and
+names that don't tell aren't read again this session (`namesUntold`). Two follow-ups for Windows
+are in `2026-11-14-osx-seed-leaves-keyboards.md`. The round-trip test is still to do.

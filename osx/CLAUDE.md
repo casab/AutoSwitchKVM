@@ -288,12 +288,14 @@ the new profile but does not force-disconnect the previous profile's devices.
   "connected" for minutes), and zmk-autoswitch 2.0 answers HID++ over that inactive link. So for a
   device that answers the channel query, "here" = its current channel is this Mac's
   (`isOnOwnChannel`; this Mac's channel from `HostChannels.ownChannel`: the channel named after
-  this Mac, else the only unnamed paired one, else the one seen at a release; `ownChannels`, per
-  session). It gates the arrival wait, marking, the status poll, the release (`.alreadyAway`:
+  this Mac, case ignored, the marked one when the name is on several; else the only unnamed
+  paired one, else the one seen at a release; `ownChannels`, per session; names that don't tell
+  aren't read again, `namesUntold`). It gates the arrival wait, marking, the status poll, the release (`.alreadyAway`:
   nothing to send) and the late release. **The user switches keyboards by hand while using both
   computers:** a device this Mac sent away that comes back while the KVM is elsewhere is left
   there (`sentAway`, cleared when the KVM returns), and a channel switcher that leaves while the
-  KVM is here isn't auto-reconnected. Only a device the release couldn't send gets a late release.
+  KVM is here isn't auto-reconnected. Only a device the release couldn't send gets a late release. A seed with the KVM away (`releaseHeld`) leaves channel switchers where they are and adds them
+  to `sentAway`; only pairing-managed and plain devices are released.
 - **Don't call a channel-switching device on arrival** (`switchesChannels` →
   `waitForChannelArrival`). On hardware, three `openConnection` page timeouts to a K380 still on
   the PC's channel kept it out ~20 s (it connected *incoming* only between our pages). Waiting,

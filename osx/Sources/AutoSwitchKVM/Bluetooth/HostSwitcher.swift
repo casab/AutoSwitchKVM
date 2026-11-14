@@ -88,20 +88,29 @@ struct HostChannels: Equatable, Sendable {
     }
 
     /// This host's channel from the names the device stores (HID++ Hosts Info): the one channel
-    /// carrying `myName`; else, when pairing is known, the only paired channel without a name (the
-    /// other computers' AutoSwitch named theirs). nil when that doesn't single one out.
-    static func ownChannel(names: [String?]?, paired: [Bool]?, myName: String) -> Int? {
+    /// carrying `myName`; when several carry it (a K380 that kept a name from an old pairing), the
+    /// one of them carrying the AutoSwitch mark; else, when pairing is known, the only paired
+    /// channel without a name (the other computers' AutoSwitch named theirs). nil when that doesn't
+    /// single one out. Mirrors Windows' `HostChannels.OwnChannel`.
+    static func ownChannel(names: [String?]?, paired: [Bool]?, marks: [UInt8] = [], myName: String) -> Int? {
         guard let names else { return nil }
         let mine = names.indices.filter { names[$0].map { nameMatches($0, myName) } ?? false }
         if mine.count == 1 { return mine[0] }
-        guard mine.isEmpty, let paired else { return nil }
+        if mine.count > 1 {
+            let marked = mine.filter { $0 < marks.count && marks[$0] == autoSwitchMark }
+            return marked.count == 1 ? marked[0] : nil
+        }
+        guard let paired else { return nil }
         let unnamed = paired.indices.filter { paired[$0] && ($0 >= names.count || names[$0] == nil) }
         return unnamed.count == 1 ? unnamed[0] : nil
     }
 
-    /// A stored name is this computer's: equal, or a cut-down copy (devices cap the length).
+    /// A stored name is this computer's: equal ignoring case (Windows gives devices its name in
+    /// capitals), or a cut-down copy (devices cap the length).
     static func nameMatches(_ stored: String, _ myName: String) -> Bool {
-        stored == myName || (stored.count >= 8 && myName.hasPrefix(stored))
+        let stored = stored.lowercased()
+        let mine = myName.lowercased()
+        return stored == mine || (stored.count >= 8 && mine.hasPrefix(stored))
     }
 
     /// A channel name from Hosts Info name pieces (UTF-8, `length` bytes in all): trailing NULs

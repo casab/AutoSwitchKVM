@@ -184,6 +184,44 @@ final class ChannelSwitchTests: XCTestCase {
         XCTAssertEqual(f.switcher.calls.filter { $0.hasPrefix("switch:") }.count, 1, "\(f.switcher.calls)")
     }
 
+    /// Stored names that don't tell which channel is this Mac's are read once a session, not on
+    /// every check (a K380 over Classic takes ~1.5 s to read them).
+    func testNamesThatDontTellAreNotReadAgain() async {
+        let f = make()
+        f.switcher.names = ["PC", nil, nil]
+        f.switcher.paired = [true, true, true]  // two unnamed paired channels: can't tell
+        f.bt.preset(paired: true, connected: true, addr)
+        f.engine.noteSwitchesChannels(f.device.id)
+        _ = await f.engine.isOnOwnChannel(f.device)
+        _ = await f.engine.isOnOwnChannel(f.device)
+        XCTAssertEqual(f.switcher.nameReads, 1)
+    }
+
+    // MARK: - A seed with the KVM away (launch, unpause, profile switch)
+
+    /// The app starts while the KVM is on the other computer, with the keyboard on this Mac's
+    /// channel (switched by hand): it stays, and isn't sent on later either.
+    func testASeedLeavesAChannelSwitcherWhereItIs() async {
+        let f = makeNamed()
+        f.bt.preset(paired: true, connected: true, addr)
+        f.engine.seed()
+        await f.engine.evaluateNow()
+        f.bt.simulateConnection(addr)
+        for _ in 0..<200 { await Task.yield() }
+
+        XCTAssertFalse(f.switcher.calls.contains { $0.hasPrefix("switch:") }, "\(f.switcher.calls)")
+        XCTAssertFalse(f.bt.calls.contains { $0.hasPrefix("disconnect:") }, "\(f.bt.calls)")
+    }
+
+    /// A device that doesn't switch channels is still released by the seed, as before.
+    func testASeedStillReleasesADeviceThatDoesntSwitchChannels() async {
+        let f = make(supported: false)
+        f.bt.preset(paired: true, connected: true, addr)
+        f.engine.seed()
+        await f.engine.evaluateNow()
+        XCTAssertTrue(f.bt.calls.contains("disconnect:\(addr)"), "\(f.bt.calls)")
+    }
+
     private func makeNamed() -> Fixture {
         let f = make()
         f.switcher.names = ["PC", "Test Mac", nil]
