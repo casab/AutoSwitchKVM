@@ -21,8 +21,8 @@ GitHub release (and from there into the in-app update notes).
 - Device notifications are now a small status panel (by the tray on Windows, under the menu bar
   on the Mac): it shows each device connecting, connected or released while the KVM switches,
   then hides by itself. No sound, it never takes focus, and nothing piles up in the notification
-  center (Settings ▸ Switch status). A device that's switched off is reported once, not at every
-  retry or switch.
+  center (Settings ▸ Switch status, on by default). A device that's switched off is reported
+  once, not at every retry or switch.
 
 ### Windows
 

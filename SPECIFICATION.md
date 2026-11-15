@@ -86,8 +86,8 @@ display string convention, e.g. `⌃⌥⌘P` / on Windows `Ctrl+Alt+Cmd⇒Win` e
 | `btCallTimeoutSecs` | int | `15` macOS / `45` Windows | Per Bluetooth-call timeout. Platform default differs by design: a Windows pair legitimately takes ~14 s and must absorb the other-host-release race |
 | `postUnpairSettleMs` | int | `2000` | Minimum gap between an unpair of a device returning and the next pair of it (§3 Connect flow). Only quick KVM bounces pay it. User-tunable (Settings ▸ General on both apps); the macOS reason is bluetoothd deleting the key ~1.5 s late, the Windows one WinRT's ~70 ms stale `IsPaired` |
 | `logLevel` | string | `"info"` | Minimum log level: `"error"`, `"warning"`, `"info"`, `"debug"` (§10). Missing/unknown = `"info"`. Settings ▸ Diagnostics ▸ Log detail on both apps |
-| `showNotifications` | bool | `false` | Connect/disconnect alerts |
-| `notifyUnexpectedDisconnect` | bool | `false` | Alert on passive drops |
+| `showNotifications` | bool | `true` (macOS 2026-11-16; Windows pending, was `false`) | "Switch status": the status panel while devices switch (both apps replaced per-device OS notifications with it, 2026-11-16). Missing = `true`; a file that says `false` stays off |
+| `notifyUnexpectedDisconnect` | bool | `false` | Show passive drops (in the status panel) |
 | `autoReconnectOnDrop` | bool | `true` | One rate-limited automatic reconnect after a passive drop (§3) |
 | `launchAtLogin` | bool | `false` | Autostart |
 | `paused` | bool | `false` | Suspend automation |
@@ -640,9 +640,13 @@ so it classifies every device as Classic (rule 6 never fires on the Mac).
 - **Sleep/Wake:** on sleep, proactively disconnect (so the other host can take the devices); on
   wake, re-seed and re-evaluate.
 - **Launch at login:** OS-native autostart, toggleable.
-- **Notifications:** connect / disconnect / gave-up alerts gated by `showNotifications`;
-  unexpected-disconnect gated by `notifyUnexpectedDisconnect`. (macOS requires a real `.app` bundle
-  for notifications; note per-platform prerequisites.)
+- **Switch status panel** (both, 2026-11-16; replaced per-device OS notifications): a small
+  panel that never takes focus (by the tray on Windows, under the menu bar on macOS) shows where
+  the KVM went and each changing device live, then hides by itself (3.5 s after the last change
+  with nothing connecting, 8 s with a problem, never while hovered). Gated by `showNotifications`
+  (on by default); unexpected drops by `notifyUnexpectedDisconnect`. Not shown at launch, wake or
+  a profile switch; a device that ended up not connected while selected is reported once, then
+  left out until it connects again.
 - **Global shortcuts:** system-wide hotkeys for Pause/Connect-all/Disconnect-all, off by default,
   user-assignable, with a restore-defaults action. Should not require elevated/Accessibility
   permission where avoidable.

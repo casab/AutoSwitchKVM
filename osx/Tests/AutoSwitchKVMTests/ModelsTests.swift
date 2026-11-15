@@ -34,6 +34,9 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(cfg.logLevel, .info)
         XCTAssertEqual(cfg.profiles.count, 1)  // empty → one Default profile
         XCTAssertEqual(cfg.hotkeyPause, .defaultPause)  // absent → the default combo
+        XCTAssertTrue(cfg.showNotifications, "the switch status panel is on by default")
+        XCTAssertTrue(AppConfig.default.showNotifications)
+        XCTAssertFalse(cfg.notifyUnexpectedDisconnect)
 
         let dev = try JSONDecoder().decode(
             BTDevice.self, from: Data(#"{"name":"x","address":"aa-bb"}"#.utf8))

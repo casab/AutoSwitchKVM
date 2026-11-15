@@ -140,6 +140,7 @@ struct AppConfig: Codable {
     var postUnpairSettleMs: Int
     /// How much the app logs (spec §10). Missing or unknown in the file = `info`.
     var logLevel: LogLevel
+    /// "Switch status": the status panel while devices switch. On by default (missing = on).
     var showNotifications: Bool
     /// Notify when a managed device drops while the source is still present (e.g. another host
     /// claimed it). Off by default.
@@ -169,7 +170,7 @@ struct AppConfig: Codable {
         btCallTimeoutSecs: Int = 15,
         postUnpairSettleMs: Int = 2000,
         logLevel: LogLevel = .info,
-        showNotifications: Bool = false,
+        showNotifications: Bool = true,
         notifyUnexpectedDisconnect: Bool = false,
         autoReconnectOnDrop: Bool = true,
         launchAtLogin: Bool = false,
@@ -251,7 +252,7 @@ struct AppConfig: Codable {
         postUnpairSettleMs = try c.decodeIfPresent(Int.self, forKey: .postUnpairSettleMs) ?? 2000
         // Decoded as a string so an unknown value falls back to `info` instead of failing the load.
         logLevel = LogLevel(config: try? c.decodeIfPresent(String.self, forKey: .logLevel))
-        showNotifications = try c.decodeIfPresent(Bool.self, forKey: .showNotifications) ?? false
+        showNotifications = try c.decodeIfPresent(Bool.self, forKey: .showNotifications) ?? true
         notifyUnexpectedDisconnect = try c.decodeIfPresent(Bool.self, forKey: .notifyUnexpectedDisconnect) ?? false
         autoReconnectOnDrop = try c.decodeIfPresent(Bool.self, forKey: .autoReconnectOnDrop) ?? true
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? false
