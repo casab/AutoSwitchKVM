@@ -228,7 +228,9 @@ public sealed class AppController
     /// reconciles statuses on resume. Cancelled on resume if it never got to run.
     private async Task ReleaseEnabledDevicesAsync(CancellationToken ct)
     {
-        var devices = Config.Devices.Where(d => d.Enabled).ToList();
+        // Unpairs first: the bond is what blocks the other host, and an audio disconnect can take
+        // a few seconds of the bounded wait.
+        var devices = Config.Devices.Where(d => d.Enabled).OrderByDescending(d => d.ManagePairing).ToList();
         foreach (var device in devices)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();

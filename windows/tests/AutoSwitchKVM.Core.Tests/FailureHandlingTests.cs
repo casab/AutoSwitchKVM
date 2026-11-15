@@ -428,13 +428,15 @@ public class FailureHandlingTests
     [Fact]
     public async Task Manual_connect_supersedes_in_flight_automation()
     {
-        var engine = MakeEngine(out var bt, out var config, out var log, managePairing: false);
-        config.Devices.Add(new BTDevice { Name = "Keyboard", Address = Addr2, Enabled = true });
+        // Pairing devices connect one at a time; devices with managePairing off run alongside them
+        // (see Unmanaged_devices_connect_alongside_each_other).
+        var engine = MakeEngine(out var bt, out var config, out var log, managePairing: true);
+        config.Devices.Add(new BTDevice { Name = "Keyboard", Address = Addr2, Enabled = true, ManagePairing = true });
 
         var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var armed = true;
-        bt.BeforeConnect = async () =>
+        bt.BeforePair = async () =>
         {
             if (!armed) return;
             armed = false;
@@ -452,6 +454,35 @@ public class FailureHandlingTests
 
         Assert.True(log.Has(LogLevel.Debug, "supersedes"), log.Dump());
         Assert.DoesNotContain(Addr2.Replace(":", ""), bt.Connected);  // superseded run stopped
+    }
+
+    [Fact]
+    public async Task Unmanaged_devices_connect_alongside_each_other()
+    {
+        // 2026-11-15: a K380 that never answered spent 59 s on retries while a speaker listed
+        // after it waited. Devices that don't pair connect at the same time.
+        var engine = MakeEngine(out var bt, out var config, out var log, managePairing: false);
+        config.Devices.Add(new BTDevice { Name = "Speaker", Address = Addr2, Enabled = true });
+
+        var first = Addr.Replace(":", "");
+        var second = Addr2.Replace(":", "");
+        var stuck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        bt.BeforeConnect = async () =>
+        {
+            if (Interlocked.Increment(ref calls) == 1) await stuck.Task;   // the first device hangs
+        };
+
+        engine.HandleUsb(Vendor, Product, added: true);
+        var arrival = engine.EvaluateNowAsync();
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!bt.Connected.Contains(second) && DateTime.UtcNow < deadline) await Task.Delay(10);
+
+        Assert.Contains(second, bt.Connected);     // connected while the first was still stuck
+        Assert.DoesNotContain(first, bt.Connected);
+        stuck.SetResult();
+        await arrival;
+        Assert.Contains(first, bt.Connected);
     }
 
     [Fact]

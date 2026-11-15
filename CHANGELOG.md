@@ -16,6 +16,14 @@ GitHub release (and from there into the in-app update notes).
 
 ## Unreleased
 
+### Windows
+
+- Bluetooth headphones and speakers can follow the KVM (being tested): AutoSwitch disconnects
+  them when the KVM leaves this PC, keeping their pairing, so your other computer can connect
+  them, and connects them again when the KVM comes back. Keep Manage pairing off for them.
+- A device that doesn't answer no longer holds up the others: devices that don't need pairing
+  connect at the same time.
+
 ## v0.4.0 (2026-11-14)
 
 ### Both

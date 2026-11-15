@@ -27,7 +27,7 @@ public static class HandoffText
         HandoffType.RepairByHand =>
             "AutoSwitch can't switch it: it remembers one computer and only moves in pairing mode. Keep it on one computer, connect it by cable through the KVM, or pair it to a Bluetooth-to-USB adapter (for controllers, e.g. 8BitDo) plugged into the KVM. AutoSwitch shows its status. Keep Manage pairing off.",
         HandoffType.HostConnects =>
-            "Not on Windows yet: Windows can't disconnect a Bluetooth device without unpairing it. The Mac app can switch these. AutoSwitch shows its status here.",
+            "AutoSwitch can switch it: it disconnects the device when the KVM leaves this PC, so your other computer can connect it, and connects it when the KVM comes back. Its pairing stays. Keep Manage pairing off.",
         HandoffType.ChannelSwitch =>
             "AutoSwitch can switch it: when the KVM leaves this PC, it tells the device to go to the other computer's channel. Its pairings stay as they are. Keep Manage pairing off.",
         _ =>
@@ -45,5 +45,5 @@ public static class HandoffText
     /// Segoe Fluent glyph: check for a supported handoff, info otherwise.
     public static string Glyph(HandoffType t) => CanSwitch(t) ? "" : t == HandoffType.Unknown ? "" : "";
 
-    public static bool CanSwitch(HandoffType t) => t is HandoffType.PairingHandoff or HandoffType.ChannelSwitch;
+    public static bool CanSwitch(HandoffType t) => t is HandoffType.PairingHandoff or HandoffType.ChannelSwitch or HandoffType.HostConnects;
 }

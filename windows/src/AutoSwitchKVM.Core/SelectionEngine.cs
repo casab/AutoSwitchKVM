@@ -927,30 +927,44 @@ public sealed class SelectionEngine
         // A device that answers the channel query is a channel switcher, even before it was seen
         // this session (spec §3): waited for, not called. Asked alongside the connects below
         // (a full query to a K380 over Classic takes ~0.5 s), and answered before it's its turn.
+        // Devices with managePairing off never pair, so they connect alongside the pairing ones too
+        // (spec §3, 2026-11-15): a K380 that didn't answer spent 59 s on its retries, and the
+        // speaker behind it waited all that time. Pairing devices still go one at a time.
         var unknown = devices.Where(d => !d.ManagePairing && !IsKnownChannelSwitcher(d)).ToList();
-        var probes = unknown.ToDictionary(d => d.Id, d => IsOnOwnChannelAsync(d));
-        foreach (var device in devices.Where(d => d.ManagePairing).Concat(unknown))
+        var unmanaged = unknown.Select(d => ConnectUnmanagedAsync(d, run)).ToList();
+        foreach (var device in devices.Where(d => d.ManagePairing))
         {
             if (StaleReason(run, respectSelection: false) is { } why)
             {
                 Debug($"run #{run.Token}: connect run stopped: {why}");
                 break;
             }
-            if (!device.ManagePairing)
-            {
-                await probes[device.Id];
-                if (IsKnownChannelSwitcher(device))
-                {
-                    waits.Add(WaitForArrivalAsync(device, run));
-                    continue;
-                }
-            }
             MarkBusy(device.Id);
             try { await ConnectOneAsync(device, run, respectSelection: true); }
             finally { ClearBusy(device.Id); }
         }
-        await Task.WhenAll(probes.Values);
+        await Task.WhenAll(unmanaged);
         await Task.WhenAll(waits);
+    }
+
+    /// One managePairing-off device of a connect run: asked whether it's a channel switcher (then
+    /// waited for), else connected.
+    private async Task ConnectUnmanagedAsync(BTDevice device, Run run)
+    {
+        await IsOnOwnChannelAsync(device);
+        if (StaleReason(run, respectSelection: false) is { } why)
+        {
+            Debug($"{device.Name}: connect skipped: {why}");
+            return;
+        }
+        if (IsKnownChannelSwitcher(device))
+        {
+            await WaitForArrivalAsync(device, run);
+            return;
+        }
+        MarkBusy(device.Id);
+        try { await ConnectOneAsync(device, run, respectSelection: true); }
+        finally { ClearBusy(device.Id); }
     }
 
     /// Wait for a type 5 device to arrive by itself (connected, HID not down) for up to

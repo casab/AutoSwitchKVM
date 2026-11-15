@@ -20,6 +20,9 @@ namespace AutoSwitchKVM.App.Platform;
 ///                     handoff release is UnpairAsync. (This makes the shared engine flow correct:
 ///                     its mid-connect "disconnect" becomes a no-op, and disconnect-on-leave is the
 ///                     no-op followed by UnpairAsync.)
+/// Bluetooth audio (headphones, speakers; spec §5a type 4) is the exception: Connect/Disconnect
+/// of a paired audio device reconnect/disconnect it and keep the bond (BluetoothAudio), so it
+/// can join the other computer.
 ///   PairAsync       = resolve the endpoint by address + Custom.PairAsync(ConfirmOnly) auto-accept.
 ///                     Failures are classified (BluetoothFailureKind) for the engine's retry policy;
 ///                     a ceremony that outlives its timeout is tracked so retries wait for it.
@@ -153,7 +156,67 @@ public sealed class WinRtBluetooth : IBluetoothController
     // Connect == ensure paired (PairAsync is idempotent: no-op if already paired). Whether the
     // device's HID input is up is checked by the engine through IsHidReadyAsync (spec §3 connect
     // flow: wait for HID on the pairing link first, reconnect only without it).
-    public Task ConnectAsync(string address, CancellationToken ct = default) => PairAsync(address, ct);
+    // A paired Bluetooth audio device (spec §5a type 4) is reconnected instead (BluetoothAudio).
+    public async Task ConnectAsync(string address, CancellationToken ct = default)
+    {
+        if (await PairedAudioFiltersAsync(address, ct) is { Count: > 0 } filters)
+        {
+            await ConnectAudioAsync(address, filters, ct);
+            return;
+        }
+        await PairAsync(address, ct);
+    }
+
+    // ---- Bluetooth audio: connect / disconnect without unpairing (spec §5a type 4) ----
+
+    private const int AudioConnectWaitMs = 8000;
+    private const int AudioDisconnectWaitMs = 10000;
+
+    /// The audio filters of a paired Classic audio device; null for anything else (HID devices,
+    /// LE devices, devices Windows doesn't know or hasn't paired).
+    private async Task<List<string>?> PairedAudioFiltersAsync(string address, CancellationToken ct)
+    {
+        var digits = Digits(address);
+        using (var dev = await ResolveAsync(ParseAddress(address), digits, ct))
+        {
+            if (dev is null || dev.IsLe || !dev.DeviceInformation.Pairing.IsPaired) return null;
+            if (dev.Classic!.ClassOfDevice.MajorClass != BluetoothMajorClass.AudioVideo) return null;
+        }
+        var filters = await Task.Run(() => BluetoothAudio.FiltersFor(digits), ct);
+        if (filters.Count == 0) Log.Debug("bt", $"audio {address}: no Bluetooth audio filters found");
+        return filters;
+    }
+
+    private async Task ConnectAudioAsync(string address, List<string> filters, CancellationToken ct)
+    {
+        if (await IsConnectedAsync(address, ct)) return;
+        var sw = Stopwatch.StartNew();
+        try { await Task.Run(() => BluetoothAudio.Reconnect(filters), ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new BluetoothException(BluetoothFailureKind.Unknown, $"audio reconnect failed: {ex.Message}", "ks-oneshot-reconnect", ex);
+        }
+        if (await WaitForConnectionAsync(address, connected: true, AudioConnectWaitMs, ct))
+        {
+            Log.Debug("bt", $"audio {address}: connected in {sw.ElapsedMilliseconds} ms ({filters.Count} audio profile(s))");
+            return;
+        }
+        // Not multipoint and the other computer still has it, or it's off / out of range. Retried
+        // soon, like a trackpad the other host hasn't released yet.
+        throw new BluetoothException(BluetoothFailureKind.DeviceBusy,
+            $"didn't connect within {AudioConnectWaitMs / 1000} s (another computer may still have it, or it's off)", "audio reconnect");
+    }
+
+    private async Task<bool> WaitForConnectionAsync(string address, bool connected, int timeoutMs, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        while (true)
+        {
+            if (await IsConnectedAsync(address, ct) == connected) return true;
+            if (sw.ElapsedMilliseconds >= timeoutMs) return false;
+            await Task.Delay(250, ct);
+        }
+    }
 
     private const string HidServiceGuid = "{00001124-0000-1000-8000-00805F9B34FB}";     // Classic HID
     private const string HogpServiceGuid = "{00001812-0000-1000-8000-00805F9B34FB}";    // HID over GATT (LE)
@@ -319,7 +382,23 @@ public sealed class WinRtBluetooth : IBluetoothController
         }
     }
 
-    public Task DisconnectAsync(string address, CancellationToken ct = default) => Task.CompletedTask;
+    /// A no-op for HID devices (the release is UnpairAsync; see the class doc). A connected, paired
+    /// Bluetooth audio device is disconnected and keeps its pairing (spec §5a type 4).
+    public async Task DisconnectAsync(string address, CancellationToken ct = default)
+    {
+        if (!await IsConnectedAsync(address, ct)) return;
+        if (await PairedAudioFiltersAsync(address, ct) is not { Count: > 0 } filters) return;
+        var sw = Stopwatch.StartNew();
+        try { await Task.Run(() => BluetoothAudio.Disconnect(filters), ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new BluetoothException(BluetoothFailureKind.Unknown, $"audio disconnect failed: {ex.Message}", "ks-oneshot-disconnect", ex);
+        }
+        if (!await WaitForConnectionAsync(address, connected: false, AudioDisconnectWaitMs, ct))
+            throw new BluetoothException(BluetoothFailureKind.Timeout,
+                $"still connected {AudioDisconnectWaitMs / 1000} s after the disconnect request", "audio disconnect");
+        Log.Debug("bt", $"audio {address}: disconnected in {sw.ElapsedMilliseconds} ms ({filters.Count} audio profile(s))");
+    }
 
     // ---- Pair / unpair ----
 
