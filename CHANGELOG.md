@@ -10,19 +10,22 @@ GitHub release (and from there into the in-app update notes).
   internal changes (refactors, tests, CI) unless they change what users get.
 - To release: rename `## Unreleased
 
+## v0.5.0 (2026-11-16)
+
 ### Both
 
-- A device that doesn't answer no longer holds up the others: devices that don't need pairing
-  (keyboards, speakers, headphones) connect at the same time. A switched-off K380 had kept a
-  Bluetooth speaker waiting, on the Mac until the KVM left again.
-- A device that's asleep or switched off (say, a keyboard you haven't touched for days) no longer
-  delays the others: the devices that answer connect first, and it connects as soon as you wake
-  it up. AutoSwitch keeps trying it every 30 seconds instead of giving up with an error.
-- Device notifications are now a small status panel (by the tray on Windows, under the menu bar
-  on the Mac): it shows each device connecting, connected or released while the KVM switches,
-  then hides by itself. No sound, it never takes focus, and nothing piles up in the notification
-  center (Settings ▸ Switch status, on by default). A device that's switched off is reported
-  once, not at every retry or switch.
+- **Bluetooth speakers and headphones follow the KVM, now on Windows too:** when the KVM leaves
+  a computer, AutoSwitch disconnects them there, keeping their pairing, and the other computer
+  connects them. Keep Manage pairing off for them.
+- **A switch status panel instead of notifications** (by the tray on Windows, under the menu bar
+  on the Mac): while the KVM switches, it shows each device connecting, connected, sent over or
+  released, then hides by itself. No sound, it never takes focus, and nothing piles up in the
+  notification center. A device that's switched off is reported once, not at every retry or
+  switch. On by default (Settings ▸ Switch status).
+- **A device that's asleep or switched off no longer holds up the others** (say, a keyboard you
+  haven't touched for days): devices that don't need pairing connect at the same time, the ones
+  that answer go first, and the sleeping one connects as soon as you wake it. AutoSwitch keeps
+  trying it every 30 seconds instead of giving up with an error.
 
 ### Windows
 
@@ -30,10 +33,6 @@ GitHub release (and from there into the in-app update notes).
   way to the other computer.
 - A Logitech keyboard you wake up on this PC while the KVM is on the other computer is sent
   there, even when it had been asleep since AutoSwitch started.
-
-- Bluetooth headphones and speakers can follow the KVM (being tested): AutoSwitch disconnects
-  them when the KVM leaves this PC, keeping their pairing, so your other computer can connect
-  them, and connects them again when the KVM comes back. Keep Manage pairing off for them.
 
 ## v0.4.0 (2026-11-14)
 
