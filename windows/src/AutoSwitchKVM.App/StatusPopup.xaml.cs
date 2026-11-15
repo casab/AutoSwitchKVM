@@ -36,6 +36,8 @@ public sealed partial class StatusPopup : Window
     private readonly Action _openTrayPanel;
     private readonly DispatcherQueueTimer _timer;
     private readonly StatusChangeFilter _filter = new();
+    /// Devices shown as dropped (Unexpected disconnects) while they stay disconnected.
+    private readonly HashSet<Guid> _dropped = new();
     private long _lastChange;
     private bool _hover;
     private double _contentHeight;
@@ -66,7 +68,7 @@ public sealed partial class StatusPopup : Window
         _timer.Interval = TimeSpan.FromMilliseconds(250);
         _timer.Tick += (_, _) => Tick();
 
-        _filter.Seed(_c.Config.Devices.Select(d => (d.Id, _c.StatusFor(d).Kind)));
+        OnStateChanged();   // primes the filter: nothing shows at launch
 
         // A WinUI window shown without ever being activated doesn't load its content (only the
         // caption rendered). Activate it once, off-screen, at creation (app start), then hide it;
@@ -81,7 +83,8 @@ public sealed partial class StatusPopup : Window
     public void OnStateChanged()
     {
         var enabled = _c.Config.Devices.Where(d => d.Enabled).ToList();
-        var ids = _filter.Changed(enabled.Select(d => (d.Id, _c.StatusFor(d).Kind)), _c.Selected);
+        var ids = _filter.Changed(enabled.Select(d => (d.Id, _c.StatusFor(d).Kind)), _c.Selected,
+            _c.IsPreview || _c.Engine.PresenceEvaluated);
         var changed = enabled.Where(d => ids.Contains(d.Id)).ToList();
         if (changed.Count > 0 && _c.Config.ShowNotifications && !_trayPanelOpen())
             Show(changed);
@@ -94,6 +97,7 @@ public sealed partial class StatusPopup : Window
     public void ShowDrop(BTDevice device)
     {
         if (_trayPanelOpen()) return;
+        _dropped.Add(device.Id);
         Show(new[] { device });
     }
 
@@ -122,6 +126,7 @@ public sealed partial class StatusPopup : Window
     private void RefreshRows()
     {
         var selected = _c.Selected;
+        HeaderText.Text = selected ? "KVM → this PC" : "KVM → the other computer";
         for (var i = Rows.Count - 1; i >= 0; i--)
         {
             var model = _c.Config.Devices.FirstOrDefault(d => d.Id == Rows[i].Id);
@@ -131,7 +136,13 @@ public sealed partial class StatusPopup : Window
         {
             var model = _c.Config.Devices.First(d => d.Id == Rows[i].Id);
             var vm = ViewModel.Devices.FirstOrDefault(v => v.Id == model.Id);
-            Rows[i].Update(model.Name, vm?.Glyph ?? "", _c.StatusFor(model), selected, i);
+            var status = _c.StatusFor(model);
+            if (_dropped.Contains(model.Id) && status.Kind is not (DeviceStatusKind.Disconnected or DeviceStatusKind.Idle))
+                _dropped.Remove(model.Id);
+            var e = _c.Engine;
+            var (text, tone) = StatusPanelText.For(status, selected, model.ManagePairing, e.IsAsleep(model.Id),
+                e.WasSentAway(model.Id), e.SwitchesChannels(model), _dropped.Contains(model.Id));
+            Rows[i].Update(model.Name, vm?.Glyph ?? "", text, tone, i);
         }
     }
 
@@ -149,6 +160,8 @@ public sealed partial class StatusPopup : Window
         _timer.Stop();
         if (AppWindow.IsVisible) AppWindow.Hide();
         Rows.Clear();
+        _dropped.Clear();
+        _filter.EndBurst();
         _hover = false;
     }
 
@@ -214,26 +227,18 @@ public sealed class StatusPopupRow : ObservableObject
     public Visibility BusyVisibility => IsBusy ? Visibility.Visible : Visibility.Collapsed;
     public Visibility DividerVisibility { get; private set; } = Visibility.Collapsed;
 
-    internal void Update(string name, string glyph, DeviceStatus status, bool selected, int index)
+    internal void Update(string name, string glyph, string text, StatusTone tone, int index)
     {
         Name = name;
         Glyph = glyph;
-        IsBusy = status.Kind == DeviceStatusKind.Connecting;
-        IsProblem = status.Kind == DeviceStatusKind.Error;
-        Text = status.Kind switch
+        Text = text;
+        IsBusy = tone == StatusTone.Busy;
+        IsProblem = tone == StatusTone.Problem;
+        Foreground = Theme.Brush(tone switch
         {
-            DeviceStatusKind.Connecting => "Connecting…",
-            DeviceStatusKind.Connected => "Connected",
-            DeviceStatusKind.BluetoothOff => "Bluetooth is off",
-            DeviceStatusKind.Error => string.IsNullOrEmpty(status.Message) ? "Problem" : $"Problem: {status.Message}",
-            _ => selected ? "Not connected" : "Released for the other computer",
-        };
-        Foreground = Theme.Brush(status.Kind switch
-        {
-            DeviceStatusKind.Connected => "SystemFillColorSuccessBrush",
-            DeviceStatusKind.Connecting => "SystemFillColorAttentionBrush",
-            DeviceStatusKind.Error => "SystemFillColorCriticalBrush",
-            DeviceStatusKind.BluetoothOff => "SystemFillColorCautionBrush",
+            StatusTone.Busy => "SystemFillColorAttentionBrush",
+            StatusTone.Problem => "SystemFillColorCriticalBrush",
+            StatusTone.Ok when text == "Connected" => "SystemFillColorSuccessBrush",
             _ => "TextFillColorSecondaryBrush",
         });
         DividerVisibility = index > 0 ? Visibility.Visible : Visibility.Collapsed;

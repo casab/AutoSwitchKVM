@@ -154,6 +154,17 @@ public sealed class SelectionEngine
     /// set its target channel.
     private bool IsKnownChannelSwitcher(BTDevice d) =>
         !d.ManagePairing && (_channelCapable.Contains(d.Id) || d.ReleaseToChannel is not null);
+
+    // ---- For the status panel's wording (read on the UI thread) ----
+
+    /// Selected reflects a real evaluation (before it, Selected is just its initial false).
+    public bool PresenceEvaluated => _presenceEvaluated;
+    /// Didn't answer twice in a row this session (slow mode): asleep or switched off.
+    public bool IsAsleep(Guid id) => Unanswered(id) >= SlowModeAfter;
+    /// This PC sent it to the other computer's channel since the KVM last came here.
+    public bool WasSentAway(Guid id) => _sentAway.Contains(id);
+    /// It answered the channel query this session, or has a channel set: it switches channels.
+    public bool SwitchesChannels(BTDevice d) => IsKnownChannelSwitcher(d);
     private readonly Dictionary<Guid, DateTime> _lastLateRelease = new();
     internal const int LateReleaseMinIntervalSecs = 10;
 

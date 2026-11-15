@@ -71,8 +71,22 @@ public class ConfigTests
             var loaded = new ConfigStore(tmp).Load();
             Assert.Equal(400, loaded.DebounceMs);        // default-on-missing
             Assert.Equal(45, loaded.BtCallTimeoutSecs);
+            Assert.True(loaded.ShowNotifications);       // switch status on by default (spec §2)
             Assert.Single(loaded.Profiles);
             Assert.Equal("Default", loaded.ActiveProfileName);
+        }
+        finally { Cleanup(tmp); }
+    }
+
+    [Fact]
+    public void Switch_status_is_on_by_default_but_an_explicit_off_stays_off()
+    {
+        Assert.True(new AppConfig().ShowNotifications);
+        var tmp = TempPath();
+        try
+        {
+            File.WriteAllText(tmp, "{\"showNotifications\":false,\"profiles\":[{\"name\":\"Default\"}]}");
+            Assert.False(new ConfigStore(tmp).Load().ShowNotifications);
         }
         finally { Cleanup(tmp); }
     }

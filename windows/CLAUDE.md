@@ -420,14 +420,17 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
 - **Switch status popup, not toasts** (2026-11-16, user request: one toast and one sound per
   device per switch). `StatusPopup.xaml(.cs)`: a borderless, always-on-top acrylic window at the
   bottom-right of the primary work area, in the tray panel's style. Driven by
-  `AppController.StateChanged`, filtered by `Core/StatusChangeFilter.cs` (tested): a device whose
-  status kind changes (not into Idle, not from Idle straight to a resting state) is added as a
-  row. A device that ended up not connected or with a problem while selected is reported once,
-  then left out until it connects again (a switched-off speaker kept popping it). Rows update
-  live; it hides 3.5 s after
+  `AppController.StateChanged`, filtered by `Core/StatusChangeFilter.cs` (tested; same rules as
+  macOS' `SwitchStatusModel`): rows only in a burst, which a KVM move starts (after the engine's
+  first evaluation) and the panel hiding ends, so launch, wake and profile switches show nothing;
+  a device whose status kind changes (not into Idle, not from Idle straight to a resting state) is
+  added as a row. A device that ended up not connected or with a problem while selected is
+  reported once, then left out until it connects again (a switched-off speaker kept popping it).
+  Row wording: `StatusPanelText` ("Sent to the other computer", "Asleep: wake it to connect", …,
+  from `SelectionEngine.IsAsleep/WasSentAway/SwitchesChannels`). Rows update live; it hides 3.5 s after
   everything settled (8 s with a problem), never while hovered; a click opens the tray panel.
-  Gated by `showNotifications` ("Switch status" in Settings); `notifyUnexpectedDisconnect` shows
-  a drop even when that's off. Not shown while the tray panel is open. **A WinUI window shown
+  Gated by `showNotifications` ("Switch status" in Settings, on by default); `notifyUnexpectedDisconnect`
+  shows a drop ("Dropped unexpectedly") even when that's off. Not shown while the tray panel is open. **A WinUI window shown
   without ever being activated doesn't load its content** (only the caption rendered): the
   popup activates once off-screen at creation, hides, and is later shown with
   `AppWindow.Show(activateWindow: false)`, so it never takes focus. Preview:

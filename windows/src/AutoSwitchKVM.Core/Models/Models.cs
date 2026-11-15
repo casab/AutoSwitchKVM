@@ -140,7 +140,9 @@ public sealed class AppConfig
     public string LogLevel { get; set; } = LogLevels.Default;
 
     // Behavior
-    public bool ShowNotifications { get; set; }
+    /// "Switch status": the status panel while devices switch. On by default (spec §2, both apps
+    /// 2026-11-16, user request); a missing key is on, a file that says false stays off.
+    public bool ShowNotifications { get; set; } = true;
     public bool NotifyUnexpectedDisconnect { get; set; }
 
     /// One rate-limited automatic reconnect after an unexpected drop while the source is
