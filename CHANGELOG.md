@@ -18,6 +18,11 @@ GitHub release (and from there into the in-app update notes).
 - A device that's asleep or switched off (say, a keyboard you haven't touched for days) no longer
   delays the others: the devices that answer connect first, and it connects as soon as you wake
   it up. AutoSwitch keeps trying it every 30 seconds instead of giving up with an error.
+- Device notifications are now a small status panel (by the tray on Windows, under the menu bar
+  on the Mac): it shows each device connecting, connected or released while the KVM switches,
+  then hides by itself. No sound, it never takes focus, and nothing piles up in the notification
+  center (Settings ▸ Switch status). A device that's switched off is reported once, not at every
+  retry or switch.
 
 ### Windows
 
@@ -25,10 +30,6 @@ GitHub release (and from there into the in-app update notes).
   way to the other computer.
 - A Logitech keyboard you wake up on this PC while the KVM is on the other computer is sent
   there, even when it had been asleep since AutoSwitch started.
-- Device notifications are now a small status panel by the tray instead of Windows notifications:
-  it shows each device connecting, connected or released while the KVM switches, then hides by
-  itself. No sound, and nothing piles up in the notification center (Settings ▸ General ▸ Switch
-  status). A device that's switched off is reported once, not at every retry or switch.
 
 - Bluetooth headphones and speakers can follow the KVM (being tested): AutoSwitch disconnects
   them when the KVM leaves this PC, keeping their pairing, so your other computer can connect

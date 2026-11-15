@@ -229,6 +229,7 @@ struct DeviceRowCard: View {
         if n.contains("mouse") { return "computermouse" }
         if n.contains("trackpad") { return "rectangle.and.hand.point.up.left" }
         if n.contains("headphone") || n.contains("airpod") || n.contains("buds") { return "headphones" }
+        if n.contains("speaker") || n.contains("soundcore") || n.contains("boom") { return "hifispeaker" }
         return "dot.radiowaves.left.and.right"
     }
 }

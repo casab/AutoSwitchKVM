@@ -32,8 +32,13 @@ final class AppController: ObservableObject {
     /// Mirrors `engine.bluetoothPowered` for the menu bar label.
     @Published private(set) var bluetoothPowered = true
 
-    private let notifier = Notifier()
     private var cancellables = Set<AnyCancellable>()
+
+    /// The switch status panel (Settings ▸ Switch status), in place of device notifications.
+    let switchStatus = SwitchStatusModel()
+    private var switchStatusPanel: SwitchStatusPanel?
+    /// Opens the Settings window; set by the menu bar label, which can reach SwiftUI's `openWindow`.
+    var openSettingsWindow: (() -> Void)?
 
     init() {
         // Start the persistent log first, so even config-load problems land in the file.
@@ -108,22 +113,12 @@ final class AppController: ObservableObject {
         }
         applyHotkeys()
 
-        // User-facing notifications for connect/disconnect, gated by the setting.
-        engine.onNotice = { [weak self] title, body in
-            guard let self, self.store.config.showNotifications else { return }
-            self.notifier.notify(title: title, body: body)
-        }
+        // Switch status panel instead of device notifications (2026-11-16, as on Windows).
+        startSwitchStatus()
         engine.onUnexpectedDisconnect = { [weak self] device in
             guard let self else { return }
             self.append("\(device.name) dropped unexpectedly", level: .debug)
-            if self.store.config.notifyUnexpectedDisconnect {
-                self.notifier.notify(
-                    title: "Device disconnected",
-                    body: "\(device.name) dropped while still selected")
-            }
-        }
-        if store.config.showNotifications || store.config.notifyUnexpectedDisconnect {
-            notifier.requestAuthorizationIfNeeded()
+            self.switchStatus.noteDrop(device, now: Date())
         }
 
         logStartupDiagnostics()
@@ -196,13 +191,63 @@ final class AppController: ObservableObject {
 
     func setShowNotifications(_ on: Bool) {
         store.config.showNotifications = on
-        if on { notifier.requestAuthorizationIfNeeded() }
     }
 
     func setNotifyUnexpectedDisconnect(_ on: Bool) {
         store.config.notifyUnexpectedDisconnect = on
-        if on { notifier.requestAuthorizationIfNeeded() }
     }
+
+    /// Feed the panel from the engine and the settings. The first value only primes the model
+    /// (nothing shows at launch).
+    private func startSwitchStatus() {
+        let model = switchStatus
+        let presence = Publishers.CombineLatest(engine.$selected, engine.$presenceEvaluated)
+        let devices = Publishers.CombineLatest3(engine.$statuses, engine.$slowDevices, engine.$sentAway)
+        Publishers.CombineLatest3(presence, devices, store.$config)
+            .receive(on: DispatchQueue.main)
+            .sink { presence, devices, config in
+                model.showSwitches = config.showNotifications
+                model.showDrops = config.notifyUnexpectedDisconnect
+                model.update(
+                    devices: config.devices.filter(\.enabled), statuses: devices.0, selected: presence.0,
+                    evaluated: presence.1, asleep: devices.1, sentAway: devices.2, now: Date())
+            }
+            .store(in: &cancellables)
+        let panel = SwitchStatusPanel(model: model) { [weak self] in
+            NSApp.activate(ignoringOtherApps: true)
+            self?.openSettingsWindow?()
+        }
+        panel.start()
+        switchStatusPanel = panel
+        if CommandLine.arguments.contains("--status-panel-demo") { showSwitchStatusDemo() }
+    }
+
+    /// `--status-panel-demo`: show the panel with sample rows, without touching any device.
+    private func showSwitchStatusDemo() {
+        let demo = SwitchStatusModel()
+        demo.showSwitches = true
+        let pad = BTDevice(name: "Magic Trackpad", address: "00-00-00-00-00-01", managePairing: true)
+        let kb = BTDevice(name: "Keyboard K380", address: "00-00-00-00-00-02", managePairing: false)
+        let spk = BTDevice(name: "Soundcore speaker", address: "00-00-00-00-00-03", managePairing: false)
+        let zmk = BTDevice(name: "Reviung41 keyboard", address: "00-00-00-00-00-04", managePairing: false)
+        let devices = [pad, zmk, spk, kb]
+        var off = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, DeviceStatus.disconnected) })
+        off[kb.id] = .connecting  // so its asleep row counts as a change
+        demo.update(
+            devices: devices, statuses: off, selected: false, evaluated: true, asleep: [], sentAway: [], now: Date())
+        demo.update(
+            devices: devices,
+            statuses: [
+                pad.id: .connecting, zmk.id: .connected, spk.id: .error("the other computer still has it"),
+                kb.id: .disconnected,
+            ],
+            selected: true, evaluated: true, asleep: [kb.id], sentAway: [], now: Date().addingTimeInterval(6))
+        let panel = SwitchStatusPanel(model: demo, openSettings: {})
+        panel.start()
+        demoPanel = panel
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { demo.dismiss() }
+    }
+    private var demoPanel: SwitchStatusPanel?
 
     func setGlobalHotkeysEnabled(_ on: Bool) {
         store.config.globalHotkeysEnabled = on
@@ -368,9 +413,6 @@ final class AppController: ObservableObject {
             LoginItem.setEnabled(imported.launchAtLogin)
             dock.setEnabled(imported.dockAutoHide)
             applyHotkeys()
-            if imported.showNotifications || imported.notifyUnexpectedDisconnect {
-                notifier.requestAuthorizationIfNeeded()
-            }
             engine.refreshMonitoring()
             engine.reevaluate()
             append("Imported settings from \(url.lastPathComponent)")

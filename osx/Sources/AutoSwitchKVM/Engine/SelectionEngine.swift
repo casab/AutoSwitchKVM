@@ -995,9 +995,12 @@ final class SelectionEngine: ObservableObject {
             }
             // Automatic connects only: a manual Connect isn't ended by the KVM leaving, so it would
             // keep trying until the next run; it gives up after `connectRetryMax` as before.
+            // Once in slow mode, any failure stays there, quietly (a refusal flipping it to an
+            // error and back popped the status panel each time; Windows 2026-11-16).
             let slow =
-                respectSelection && !device.managePairing && !f.kind.isSoft
-                && (unansweredTries[device.id] ?? 0) >= max(1, unansweredSlowAfter)
+                respectSelection && !device.managePairing
+                && (slowDevices.contains(device.id)
+                    || (!f.kind.isSoft && (unansweredTries[device.id] ?? 0) >= max(1, unansweredSlowAfter)))
             let wasSlow = slow && slowDevices.contains(device.id)
             // Expected refusals (the other host still holds it, an operation in flight) are routine
             // on every switch: debug, and so are the slow tries of a device that is asleep. Hard
@@ -1085,8 +1088,8 @@ final class SelectionEngine: ObservableObject {
     /// Consecutive tries a device didn't answer (page timeouts), this session; cleared when it
     /// connects. Spec §3 Connect flow "Order".
     private var unansweredTries: [UUID: Int] = [:]
-    /// Devices in slow mode (logged once per stretch).
-    private var slowDevices = Set<UUID>()
+    /// Devices in slow mode (asleep or off): the status panel shows them as asleep.
+    @Published private(set) var slowDevices = Set<UUID>()
 
     private enum Turn { case go, connectedByItself, stale(String) }
 
@@ -1417,7 +1420,7 @@ final class SelectionEngine: ObservableObject {
 
     private let hostSwitcher: HostSwitcher?
     /// True once an evaluation acted on real presence, so `selected` can be trusted.
-    private var presenceEvaluated = false
+    @Published private(set) var presenceEvaluated = false
     /// Devices whose channel was marked this session.
     private var channelMarked = Set<UUID>()
     private var lastLateRelease: [UUID: Date] = [:]
@@ -1613,7 +1616,7 @@ final class SelectionEngine: ObservableObject {
     /// that comes back meanwhile was brought back on purpose (its channel key, or the other
     /// computer), so it is left here: only a device the release couldn't send (e.g. asleep at the
     /// switch) gets a late release. A channel switcher a seed left where it was is in here too.
-    private var sentAway = Set<UUID>()
+    @Published private(set) var sentAway = Set<UUID>()
     /// This Mac's channel per device: the channel carrying this Mac's name, else the only paired
     /// channel without a name, else as seen while the KVM was here. Kept for the session.
     private var ownChannels: [UUID: Int] = [:]

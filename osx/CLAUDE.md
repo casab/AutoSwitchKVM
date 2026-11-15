@@ -319,6 +319,18 @@ the new profile but does not force-disconnect the previous profile's devices.
   `didRequestPairing` flag, and the trackpad's pairing request then got the system's "Connection
   Request" dialog. In the unified log: "Setting didRequestPairing for Application … to 0" between
   the pair start and "CBClassicSession::pairingRequested: Resetting didRequestPairing".
+- **Switch status panel, not notifications** (2026-11-16, as Windows' `StatusPopup`; spec and plan in
+  `osx/docs/superpowers/`). `UI/SwitchStatusModel.swift` (no UI, tested in `SwitchStatusModelTests`)
+  decides rows, texts and hiding: a row per device whose status kind changes (not into Idle, not
+  Idle/unknown → resting, the first update only primes), a KVM move starts a new burst, hides 3.5 s
+  after the last change with nothing connecting (8 s with a problem), never while the pointer is
+  over it. `UI/SwitchStatusPanel.swift`: `NonActivatingPanel` (`canBecomeKey/Main` false,
+  `.nonactivatingPanel`, `.statusBar` level, all Spaces), shown with `orderFrontRegardless`, top-right
+  of the menu bar screen; hover is read from `NSEvent.mouseLocation` (tracking areas don't fire in
+  an inactive accessory app); hidden while the MenuBarExtra window is open; a click opens Settings
+  through `AppController.openSettingsWindow`, which the menu bar label sets from `openWindow`.
+  Gated by `showNotifications` ("Switch status"); `notifyUnexpectedDisconnect` adds drop rows.
+  `Notifier`/`UNUserNotification` are gone. Demo: `open AutoSwitchKVM.app --args --status-panel-demo`.
 - **Release order:** devices without `managePairing` first (`releaseOrder`), so an unpair never
   holds back a keyboard the other computer is waiting for (spec §3, same on Windows).
 - **Fast switch-back:** an automatic release stops as soon as the source is back

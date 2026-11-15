@@ -14,7 +14,7 @@ struct AutoSwitchKVMApp: App {
                 .environmentObject(controller.engine)
                 .environmentObject(controller.usb)
         } label: {
-            Image(systemName: menuBarSymbol)
+            MenuBarLabel(symbol: menuBarSymbol)
         }
         .menuBarExtraStyle(.window)
 
@@ -41,6 +41,18 @@ struct AutoSwitchKVMApp: App {
 
 /// Hides the Dock icon (menu-bar-only app) and starts the controller.
 @MainActor
+/// The menu bar icon. Always on screen, so it hands SwiftUI's `openWindow` to the controller
+/// (the switch status panel opens Settings on a click).
+private struct MenuBarLabel: View {
+    let symbol: String
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image(systemName: symbol)
+            .onAppear { AppController.shared.openSettingsWindow = { openWindow(id: "settings") } }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// False when another copy already runs; this one then quits without touching anything.
     private var isPrimary = true

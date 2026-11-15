@@ -97,7 +97,9 @@ Also in Settings:
 - **Device order and delay:** devices connect top to bottom; a per-device delay can stagger them.
 - **Keyboard shortcuts** (General): optional system-wide shortcuts to pause, connect all and
   disconnect all. The defaults are ⌃⌥⌘P / ⌃⌥⌘C / ⌃⌥⌘D, and you can record your own.
-- **Launch at login**, **notifications**, and automatic **reconnect** when a device drops.
+- **Launch at login**, a **switch status** panel (each device connecting, connected or released,
+  under the menu bar while the KVM switches; it hides by itself), and automatic **reconnect** when
+  a device drops.
 - **Back up or restore** all your settings as a file (General ▸ Configuration).
 - **Extras:** hide the Dock automatically when the Mac is on its built-in display only.
 
@@ -142,8 +144,8 @@ macOS 13+. Run the commands from this folder (`osx/`).
 - **Quick loop (Swift Package):** open `Package.swift` in Xcode, choose the **AutoSwitchKVM**
   scheme and **My Mac**, and run. Or `swift build` from the terminal.
 - **The real `.app`:** `brew install xcodegen` once, then `xcodegen generate` and open
-  `AutoSwitchKVM.xcodeproj`. Use this for anything that needs a bundle: notifications, launch at
-  login, and automatic updates.
+  `AutoSwitchKVM.xcodeproj`. Use this for anything that needs a bundle: launch at login and
+  automatic updates.
 - **Tests:** `swift test` (or ⌘U). The engine is tested against fake USB and Bluetooth, so no
   hardware is needed. CI runs build, tests and a blocking `swift-format` lint on every push.
 - **Only one copy runs.** Quit the installed app before running a dev build; the dev build would
@@ -165,7 +167,7 @@ A single SwiftUI menu bar target, organized by folder under `Sources/AutoSwitchK
   decoded. Unpairing uses `-[IOBluetoothDevice remove]` (there's no public API; `blueutil` uses
   the same call). A device counts as connected only once its HID connection is up.
 - **`Models/`**, **`System/`**, **`Support/`**, **`UI/`**: settings and profiles stored as JSON,
-  sleep/wake, login item, shortcuts, notifications, single-instance lock, logging (with a
+  sleep/wake, login item, shortcuts, single-instance lock, logging (with a
   user-set log level), and the menu bar panel and Settings window. `App/` wires it together and
   holds the Sparkle updater.
 

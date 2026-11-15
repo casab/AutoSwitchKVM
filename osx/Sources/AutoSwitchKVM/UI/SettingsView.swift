@@ -583,12 +583,17 @@ struct GeneralTab: View {
                         get: { store.config.paused },
                         set: { controller.setPaused($0) }))
                 Toggle(
-                    "Show notifications",
                     isOn: Binding(
                         get: { store.config.showNotifications },
-                        set: { controller.setShowNotifications($0) }))
+                        set: { controller.setShowNotifications($0) })
+                ) {
+                    Text("Switch status")
+                    Text(
+                        "While devices switch, show their status in a small panel under the menu bar. It hides by "
+                            + "itself and makes no sound.")
+                }
                 Toggle(
-                    "Notify when a device drops unexpectedly",
+                    "Show unexpected disconnects too",
                     isOn: Binding(
                         get: { store.config.notifyUnexpectedDisconnect },
                         set: { controller.setNotifyUnexpectedDisconnect($0) }))

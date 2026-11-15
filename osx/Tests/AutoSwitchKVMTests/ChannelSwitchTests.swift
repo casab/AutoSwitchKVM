@@ -490,6 +490,47 @@ final class ChannelSwitchTests: XCTestCase {
         XCTAssertFalse(f.bt.calls.contains { $0.hasPrefix("disconnect:") }, "\(f.bt.calls)")
     }
 
+    /// The status panel shows a device in slow mode as asleep, so the engine publishes them.
+    func testASleepingDeviceIsReportedAsleepUntilItWakes() async {
+        let f = makeSleepingK380()
+        var woke = false
+        var asleepBeforeWaking = false
+        f.engine.sleepHook = { [bt = f.bt, engine = f.engine, addr, id = f.device.id] _ in
+            if !woke, bt.calls.filter({ $0 == "connect:\(addr)" }).count >= 2 {
+                asleepBeforeWaking = engine.slowDevices.contains(id)
+                woke = true
+                bt.connectErrorFor[addr] = nil
+                bt.preset(paired: true, connected: true, addr)
+            }
+            await Task.yield()
+        }
+        await arrive(f)
+        XCTAssertTrue(woke)
+        XCTAssertTrue(asleepBeforeWaking)
+        XCTAssertTrue(f.engine.slowDevices.isEmpty)
+    }
+
+    /// Once a device is in slow mode, any failed try stays quiet (Disconnected), not just the ones
+    /// it didn't answer: a refusal flipping it to an error and back popped the status panel each
+    /// time (Windows, 2026-11-16).
+    func testAnyFailureInSlowModeStaysQuiet() async {
+        let f = makeSleepingK380()
+        var sleeps = 0
+        var sawError = false
+        f.engine.sleepHook = { [bt = f.bt, engine = f.engine, addr, id = f.device.id] _ in
+            sleeps += 1
+            if engine.slowDevices.contains(id) {
+                bt.connectErrorFor[addr] = BTError.connectFailed(0x0D)  // refused (busy)
+                if case .error = engine.statuses[id] { sawError = true }
+            }
+            if sleeps == 400 { engine.handleUSB((vendorID: 0x05E3, productID: 0x0626, added: false)) }
+            await Task.yield()
+        }
+        await arrive(f)
+        XCTAssertGreaterThan(f.bt.calls.filter { $0 == "connect:\(addr)" }.count, 3, "kept trying")
+        XCTAssertFalse(sawError, "stayed Disconnected")
+    }
+
     /// Asleep, then woken up after the switch: connected as soon as it shows up, without waiting
     /// for its next try.
     func testASleepingDeviceThatWakesUpIsConnectedAtOnce() async {
