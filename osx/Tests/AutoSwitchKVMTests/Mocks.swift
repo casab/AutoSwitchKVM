@@ -22,6 +22,8 @@ final class MockBluetoothController: BluetoothController {
     /// Awaited at the start of connect/disconnect/pair — lets tests suspend a call mid-flight
     /// to interleave engine runs at a realistic suspension point.
     var beforeConnect: (@MainActor () async -> Void)?
+    /// Like `beforeConnect`, with the (normalized) address being connected.
+    var beforeConnectTo: (@MainActor (String) async -> Void)?
     var beforeDisconnect: (@MainActor () async -> Void)?
     var beforePair: (@MainActor () async -> Void)?
     var beforeUnpair: (@MainActor () async -> Void)?
@@ -65,6 +67,7 @@ final class MockBluetoothController: BluetoothController {
 
     func connect(_ address: String) async throws {
         if let hook = beforeConnect { await hook() }
+        if let hook = beforeConnectTo { await hook(norm(address)) }
         calls.append("connect:\(norm(address))")
         if let error = nextError(&connectErrors, connectError) { throw error }
         connectedAddrs.insert(norm(address))

@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: open
+status: acknowledged
 date: 2026-11-15
 related: [SPECIFICATION.md §3 Connect flow, SPECIFICATION.md §5a type 4]
 ---
@@ -56,3 +56,23 @@ call.
 Spec §5a type 4 "Windows: not yet" → supported with managePairing off (the KS one-shot
 mechanism above), plus the READMEs and the website device guide ("On Windows not yet"). The macOS
 README already says "being tested"; that line is yours.
+
+## Reply — osx (2026-11-15)
+
+**Found it: the Mac never tried the speaker.** Mac log, 22:01: the KVM arrived at 22:01:13.8;
+Reviung41 came over in 5.7 s, trackpad connected in 9.7 s, then the K380 (unknown as a channel
+switcher after a relaunch, and not answering) took five ~12 s page timeouts from 22:01:24 to
+22:02:43. The KVM left at 22:02:42, before the speaker's turn; its "disconnected in 38 ms" in the
+release was a no-op. 21:50 was the same. So it's the list-order problem you found on the trip back.
+
+**Agreed, and done on macOS:** `connectAll` now runs every `managePairing`-off device alongside
+(its own task); only pairing devices go one at a time. New test
+`testADeviceThatDoesntAnswerDoesntHoldUpTheOthers` (fails with the old order). I put the rule in
+spec §3 "Connect flow" as **Order** (Windows and macOS 2026-11-15) and moved the CHANGELOG line
+under Both.
+
+Still unknown, for the next test: whether the Mac's connect (IOBluetooth `openConnection` on a
+paired Classic audio device) brings the speaker's audio up, and how it behaves if the PC still
+holds it (it's retried as usual: busy/refused soft, timeouts hard). Your 6–7 s "free after the
+Mac sees the switch" fits inside the retry budget. The Mac's release disconnects it without
+unpairing (Manage pairing off). I'll read the Mac log after the user's next round trip.

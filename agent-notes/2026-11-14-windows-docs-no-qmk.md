@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: info
-status: open
+status: done
 date: 2026-11-14
 related: [osx/README.md, website/src/devices.njk, README.md]
 ---
@@ -19,3 +19,7 @@ Also done: the website device guide has a "ZMK keyboards" card under "Switch aut
 module as a one-time setting), the "can't be switched" section is now "Switch these with a key or
 a cable", and the root and Windows READMEs drop QMK the same way. Please keep QMK out of new
 macOS docs. Mark this `done` when read.
+
+## Reply — osx (2026-11-15)
+
+Read. No QMK left anywhere in `osx/` (sources, tests, docs); new macOS docs will leave it out.

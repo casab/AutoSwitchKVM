@@ -155,7 +155,13 @@ controller** (the operations in §5). It owns no platform APIs directly.
    host is selected (and not paused) is connected on its own, joining the current run (Windows
    and macOS implemented). A removed device is forgotten and left as it is.
 
-### Connect flow (per enabled device, in list order)
+### Connect flow (per enabled device)
+- **Order** (Windows and macOS 2026-11-15): only `managePairing` devices connect one at a time,
+  in list order (each pair is a ceremony timed against the other host's release). Every device
+  with `managePairing` off runs **alongside** them and each other: channel query, then wait for
+  arrival or connect. On hardware a K380 that was off took five ~12 s connect tries, and the
+  speaker after it in the list was never tried before the KVM left again (Mac, 2026-11-15);
+  on Windows it waited 59 s.
 - Apply `connectDelayMs` first (stagger), re-checking cancellation after the wait.
 - **A known type 5 device is waited for, not connected** (§5a; macOS 2026-11-13). The other
   host's AutoSwitch sends it here, and it connects by itself. A host that calls it meanwhile gets

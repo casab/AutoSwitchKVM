@@ -20,16 +20,17 @@ final class ChannelSwitchTests: XCTestCase {
     }
 
     private func make(
-        managePairing: Bool = false, releaseToChannel: Int? = nil, supported: Bool = true
+        managePairing: Bool = false, releaseToChannel: Int? = nil, supported: Bool = true, more: [BTDevice] = []
     ) -> Fixture {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let store = ConfigStore(directory: tmp)
         store.config.source = USBSource(name: "Hub", vendorID: 0x05E3, productIDs: [0x0626])
-        store.config.devices = [
-            BTDevice(
-                name: "K380", address: addr, managePairing: managePairing, connectDelayMs: 0,
-                releaseToChannel: releaseToChannel)
-        ]
+        store.config.devices =
+            [
+                BTDevice(
+                    name: "K380", address: addr, managePairing: managePairing, connectDelayMs: 0,
+                    releaseToChannel: releaseToChannel)
+            ] + more
         let bt = MockBluetoothController()
         let switcher = FakeHostSwitcher()
         if supported { switcher.supportedAddress = addr }
@@ -380,6 +381,33 @@ final class ChannelSwitchTests: XCTestCase {
             f.engine.statuses[f.store.config.devices[1].id], .connected, "connected while the trackpad still pairs")
         XCTAssertNotEqual(f.engine.statuses[f.store.config.devices[0].id], .connected)
         pairGate = true
+        await run.value
+    }
+
+    /// Hardware 2026-11-15: a K380 that was off took five 12 s tries, and the speaker after it in
+    /// the list was never tried before the KVM left again. Devices without Manage pairing connect
+    /// alongside each other.
+    func testADeviceThatDoesntAnswerDoesntHoldUpTheOthers() async {
+        // The K380 never answered: not known to switch channels.
+        let f = make(
+            supported: false,
+            more: [BTDevice(name: "Speaker", address: "f4-2b-7d-12-c8-21", managePairing: false, connectDelayMs: 0)])
+        var gate = false
+        f.bt.beforeConnectTo = { a in
+            guard a == "aa-bb-cc-dd-ee-ff" else { return }
+            while !gate { try? await Task.sleep(nanoseconds: 1_000_000) }
+        }
+        f.engine.handleUSB((vendorID: 0x05E3, productID: 0x0626, added: true))
+        let run = Task { await f.engine.evaluateNow() }
+
+        let speakerID = f.store.config.devices[1].id
+        let deadline = Date().addingTimeInterval(3)
+        while f.engine.statuses[speakerID] != .connected, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(f.engine.statuses[speakerID], .connected, "connected while the K380 still hangs")
+        XCTAssertNotEqual(f.engine.statuses[f.device.id], .connected)
+        gate = true
         await run.value
     }
 

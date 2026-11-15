@@ -8,21 +8,19 @@ GitHub release (and from there into the in-app update notes).
 - When you commit a change a user would notice, add a line under **Unreleased**, in the right
   group: **Both**, **macOS** or **Windows**. Plain words, what the user sees, not how. Skip
   internal changes (refactors, tests, CI) unless they change what users get.
-- To release: rename `## Unreleased` to `## vX.Y.Z (YYYY-MM-DD)`, check that both platforms'
-  changes since the last tag are in it (`git log vPREV..HEAD`), add a new empty `## Unreleased`
-  above it, commit, then tag. A stable tag without its section fails the release.
-- A pre-release tag (`vX.Y.Z-rc.1`) uses its own section if there is one, otherwise
-  `vX.Y.Z`, otherwise **Unreleased**.
+- To release: rename `## Unreleased
 
-## Unreleased
+### Both
+
+- A device that doesn't answer no longer holds up the others: devices that don't need pairing
+  (keyboards, speakers, headphones) connect at the same time. A switched-off K380 had kept a
+  Bluetooth speaker waiting, on the Mac until the KVM left again.
 
 ### Windows
 
 - Bluetooth headphones and speakers can follow the KVM (being tested): AutoSwitch disconnects
   them when the KVM leaves this PC, keeping their pairing, so your other computer can connect
   them, and connects them again when the KVM comes back. Keep Manage pairing off for them.
-- A device that doesn't answer no longer holds up the others: devices that don't need pairing
-  connect at the same time.
 
 ## v0.4.0 (2026-11-14)
 

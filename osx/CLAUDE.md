@@ -303,6 +303,9 @@ the new profile but does not force-disconnect the previous profile's devices.
   (~3.4 s) runs before the K380 switch. "Known" = it answered the channel query this session or
   `releaseToChannel` is set; an unknown device (first switch after launch) is still connected the
   usual way.
+- **Connect order** (`connectAll`): only `managePairing` devices go one at a time; every other
+  device runs in its own task alongside. A K380 that was off (five ~12 s page timeouts) kept a
+  speaker later in the list from ever being tried (hardware 2026-11-15; spec §3, same on Windows).
 - **Release order:** devices without `managePairing` first (`releaseOrder`), so an unpair never
   holds back a keyboard the other computer is waiting for (spec §3, same on Windows).
 - **Fast switch-back:** an automatic release stops as soon as the source is back

@@ -739,11 +739,13 @@ final class SelectionEngine: ObservableObject {
 
     private func connectAll(run: Run) async {
         let devices = store.config.devices.filter(\.enabled)
-        // A channel-switching device comes over by itself and its wait uses no radio, so it runs
-        // alongside the others: a slow pair (17 s on hardware, in a fast switch-back) mustn't keep
-        // it waiting in line.
+        // Only pairing-managed devices go one at a time (each pair is a ceremony with the other
+        // host's release). Every other device runs alongside: a channel switcher comes over by
+        // itself, and a slow pair (17 s on hardware) mustn't keep it waiting in line; a device
+        // that doesn't answer (a K380 that is off: five 12 s tries) mustn't keep a speaker waiting
+        // until the KVM leaves again (hardware 2026-11-15; Windows does the same).
         var waits: [Task<Void, Never>] = []
-        for device in devices where switchesChannels(device) {
+        for device in devices where !device.managePairing {
             markBusy(device.id)
             waits.append(
                 Task { @MainActor [weak self] in
@@ -752,7 +754,7 @@ final class SelectionEngine: ObservableObject {
                     await self.connectOne(device, run: run, respectSelection: true)
                 })
         }
-        for device in devices where !switchesChannels(device) {
+        for device in devices where device.managePairing {
             if let why = staleReason(run, respectSelection: false) {
                 Log.engine.debug("run #\(run.token): connect run stopped: \(why)")
                 break
