@@ -8,8 +8,8 @@ layout: base.njk
       <p class="eyebrow">For one desk, two computers, and a KVM switch</p>
       <h1><span class="nowrap">Press the KVM button.</span><br><span class="hl nowrap">Your devices follow.</span></h1>
       <p class="lead">
-        AutoSwitch KVM moves your Bluetooth keyboard, mouse and trackpad to whichever computer your
-        KVM switch picks. Apple Magic accessories, Logitech Easy-Switch keyboards and mice, ZMK keyboards, and more.
+        AutoSwitch KVM moves your Bluetooth keyboard, mouse, trackpad and speakers to whichever computer your
+        KVM switch picks. Apple Magic accessories, Logitech Easy-Switch keyboards and mice, ZMK keyboards, headphones and more.
         No Bluetooth settings. No re-pairing. No channel keys. You just switch.
       </p>
       <div class="cta" data-downloads>
@@ -120,7 +120,7 @@ layout: base.njk
 <section class="section works" id="works">
   <div class="wrap">
     <p class="eyebrow">Works with</p>
-    <h2>Two kinds of devices, switched two ways</h2>
+    <h2>Three kinds of devices, three ways to switch</h2>
     <ul class="works__list">
       <li class="works__item">
         <h3>Apple Magic Trackpad, Keyboard &amp; Mouse</h3>
@@ -140,10 +140,18 @@ layout: base.njk
         </p>
         <p class="works__how">Switches channel on request<br>Mac ✓ · Windows ✓</p>
       </li>
+      <li class="works__item">
+        <h3>Headphones &amp; speakers</h3>
+        <p>
+          Most remember several computers and go to the one that asks. AutoSwitch disconnects them
+          from the computer you leave, keeping the pairing, and connects them on the one you arrive at.
+        </p>
+        <p class="works__how">Joins whichever computer connects<br>Mac ✓ · Windows ✓</p>
+      </li>
       <li class="works__item works__item--other">
         <h3>Everything else</h3>
         <p>
-          Game controllers, headphones and the rest: AutoSwitch tells you what's possible for each
+          Game controllers and the rest: AutoSwitch tells you what's possible for each
           one, shows its status, and points you to the easy fixes (like a USB adapter on the KVM).
         </p>
         <p class="works__how"><a href="/devices/">See the device guide →</a></p>
@@ -237,7 +245,7 @@ layout: base.njk
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12h12m0 0-4-4m4 4-4 4M20 5v14"/></svg>
         <h3>Hands-off switching</h3>
-        <p>Devices connect when your computer is picked and step aside when it isn't. Nothing to click.</p>
+        <p>Devices connect when your computer is picked and step aside when it isn't. Nothing to click, and one click to pause.</p>
       </li>
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>
@@ -260,9 +268,9 @@ layout: base.njk
         <p>Your computer goes to sleep, your devices are released. It wakes, everything catches up.</p>
       </li>
       <li>
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>
-        <h3>Pause any time</h3>
-        <p>One click to pause, plus Connect all / Release all buttons and optional keyboard shortcuts.</p>
+        <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="12" rx="3"/><path d="M8 10h8M8 13h5M9 21h6"/></svg>
+        <h3>Tells you, quietly</h3>
+        <p>While the KVM switches, a small panel shows each device connecting and arriving, then gets out of the way. No pings, no pile of notifications.</p>
       </li>
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>
@@ -337,8 +345,9 @@ layout: base.njk
           Devices that hold one pairing and accept the next computer once released, like the Apple
           Magic Trackpad, Keyboard and Mouse: those switch automatically, and so do Logitech
           Easy-Switch devices like the K380 and ZMK keyboards with the
-          <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> module. Game controllers can't be switched
-          by any app;
+          <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> module. Most headphones and speakers
+          switch too: AutoSwitch disconnects them on one computer and connects them on the other.
+          Game controllers can't be switched by any app;
           AutoSwitch tells you so when you add one, and shows their status.
           <a href="/devices/">The device guide</a> explains all four kinds.
         </p>

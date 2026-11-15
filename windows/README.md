@@ -6,7 +6,8 @@ AutoSwitch KVM sits in the system tray. When your KVM switches to this PC it con
 Bluetooth devices, pairing them first if needed. When the KVM switches away it releases them, so
 your other computer can take over: an Apple Magic Trackpad, Keyboard or Mouse by handing over
 its pairing, a Logitech Easy-Switch keyboard or mouse (or a ZMK keyboard with the
-[zmk-autoswitch](https://github.com/casab/zmk-autoswitch) module) by switching it to the other computer's channel. It's the
+[zmk-autoswitch](https://github.com/casab/zmk-autoswitch) module) by switching it to the other computer's channel,
+headphones and speakers by disconnecting them (their pairing stays). It's the
 Windows half of a pair: the
 [macOS app](../osx/README.md) does the same on your Mac. See the [project overview](../README.md)
 for the bigger picture.
@@ -15,8 +16,8 @@ for the bigger picture.
   <img src="docs/images/tray-panel.png" alt="Tray panel: status, device toggles, profile, Pause / Connect all / Release all" width="300">
 </p>
 
-> **Status: beta.** Used daily on real hardware (an Apple Magic Trackpad, a Logitech K380 and a
-> ZMK Reviung41 between a Windows 11 PC and a Mac). Feedback and bug reports are welcome on
+> **Status: beta.** Used daily on real hardware (an Apple Magic Trackpad, a Logitech K380, a
+> ZMK Reviung41 and a Bluetooth speaker between a Windows 11 PC and a Mac). Feedback and bug reports are welcome on
 > [GitHub Issues](https://github.com/casab/AutoSwitchKVM/issues).
 
 ## Install
@@ -68,7 +69,7 @@ is (**How it switches**) and what that means.
 | **Switches channel on request** | Logitech Easy-Switch keyboards and mice (e.g. K380); ZMK keyboards with [zmk-autoswitch](https://github.com/casab/zmk-autoswitch) | **Switches automatically.** When the KVM leaves, AutoSwitch tells the device to go to the other computer's channel (set **Other computer's channel** in its settings, or leave it on Automatic when AutoSwitch runs on both computers). Its pairings stay. |
 | **Picks the computer itself** | Multi-device keyboards with host keys | **Can't switch.** The device's own key picks the computer. Use that key, or a USB cable through the KVM. Leave Manage pairing off: unpairing would make you pair the device again. (ZMK keyboards switch channel on request with the [zmk-autoswitch](https://github.com/casab/zmk-autoswitch) module.) |
 | **Re-pairs by hand** | Xbox, PlayStation, Nintendo controllers | **Can't switch.** It remembers one computer and moves only in pairing mode. Keep it on one computer, use a cable through the KVM, or pair it to a Bluetooth-to-USB adapter (e.g. 8BitDo USB Wireless Adapter 2) plugged into the KVM. |
-| **Joins whichever computer connects** | Many headphones and speakers | **Not yet.** Windows has no way to disconnect a Bluetooth device without unpairing it. The Mac app can switch these. |
+| **Joins whichever computer connects** | Many headphones and speakers | **Switches automatically.** When the KVM leaves, AutoSwitch disconnects the device (the same Disconnect as in Windows' Bluetooth settings) so your other computer can connect it, and connects it again when the KVM comes back. Its pairing stays. Keep Manage pairing off. |
 
 **Using a USB receiver?** Logitech Unifying, Logi Bolt and Lightspeed receivers are faster than
 Bluetooth, and they need no software to follow the KVM: plug the receiver into the KVM's USB hub,
