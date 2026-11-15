@@ -175,8 +175,8 @@ controller** (the operations in §5). It owns no platform APIs directly.
   connect while another device's pairing ceremony runs** (fails soft, retried): bluetoothd keeps
   one "this app requested pairing" flag per app, each connect request resets it, and a speaker
   connect during the trackpad's pairing made bluetoothd show its own "Connection Request" dialog.
-- **A device that doesn't answer goes last and is tried slowly** (macOS 2026-11-15; Windows
-  pending). For devices with `managePairing` off:
+- **A device that doesn't answer goes last and is tried slowly** (macOS and Windows
+  2026-11-15). For devices with `managePairing` off:
   - Count each device's consecutive unanswered tries (page timeouts) this session; reset when it
     connects by any path. The count lowers its place in the queue (above), and with a count > 0
     its tries use a **short page timeout** (macOS 3 s instead of the default, which holds the radio
@@ -188,6 +188,17 @@ controller** (the operations in §5). It owns no platform APIs directly.
   - While waiting, poll the link (~0.5 s): a keyboard that wakes up reconnects by itself, and a
     channel switcher woken on the other host's channel is sent over by that host. Either way it
     counts as connected at once ("connected by itself"), not at its next try.
+  - **Windows differences.** Windows has no radio queue: a paired HID keyboard isn't paged by a
+    connect at all (it reconnects by itself; the try only checks), so only an audio reconnect
+    pages. "Unanswered" (`NoAnswer`) = the connect call went through but the device didn't come:
+    a paired device that doesn't report connected, or an audio reconnect with no link within 8 s.
+    A failing status query is not unanswered (it fails the try as itself). "Goes last" = before
+    each try, a device with a count > 0 waits until no device with a lower count is in a connect
+    (`managePairing` devices count 0; a run lists all its devices before their tasks start; a
+    device waiting out a slow-mode interval and channel switchers waiting to come over don't
+    count). No cleanup disconnect after an unanswered try (nothing came up, and a speaker whose
+    link arrives just after the 8 s would be dropped). Slow mode only for automatic connects: a
+    manual Connect still gives up after `connectRetryMax`.
 - Apply `connectDelayMs` first (stagger), re-checking cancellation after the wait.
 - **A known type 5 device is waited for, not connected** (§5a; macOS 2026-11-13). The other
   host's AutoSwitch sends it here, and it connects by itself. A host that calls it meanwhile gets
@@ -231,9 +242,14 @@ controller** (the operations in §5). It owns no platform APIs directly.
   a K380 to the other computer's channel after the KVM had returned. That computer then had no KVM
   and didn't send it back. Manual and sleep releases always finish. (Windows implemented too,
   2026-11-13: presence from the latest USB event/snapshot, ahead of the debounce.)
-- **Release order** (Windows and macOS 2026-11-13): devices without `managePairing` first
-  (a channel switch takes ~0.5 s), then the rest in list order. A Windows trackpad unpair takes
-  ~3.4 s, and in list order it held the K380 back ~8 s on the Mac's side.
+- **Release order** (Windows and macOS 2026-11-13; revised on Windows 2026-11-15): channel
+  switches first (~0.5 s each), then the `managePairing` devices one at a time in list order (a
+  Windows trackpad unpair takes ~3.4 s, and in list order it held the K380 back ~8 s on the Mac's
+  side), with **every other device alongside them, not ahead**. 2026-11-15: a speaker's audio
+  disconnect (3.3–4.4 s on Windows) ran before the trackpad's unpair, and the Mac's trackpad
+  connect went from 4–6 s to 10–15 s. Windows: known channel switchers go first; devices not
+  known as switchers this session (their channel switch, if any, falls through to the usual
+  release) and everything else start together with the unpairs.
 - **Channel switch first** (§5a type 5; Windows and macOS implemented 2026-11-13): if
   `managePairing` is off and the device is connected here and supports host-initiated channel
   switching, send it to the target channel (`releaseToChannel`, else the single other channel
@@ -255,7 +271,10 @@ controller** (the operations in §5). It owns no platform APIs directly.
   control channel can appear a moment after its connection. On macOS the query 7 ms after the
   HID connection found nothing, and the K380 was stranded. Retry for a few seconds (macOS: up to
   5 s, every 0.5 s) while it stays connected and the KVM stays away. If it never answers, warn
-  ("press its channel key"). **Only a device the release couldn't send** (macOS and Windows 2026-11-14): one
+  ("press its channel key"). **Also for a device not known as a channel switcher this session**,
+  quietly (no warning: it may not switch channels at all). 2026-11-16, Windows: a K380 asleep
+  since launch was woken while the KVM was on the Mac; Windows made one immediate try, found no
+  control channel yet, and left it on the PC (Windows fixed the same day). **Only a device the release couldn't send** (macOS and Windows 2026-11-14): one
   this host sent away and that comes back while the KVM is elsewhere was brought back on purpose
   (its channel key, or the other host), so it is left here. The user switches keyboards by hand
   while using both computers.

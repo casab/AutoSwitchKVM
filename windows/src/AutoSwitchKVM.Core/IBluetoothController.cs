@@ -69,6 +69,12 @@ public enum BluetoothFailureKind
     /// The device never answered in time (our per-call timeout, or Windows AuthenticationTimeout).
     Timeout,
 
+    /// The call went through but the device didn't come (asleep, switched off, out of range, or
+    /// held by another computer): a paired keyboard that doesn't report connected, a speaker
+    /// whose reconnect brought no link. For devices without managePairing the engine counts these
+    /// and, from two in a row, tries the device slowly and behind the others (spec §3).
+    NoAnswer,
+
     /// Key exchange failed — typically a stale/mismatched link key. Re-pair from scratch.
     AuthenticationFailed,
 

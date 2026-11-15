@@ -192,6 +192,25 @@ public class ChannelSwitchTests
     }
 
     [Fact]
+    public async Task Late_release_keeps_asking_a_device_not_yet_known_as_a_channel_switcher()
+    {
+        // 2026-11-16: a K380 asleep since launch (never answered this session) was woken while
+        // the KVM was on the Mac. Its control channel came up a moment after the link, and the
+        // single immediate try left it on the PC.
+        var engine = Make(out var bt, out var hs, out _, releaseTo: null);   // not known
+        hs.Marks[1] = HostChannels.AutoSwitchMark;                           // the Mac's channel
+        var polls = 0;
+        engine.SleepHook = _ => { if (++polls == 2) hs.Reachable = true; return Task.CompletedTask; };
+        await engine.EvaluateNowAsync();                 // switched away
+        hs.Reachable = false;                            // its control channel isn't listed yet
+
+        bt.Connected.Add(Norm(K380));
+        bt.FireConnectionChange(K380, connected: true);
+
+        Assert.Contains($"switch:{Norm(K380)}:1", hs.Calls);
+    }
+
+    [Fact]
     public async Task Late_release_gives_up_quietly_for_devices_that_do_not_switch_channels()
     {
         var engine = Make(out var bt, out var hs, out _, releaseTo: null);   // not a known channel switcher

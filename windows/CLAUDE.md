@@ -353,10 +353,21 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   bond per host, and unpairing them on Windows forces a re-pair from the keyboard. Windows can't
   drop an LE HID link while keeping the bond, so with Manage pairing off a release leaves the
   keyboard connected; switching hosts is the keyboard's own profile key (or USB through the KVM).
-- **Device handoff types (spec §5a).** Only type 1 ("hands off by pairing", the trackpad) can be
-  switched on Windows; type 4 (multipoint, host connects) needs a disconnect-without-unpair, which
-  Windows has no public API for (future: `BluetoothSetServiceState` for Classic). Types 2/3 (device
-  picks the host / re-pairs by hand) can't be switched by any host. `Core/DeviceHandoff.cs`
+- **Device handoff types (spec §5a).** Types 1 (the trackpad), 5 (channel switch) and, since
+  2026-11-15, 4 (headphones/speakers) can be switched on Windows. Type 4 uses
+  `Platform/BluetoothAudio.cs`: the audio drivers' one-shot `KSPROPSETID_BtAudio`
+  DISCONNECT/RECONNECT (what Windows' own Connect/Disconnect buttons do) on **every** audio filter
+  of the device: A2DP (`BTHENUM\{0000110B-…}…&MAC`) and Hands-Free (`BTHHFENUM\BTHHFPAUDIO\…`,
+  address only in `DEVPKEY_Bluetooth_DeviceAddress`). A2DP alone left the link up. Soundcore
+  speaker: link down 3.3–4.4 s after the request, still paired; back in ~0.4 s. `WinRtBluetooth`
+  Connect/Disconnect take this path only for a paired Classic AudioVideo device; an audio
+  reconnect with no link in 8 s is `NoAnswer`. Types 2/3 (device picks the host / re-pairs by
+  hand) can't be switched by any host.
+- **Order of a run (spec §3).** Connect: pairing devices one at a time; everything else
+  alongside; a device that didn't answer (`NoAnswer`) waits behind the ones that do, and from 2 in
+  a row is tried every 30 s without giving up (automatic runs only). Release: known channel
+  switchers first, then unpairs one at a time with every other device alongside (a speaker's
+  disconnect ahead of the trackpad unpair made the Mac's trackpad 4–5 s slower). `Core/DeviceHandoff.cs`
   (`HandoffCatalog.Classify`, tested in `HandoffCatalogTests`) classifies from
   `WinRtBluetooth.GetIdentityAsync`: vendor/product from PnP IDs (`_VID&0001004C_PID&0324` Classic,
   `_DEV_VID&02045E_PID&0B13` LE; last 4 hex = vendor), Classic/LE, class of device / LE appearance.

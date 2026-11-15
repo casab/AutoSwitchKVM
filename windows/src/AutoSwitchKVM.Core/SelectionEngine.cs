@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using AutoSwitchKVM.Core.Models;
 
@@ -130,6 +131,15 @@ public sealed class SelectionEngine
     /// Connect flow), and how often it looks.
     internal int ArrivalWaitMs { get; set; } = 20_000;
     internal const int ArrivalPollMs = 500;
+
+    /// A device that doesn't answer (spec §3 Connect flow, managePairing off): unanswered tries in
+    /// a row this session (reset when it connects), the count from which it's tried slowly, and
+    /// how often then. Devices inside ConnectOneAsync, for "wait your turn".
+    private readonly ConcurrentDictionary<Guid, int> _unanswered = new();
+    private readonly ConcurrentDictionary<Guid, byte> _inConnect = new();
+    private readonly ConcurrentDictionary<Guid, byte> _slowWaiting = new();
+    internal const int SlowModeAfter = 2;
+    internal int SlowRetryMs { get; set; } = 30_000;
 
     /// Late release: the device's control channel can appear a moment after its connection (on
     /// macOS 7 ms was too early), so keep asking this long, this often (spec §3 Late release).
@@ -344,17 +354,21 @@ public sealed class SelectionEngine
         MarkBusy(device.Id);
         try
         {
-            // A known channel switcher: wait (briefly) until it answers. Anything else gets one
-            // silent try: it may not switch channels at all (ZMK, controllers).
-            if (known && !await WaitForChannelsAsync(device)) return;
+            // Wait (briefly) until it answers: its control channel can appear a moment after the
+            // link. Also for a device not known as a channel switcher this session (2026-11-16: a
+            // K380 asleep since launch, woken while the KVM was on the Mac; one immediate try
+            // found nothing and it stayed on this PC), but quietly: it may not switch channels
+            // at all (ZMK 1.x, controllers).
+            if (!await WaitForChannelsAsync(device, quiet: !known)) return;
             await SwitchChannelAsync(device, "it connected here while the KVM is elsewhere", lateRelease: true);
         }
         finally { ClearBusy(device.Id); }
     }
 
     /// Ask until the device's channel query answers, for up to LateReleaseRetryMs, while it stays
-    /// connected and the KVM stays away. False (with a warning if it never answered) to give up.
-    private async Task<bool> WaitForChannelsAsync(BTDevice device)
+    /// connected and the KVM stays away. False (with a warning if it never answered, unless quiet:
+    /// a device that may not switch channels at all) to give up.
+    private async Task<bool> WaitForChannelsAsync(BTDevice device, bool quiet = false)
     {
         for (var waited = 0; ; waited += LateReleasePollMs)
         {
@@ -374,8 +388,11 @@ public sealed class SelectionEngine
             }
             if (waited >= LateReleaseRetryMs)
             {
-                Warn($"{device.Name}: it's connected here while the KVM is on the other computer, but it doesn't answer " +
-                     "the channel query; press its channel key for the other computer");
+                if (quiet)
+                    Debug($"{device.Name}: connected while the KVM is elsewhere; no channel query answer (doesn't switch channels?)");
+                else
+                    Warn($"{device.Name}: it's connected here while the KVM is on the other computer, but it doesn't answer " +
+                         "the channel query; press its channel key for the other computer");
                 return false;
             }
             await SleepHook(LateReleasePollMs);
@@ -931,17 +948,28 @@ public sealed class SelectionEngine
         // (spec §3, 2026-11-15): a K380 that didn't answer spent 59 s on its retries, and the
         // speaker behind it waited all that time. Pairing devices still go one at a time.
         var unknown = devices.Where(d => !d.ManagePairing && !IsKnownChannelSwitcher(d)).ToList();
+        var managed = devices.Where(d => d.ManagePairing).ToList();
+        // Listed as connecting before any task starts, so a device that didn't answer last time
+        // sees the others ahead of it even if its task runs first (spec §3 "goes last").
+        foreach (var device in managed.Concat(unknown)) _inConnect[device.Id] = 0;
         var unmanaged = unknown.Select(d => ConnectUnmanagedAsync(d, run)).ToList();
-        foreach (var device in devices.Where(d => d.ManagePairing))
+        try
         {
-            if (StaleReason(run, respectSelection: false) is { } why)
+            foreach (var device in managed)
             {
-                Debug($"run #{run.Token}: connect run stopped: {why}");
-                break;
+                if (StaleReason(run, respectSelection: false) is { } why)
+                {
+                    Debug($"run #{run.Token}: connect run stopped: {why}");
+                    break;
+                }
+                MarkBusy(device.Id);
+                try { await ConnectOneAsync(device, run, respectSelection: true); }
+                finally { ClearBusy(device.Id); }
             }
-            MarkBusy(device.Id);
-            try { await ConnectOneAsync(device, run, respectSelection: true); }
-            finally { ClearBusy(device.Id); }
+        }
+        finally
+        {
+            foreach (var device in managed) _inConnect.TryRemove(device.Id, out _);   // the ones a stop skipped
         }
         await Task.WhenAll(unmanaged);
         await Task.WhenAll(waits);
@@ -951,20 +979,25 @@ public sealed class SelectionEngine
     /// waited for), else connected.
     private async Task ConnectUnmanagedAsync(BTDevice device, Run run)
     {
-        await IsOnOwnChannelAsync(device);
-        if (StaleReason(run, respectSelection: false) is { } why)
+        try
         {
-            Debug($"{device.Name}: connect skipped: {why}");
-            return;
+            await IsOnOwnChannelAsync(device);
+            if (StaleReason(run, respectSelection: false) is { } why)
+            {
+                Debug($"{device.Name}: connect skipped: {why}");
+                return;
+            }
+            if (IsKnownChannelSwitcher(device))
+            {
+                _inConnect.TryRemove(device.Id, out _);   // waiting to come over uses no radio
+                await WaitForArrivalAsync(device, run);
+                return;
+            }
+            MarkBusy(device.Id);
+            try { await ConnectOneAsync(device, run, respectSelection: true); }
+            finally { ClearBusy(device.Id); }
         }
-        if (IsKnownChannelSwitcher(device))
-        {
-            await WaitForArrivalAsync(device, run);
-            return;
-        }
-        MarkBusy(device.Id);
-        try { await ConnectOneAsync(device, run, respectSelection: true); }
-        finally { ClearBusy(device.Id); }
+        finally { _inConnect.TryRemove(device.Id, out _); }
     }
 
     /// Wait for a type 5 device to arrive by itself (connected, HID not down) for up to
@@ -1010,7 +1043,54 @@ public sealed class SelectionEngine
     ///     a hard failure that may mean a stale bond (AuthenticationFailed / Timeout / Unknown)
     ///     makes the next try unpair first and re-pair from scratch.
     ///   - InvalidAddress gives up immediately; AdapterUnavailable refreshes adapter power.
+    ///   - A managePairing-off device that doesn't answer (NoAnswer) goes behind the devices that
+    ///     do, and from SlowModeAfter in a row is tried every SlowRetryMs without a retry budget
+    ///     (automatic connects only), watched meanwhile in case it wakes up (spec §3).
     private async Task ConnectOneAsync(BTDevice device, Run run, bool respectSelection)
+    {
+        _inConnect[device.Id] = 0;
+        try { await ConnectOneCoreAsync(device, run, respectSelection); }
+        finally { _inConnect.TryRemove(device.Id, out _); }
+    }
+
+    private int Unanswered(Guid id) => _unanswered.TryGetValue(id, out var n) ? n : 0;
+
+    /// Another device is connecting or about to (a run lists its devices before their tasks
+    /// start), isn't waiting out a slow-mode interval, and has answered more recently than this
+    /// one: this one waits (spec §3 "goes last").
+    private bool OthersAhead(BTDevice device)
+    {
+        var mine = Unanswered(device.Id);
+        return _inConnect.Keys.Any(id => id != device.Id
+            && !_slowWaiting.ContainsKey(id)
+            && Unanswered(id) < mine);
+    }
+
+    private enum WatchResult { Elapsed, Connected, Stale }
+
+    /// Wait up to maxMs (or until `until` holds), polling the device: one that wakes up and
+    /// connects by itself counts as connected at once (spec §3, "watch while waiting").
+    private async Task<(WatchResult Result, string? Why)> WatchAsync(BTDevice device, Run run, bool respectSelection,
+        int maxMs, Func<bool>? until = null)
+    {
+        var waited = 0;
+        while (true)
+        {
+            if (StaleReason(run, respectSelection) is { } why) return (WatchResult.Stale, why);
+            if (await SafeIsConnectedAsync(device) && await SafeHidReadyAsync(device) != false
+                && (device.ManagePairing || await IsOnOwnChannelAsync(device) != false))
+            {
+                Info($"{device.Name}: connected (it woke up and connected by itself)");
+                SetStatus(device.Id, DeviceStatus.Connected);
+                return (WatchResult.Connected, null);
+            }
+            if (until?.Invoke() == true || waited >= maxMs) return (WatchResult.Elapsed, null);
+            await SleepHook(ArrivalPollMs);
+            await Task.Yield();   // an instant test SleepHook must not starve the devices ahead
+            waited += ArrivalPollMs;        }
+    }
+
+    private async Task ConnectOneCoreAsync(BTDevice device, Run run, bool respectSelection)
     {
         var cfg = Config;
         var addr = device.Address;
@@ -1040,6 +1120,7 @@ public sealed class SelectionEngine
         var hidNotReady = 0;
         var wedged = false;
         var freshBond = false;
+        var slowLogged = false;
         Failure last = default;
 
         while (true)
@@ -1055,6 +1136,20 @@ public sealed class SelectionEngine
                 Debug($"{name}: connect aborted before try {tries + 1}: {stale}");
                 MarkAborted(device.Id);
                 return;
+            }
+            // Spec §3: a device that didn't answer last time waits until the devices that did
+            // are done connecting.
+            if (!device.ManagePairing && respectSelection && OthersAhead(device))
+            {
+                Debug($"{name}: waiting for the devices that answer to connect first");
+                var (turn, turnWhy) = await WatchAsync(device, run, respectSelection, int.MaxValue, () => !OthersAhead(device));
+                if (turn == WatchResult.Connected) return;
+                if (turn == WatchResult.Stale)
+                {
+                    Debug($"{name}: connect aborted while waiting its turn: {turnWhy}");
+                    MarkAborted(device.Id);
+                    return;
+                }
             }
             tries++;
 
@@ -1142,8 +1237,12 @@ public sealed class SelectionEngine
 
                     // A clean connect is necessary but not sufficient: IsConnected must agree.
                     step = "verify";
-                    if (!await SafeIsConnectedAsync(device))
-                        throw new BluetoothException("connect completed but the device does not report connected");
+                    // A failing status query fails the try as itself (it's not a device that
+                    // didn't answer: that would send it into slow mode).
+                    if (!await WithTimeoutAsync(ct => _bt.IsConnectedAsync(addr, ct)))
+                        throw new BluetoothException(
+                            device.ManagePairing ? BluetoothFailureKind.Unknown : BluetoothFailureKind.NoAnswer,
+                            "connect completed but the device does not report connected");
                 }
 
                 // A link alone is not success: the device's HID input must be up (null = the
@@ -1174,13 +1273,19 @@ public sealed class SelectionEngine
             }
 
             last = failure;
+            var unanswered = !device.ManagePairing && failure.Kind == BluetoothFailureKind.NoAnswer;
+            var count = unanswered ? _unanswered.AddOrUpdate(device.Id, 1, (_, n) => n + 1) : 0;
+            var slow = unanswered && respectSelection && count >= SlowModeAfter;   // never for a manual connect
             var tryLine = $"{name}: try {tries}: {step} failed after {Ms(attempt)}: {failure.Summary}";
-            if (failure.Kind is BluetoothFailureKind.DeviceBusy or BluetoothFailureKind.OperationInProgress) Debug(tryLine);
+            if (failure.Kind is BluetoothFailureKind.DeviceBusy or BluetoothFailureKind.OperationInProgress || slowLogged) Debug(tryLine);
             else Warn(tryLine);
-            SetStatus(device.Id, DeviceStatus.Error(failure.Message));
+            SetStatus(device.Id, slow ? DeviceStatus.Disconnected : DeviceStatus.Error(failure.Message));
 
             // Don't trust a link-only state; drop any partial connection so the next try is clean.
-            await BestEffortAsync(device, "cleanup disconnect", ct => _bt.DisconnectAsync(addr, ct));
+            // Not after NoAnswer: nothing came up, and a device that arrives just after the try
+            // gave up (a speaker's link at 8.5 s) would be dropped again.
+            if (failure.Kind != BluetoothFailureKind.NoAnswer)
+                await BestEffortAsync(device, "cleanup disconnect", ct => _bt.DisconnectAsync(addr, ct));
 
             // Superseded while the try was running: stop here rather than log a misleading retry.
             if (StaleReason(run, respectSelection) is { } afterFailure)
@@ -1188,6 +1293,31 @@ public sealed class SelectionEngine
                 Debug($"{name}: connect aborted after failed try {tries}: {afterFailure}");
                 MarkAborted(device.Id);
                 return;
+            }
+
+            // Spec §3 slow mode: no retry budget, a try every SlowRetryMs until it connects or the
+            // KVM leaves, watched in between (a keyboard that wakes up reconnects by itself).
+            if (slow)
+            {
+                if (!slowLogged)
+                {
+                    slowLogged = true;
+                    Info($"{name}: doesn't answer (asleep or switched off?). It connects as soon as it wakes up; " +
+                         $"meanwhile it's tried every {SlowRetryMs / 1000} s while no other device connects");
+                }
+                _slowWaiting[device.Id] = 0;
+                (WatchResult, string?) slowWatch;
+                try { slowWatch = await WatchAsync(device, run, respectSelection, SlowRetryMs); }
+                finally { _slowWaiting.TryRemove(device.Id, out _); }
+                var (slowResult, slowWhy) = slowWatch;
+                if (slowResult == WatchResult.Connected) return;
+                if (slowResult == WatchResult.Stale)
+                {
+                    Debug($"{name}: slow tries stopped: {slowWhy}");
+                    MarkAborted(device.Id);
+                    return;
+                }
+                continue;
             }
 
             if (failure.Kind == BluetoothFailureKind.InvalidAddress)
@@ -1223,7 +1353,19 @@ public sealed class SelectionEngine
             var backoff = BackoffMillisJittered(cfg.ConnectRetrySecs, hardFailures);
             Debug($"{name}: attempt {hardFailures}/{maxHard} failed; retrying in {backoff} ms" +
                  (freshBond ? " (will re-pair from scratch)" : ""));
-            await SleepHook(backoff);
+            if (device.ManagePairing)
+            {
+                await SleepHook(backoff);
+                continue;
+            }
+            var (waitResult, waitWhy) = await WatchAsync(device, run, respectSelection, backoff);
+            if (waitResult == WatchResult.Connected) return;
+            if (waitResult == WatchResult.Stale)
+            {
+                Debug($"{name}: connect aborted during the retry wait: {waitWhy}");
+                MarkAborted(device.Id);
+                return;
+            }
         }
 
         var cause = wedged
@@ -1243,66 +1385,78 @@ public sealed class SelectionEngine
     /// the KVM leave, the user switches keyboards by hand while using both computers, and it holds
     /// no bond the other computer waits for (2026-11-14: a relaunch sent the Reviung41 off the Mac
     /// while the user typed on it).
-    private async Task ReleaseHeldAsync(Run run)
+    private Task ReleaseHeldAsync(Run run) => ReleaseInOrderAsync(run, "reconcile", async device =>
     {
-        foreach (var device in ReleaseOrder())
+        var connected = await SafeIsConnectedAsync(device);
+        if (!device.ManagePairing && !connected) return;   // nothing held
+        if (!device.ManagePairing)
         {
-            if (!device.Enabled) continue;
-            if (SourcePresentNow)
+            var here = await IsOnOwnChannelAsync(device);
+            if (IsKnownChannelSwitcher(device))
             {
-                Debug($"run #{run.Token}: reconcile stopped: the KVM came back");
+                _sentAway.Add(device.Id);   // no late release either
+                Info(here == false
+                    ? $"{device.Name}: already on another computer's channel; nothing to release"
+                    : $"{device.Name}: switches channels; leaving it where it is (press its channel key to move it)");
                 return;
             }
-            if (StaleReason(run, respectSelection: false) is { } why)
-            {
-                Debug($"run #{run.Token}: reconcile stopped: {why}");
-                return;
-            }
-            var connected = await SafeIsConnectedAsync(device);
-            if (!device.ManagePairing && !connected) continue;   // nothing held
-            if (!device.ManagePairing)
-            {
-                var here = await IsOnOwnChannelAsync(device);
-                if (IsKnownChannelSwitcher(device))
-                {
-                    _sentAway.Add(device.Id);   // no late release either
-                    Info(here == false
-                        ? $"{device.Name}: already on another computer's channel; nothing to release"
-                        : $"{device.Name}: switches channels; leaving it where it is (press its channel key to move it)");
-                    continue;
-                }
-            }
-            MarkBusy(device.Id);
-            try { await DisconnectOneAsync(device, run, notify: connected, automatic: true); }
-            finally { ClearBusy(device.Id); }
         }
-    }
+        MarkBusy(device.Id);
+        try { await DisconnectOneAsync(device, run, notify: connected, automatic: true); }
+        finally { ClearBusy(device.Id); }
+    });
 
-    private async Task DisconnectAllAsync(Run run)
+    private Task DisconnectAllAsync(Run run) => ReleaseInOrderAsync(run, "release run", async device =>
     {
-        foreach (var device in ReleaseOrder())
-        {
-            if (!device.Enabled) continue;
-            if (StaleReason(run, respectSelection: false) is { } why)  // e.g. the source came back
-            {
-                Debug($"run #{run.Token}: release run stopped: {why}");
-                return;
-            }
-            if (SourcePresentNow)
-            {
-                Debug($"run #{run.Token}: release run stopped: the KVM came back");
-                return;
-            }
-            MarkBusy(device.Id);
-            try { await DisconnectOneAsync(device, run, automatic: true); }
-            finally { ClearBusy(device.Id); }
-        }
-    }
+        MarkBusy(device.Id);
+        try { await DisconnectOneAsync(device, run, automatic: true); }
+        finally { ClearBusy(device.Id); }
+    });
 
-    /// Release order: devices without managePairing first (a channel switch takes ~0.5 s), then
-    /// the rest in list order (a Magic Trackpad unpair takes ~3.4 s on Windows). Spec §3.
-    private List<BTDevice> ReleaseOrder() =>
-        Config.Devices.Where(d => !d.ManagePairing).Concat(Config.Devices.Where(d => d.ManagePairing)).ToList();
+    /// Release order (spec §3): known channel switchers first, one at a time (a switch takes
+    /// ~0.5 s); then the managePairing devices one at a time, in list order (a Magic Trackpad
+    /// unpair takes ~3.4 s, and the other computer pairs as soon as it's gone), with every other
+    /// device alongside them. 2026-11-15: a speaker's audio disconnect (3.3-4.4 s) ahead of the
+    /// trackpad made the Mac's trackpad connect 4-5 s slower. Stops when the run goes stale or
+    /// the KVM comes back.
+    private async Task ReleaseInOrderAsync(Run run, string what, Func<BTDevice, Task> releaseOne)
+    {
+        bool Stopped()
+        {
+            var why = StaleReason(run, respectSelection: false) ?? (SourcePresentNow ? "the KVM came back" : null);
+            if (why is null) return false;
+            Debug($"run #{run.Token}: {what} stopped: {why}");
+            return true;
+        }
+
+        var devices = Config.Devices.Where(d => d.Enabled).ToList();
+        var switchers = devices.Where(d => !d.ManagePairing && IsKnownChannelSwitcher(d)).ToList();
+        var rest = devices.Where(d => !d.ManagePairing && !switchers.Contains(d)).ToList();
+        foreach (var device in switchers)
+        {
+            if (Stopped()) return;
+            await releaseOne(device);
+        }
+
+        async Task PairingDevicesAsync()
+        {
+            foreach (var device in devices.Where(d => d.ManagePairing))
+            {
+                if (Stopped()) return;
+                await releaseOne(device);
+            }
+        }
+
+        async Task OtherAsync(BTDevice device)
+        {
+            if (Stopped()) return;
+            await releaseOne(device);
+        }
+
+        var others = rest.Select(OtherAsync).ToList();
+        others.Add(PairingDevicesAsync());
+        await Task.WhenAll(others);
+    }
 
     /// Tear down one device: disconnect, then (managePairing) unpair. Staleness is re-checked
     /// after every await — a newer run owns the devices once it starts, and a stale release must
@@ -1701,6 +1855,7 @@ public sealed class SelectionEngine
         var had = _statuses.TryGetValue(id, out var existing);
         if (had && existing == status) return;
         _statuses[id] = status;
+        if (status == DeviceStatus.Connected) _unanswered.TryRemove(id, out _);
         RaiseChanged();
         if (status == DeviceStatus.Connected && (!had || existing != DeviceStatus.Connected)) OnBecameConnected(id);
     }

@@ -456,6 +456,114 @@ public class FailureHandlingTests
         Assert.DoesNotContain(Addr2.Replace(":", ""), bt.Connected);  // superseded run stopped
     }
 
+    /// Polls a condition the engine's background tasks will make true (the fake's lists are read
+    /// while the engine writes them, so a torn read just tries again).
+    private static async Task WaitFor(Func<bool> condition, string what)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            try { if (condition()) return; } catch (InvalidOperationException) { }
+            await Task.Delay(5);
+        }
+        throw new TimeoutException($"timed out waiting for: {what}");
+    }
+
+    [Fact]
+    public async Task A_device_that_doesnt_answer_is_tried_slowly_and_connects_when_it_wakes()
+    {
+        // Spec §3: from two unanswered tries in a row, no retry budget and no give-up; a try
+        // every SlowRetryMs until it connects or the KVM leaves, watched in between.
+        var engine = MakeEngine(out var bt, out var config, out var log, managePairing: false);
+        config.ConnectRetryMax = 2;
+        bt.ConnectError = Fail(BluetoothFailureKind.NoAnswer, "didn't come");
+
+        engine.HandleUsb(Vendor, Product, added: true);
+        var arrival = engine.EvaluateNowAsync();
+        await WaitFor(() => log.Has(LogLevel.Info, "doesn't answer"), "the slow-mode line");
+        await WaitFor(() => Count(bt, "connect") >= 4, "tries past connectRetryMax");
+
+        Assert.False(log.Has(LogLevel.Error, "gave up"), log.Dump());
+        Assert.Equal(DeviceStatus.Disconnected, engine.Statuses.Values.Single());
+
+        lock (bt.Connected) bt.Connected.Add(N);   // it wakes up and reconnects by itself
+        await arrival.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
+        Assert.True(log.Has(LogLevel.Info, "connected by itself"), log.Dump());
+    }
+
+    [Fact]
+    public async Task Manual_connect_of_a_device_that_doesnt_answer_still_gives_up()
+    {
+        var engine = MakeEngine(out var bt, out var config, out var log, managePairing: false);
+        config.ConnectRetryMax = 2;
+        bt.ConnectError = Fail(BluetoothFailureKind.NoAnswer, "didn't come");
+
+        await engine.ConnectDeviceNowAsync(config.Devices[0]).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Contains("gave up", engine.Statuses.Values.Single().Label);
+    }
+
+    [Fact]
+    public async Task A_device_that_didnt_answer_goes_last_next_time()
+    {
+        // The sleeping K380 (first in the list) waits until the speaker has connected.
+        var engine = MakeEngine(out var bt, out var config, out var log, managePairing: false);
+        config.Devices.Add(new BTDevice { Name = "Speaker", Address = Addr2, Enabled = true });
+        var speaker = Addr2.Replace(":", "");
+        bt.ConnectErrorFor = a => a == N ? Fail(BluetoothFailureKind.NoAnswer, "asleep") : null;
+
+        engine.HandleUsb(Vendor, Product, added: true);
+        var first = engine.EvaluateNowAsync();
+        await WaitFor(() => log.Has(LogLevel.Info, "doesn't answer"), "the K380 in slow mode");
+        await Leave(engine);
+        await first;
+
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var speakerWaiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bt.BeforeConnectFor = async a =>
+        {
+            if (a != speaker) return;
+            speakerWaiting.TrySetResult();
+            await gate.Task;
+        };
+        var before = Count(bt, "connect");
+        engine.HandleUsb(Vendor, Product, added: true);
+        var second = engine.EvaluateNowAsync();
+        await speakerWaiting.Task;
+        await Task.Delay(200);
+        Assert.Equal(before, Count(bt, "connect"));   // the K380 hasn't been tried yet
+        Assert.True(log.Has(LogLevel.Debug, "waiting for the devices that answer"), log.Dump());
+
+        gate.SetResult();
+        await WaitFor(() => Count(bt, "connect") > before, "the K380's try after the speaker");
+        await Leave(engine);
+        await second;
+    }
+
+    [Fact]
+    public async Task Trackpad_unpair_does_not_wait_for_a_speaker_disconnect()
+    {
+        // 2026-11-15: the speaker's audio disconnect (3-4 s) ran ahead of the trackpad's unpair,
+        // and the Mac's trackpad connect got 4-5 s slower. The speaker is first in the list.
+        var engine = MakeEngine(out var bt, out var config, out var log, managePairing: true);
+        var speaker = Addr2.Replace(":", "");
+        config.Devices.Insert(0, new BTDevice { Name = "Speaker", Address = Addr2, Enabled = true });
+        await Arrive(engine);
+
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bt.BeforeDisconnectFor = async a => { if (a == speaker) await gate.Task; };
+        engine.HandleUsb(Vendor, Product, added: false);
+        var leave = engine.EvaluateNowAsync();
+        await WaitFor(() => bt.Calls.Contains($"unpair:{N}"), "the trackpad unpair");
+        Assert.DoesNotContain($"disconnect:{speaker}", bt.Calls);   // the speaker is still on its way out
+
+        gate.SetResult();
+        await leave;
+        Assert.Contains($"disconnect:{speaker}", bt.Calls);
+    }
+
     [Fact]
     public async Task Unmanaged_devices_connect_alongside_each_other()
     {

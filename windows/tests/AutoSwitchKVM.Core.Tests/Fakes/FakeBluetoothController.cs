@@ -17,6 +17,11 @@ public sealed class FakeBluetoothController : IBluetoothController
     public Func<Task>? BeforeDisconnect { get; set; }
     public Func<Task>? BeforePair { get; set; }
     public Func<Task>? BeforeUnpair { get; set; }
+    /// Per-address variants (address digits): awaited after the global hook / thrown before the
+    /// sticky error, so a test can hold or fail one device while the others go on.
+    public Func<string, Task>? BeforeConnectFor { get; set; }
+    public Func<string, Task>? BeforeDisconnectFor { get; set; }
+    public Func<string, Exception?>? ConnectErrorFor { get; set; }
     /// When set, connect/disconnect record the call, then throw without changing state.
     public Exception? ConnectError { get; set; }
     public Exception? DisconnectError { get; set; }
@@ -54,7 +59,9 @@ public sealed class FakeBluetoothController : IBluetoothController
     public async Task ConnectAsync(string address, CancellationToken ct = default)
     {
         if (BeforeConnect is not null) await BeforeConnect();
+        if (BeforeConnectFor is not null) await BeforeConnectFor(Norm(address));
         Calls.Add($"connect:{Norm(address)}");
+        if (ConnectErrorFor?.Invoke(Norm(address)) is { } perDevice) throw perDevice;
         if (ConnectErrors.Count > 0 && ConnectErrors.Dequeue() is { } scripted) throw scripted;
         if (ConnectError is not null) throw ConnectError;
         Connected.Add(Norm(address));
@@ -64,6 +71,7 @@ public sealed class FakeBluetoothController : IBluetoothController
     public async Task DisconnectAsync(string address, CancellationToken ct = default)
     {
         if (BeforeDisconnect is not null) await BeforeDisconnect();
+        if (BeforeDisconnectFor is not null) await BeforeDisconnectFor(Norm(address));
         Calls.Add($"disconnect:{Norm(address)}");
         if (DisconnectError is not null) throw DisconnectError;
         Connected.Remove(Norm(address));

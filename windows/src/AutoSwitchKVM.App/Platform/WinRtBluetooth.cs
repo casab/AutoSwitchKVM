@@ -201,9 +201,8 @@ public sealed class WinRtBluetooth : IBluetoothController
             Log.Debug("bt", $"audio {address}: connected in {sw.ElapsedMilliseconds} ms ({filters.Count} audio profile(s))");
             return;
         }
-        // Not multipoint and the other computer still has it, or it's off / out of range. Retried
-        // soon, like a trackpad the other host hasn't released yet.
-        throw new BluetoothException(BluetoothFailureKind.DeviceBusy,
+        // Not multipoint and the other computer still has it, or it's off / out of range.
+        throw new BluetoothException(BluetoothFailureKind.NoAnswer,
             $"didn't connect within {AudioConnectWaitMs / 1000} s (another computer may still have it, or it's off)", "audio reconnect");
     }
 
