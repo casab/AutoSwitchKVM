@@ -26,11 +26,11 @@
                 <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE72C;" /></toolkit:SettingsCard.HeaderIcon>
                 <ToggleSwitch IsOn="{x:Bind ViewModel.AutoReconnectOnDrop, Mode=TwoWay}" />
             </toolkit:SettingsCard>
-            <toolkit:SettingsExpander Header="Notifications" Description="Show a notification when devices connect, disconnect or fail.">
+            <toolkit:SettingsExpander Header="Switch status" Description="While devices switch, show their status in a small panel by the tray. It hides by itself and makes no sound.">
                 <toolkit:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xEA8F;" /></toolkit:SettingsExpander.HeaderIcon>
                 <ToggleSwitch IsOn="{x:Bind ViewModel.ShowNotifications, Mode=TwoWay}" />
                 <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard Header="Unexpected disconnects" Description="Also notify when a device drops while the KVM is on this PC.">
+                    <toolkit:SettingsCard Header="Unexpected disconnects" Description="Also show it when a device drops while the KVM is on this PC.">
                         <ToggleSwitch IsOn="{x:Bind ViewModel.NotifyUnexpectedDisconnect, Mode=TwoWay}" />
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>

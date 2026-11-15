@@ -104,6 +104,7 @@ public partial class App : Application
             var page = cmd.FirstOrDefault(a => a.StartsWith("--settings"))?.Split('=').ElementAtOrDefault(1);
             if (cmd.Any(a => a.StartsWith("--settings"))) ShowSettings(page ?? "overview");
             if (cmd.Contains("--panel")) Panel.ShowPanel();
+            if (cmd.Contains("--popup")) Popup.ShowAllForPreview();
             return;
         }
 
@@ -145,6 +146,12 @@ public partial class App : Application
 
         // Swap the tray icon (and tooltip) to match state changes (active / inactive / paused / off).
         Controller.StateChanged += () => _dispatcher?.Enqueue("tray icon", UpdateTrayIcon);
+
+        // Switch status by the tray, in place of Windows toasts for device events. Created now so
+        // it knows every device's status before the first change.
+        _ = Popup;
+        Controller.StateChanged += () => _dispatcher?.Enqueue("status popup", Popup.OnStateChanged);
+        Controller.UnexpectedDisconnect += d => _dispatcher?.Enqueue("status popup drop", () => Popup.ShowDrop(d));
 
         // First launch after installing: open Settings so setup (source, devices) is right there.
         if (Program.IsFirstRun) ShowSettings("overview");
@@ -299,6 +306,12 @@ public partial class App : Application
         }
     }
     private TrayPanel? _panel;
+
+    /// The switch-status popup by the tray, created on first use.
+    private StatusPopup Popup => _popup ??= new StatusPopup(Controller,
+        trayPanelOpen: () => _panel?.IsShown == true,
+        openTrayPanel: () => Panel.ShowPanel());
+    private StatusPopup? _popup;
 
     private void ExitApp()
     {

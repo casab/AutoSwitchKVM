@@ -174,7 +174,8 @@ testability):
   - `Platform/{LoginItem,PowerMonitor,HotKeyService,ToastNotifier}.cs` — **system integration
     (Milestone 6)**: HKCU Run key; SystemEvents power suspend/resume (suspend->disconnect all,
     resume->reconcile); Win32 RegisterHotKey on a message-only window (defaults Ctrl+Alt+P/C/D);
-    AppNotificationManager toasts (unpackaged Register). Wired in AppController; recorder in the
+    AppNotificationManager toasts (unpackaged Register; only "update ready" since 2026-11-16).
+    Device events go to `StatusPopup` instead (below). Wired in AppController; recorder in the
     General tab. (Note: namespaced under `Platform`, not `System`, to avoid clashing with `System.*`.)
   - `Platform/WinRtBluetooth.cs` — **implemented (Milestone 4)**: radio power, ConnectionStatus+HID
     `isConnected`, idempotent `pair` (resolve endpoint by address + Custom.PairAsync ConfirmOnly
@@ -416,6 +417,18 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   with `cdb -c "!gflag +sls; g; q"` on a minimal harness. Test toasts from a published folder, not
   a dev build. A stale `obj/` after an SDK bump gives CS0759 on `_XamlGeneratedCreateApplicationInstance`:
   delete `obj/x64/<config>` and rebuild.
+- **Switch status popup, not toasts** (2026-11-16, user request: one toast and one sound per
+  device per switch). `StatusPopup.xaml(.cs)`: a borderless, always-on-top acrylic window at the
+  bottom-right of the primary work area, in the tray panel's style. Driven by
+  `AppController.StateChanged`: a device whose status kind changes (not into Idle, not from Idle
+  straight to a resting state) is added as a row; rows update live; it hides 3.5 s after
+  everything settled (8 s with a problem), never while hovered; a click opens the tray panel.
+  Gated by `showNotifications` ("Switch status" in Settings); `notifyUnexpectedDisconnect` shows
+  a drop even when that's off. Not shown while the tray panel is open. **A WinUI window shown
+  without ever being activated doesn't load its content** (only the caption rendered): the
+  popup activates once off-screen at creation, hides, and is later shown with
+  `AppWindow.Show(activateWindow: false)`, so it never takes focus. Preview:
+  `--ui-preview --preview-demo --popup`.
 - **Buttons inside a `SettingsExpander`'s `Items` don't inherit the row's `DataContext`** (the
   toolkit hosts them in its own repeater). Pass the item explicitly (`Tag="{x:Bind}"`) instead of
   reading `DataContext` in a click handler: Devices ▸ Remove silently did nothing because of this.

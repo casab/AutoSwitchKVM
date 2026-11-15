@@ -25,6 +25,10 @@ GitHub release (and from there into the in-app update notes).
   way to the other computer.
 - A Logitech keyboard you wake up on this PC while the KVM is on the other computer is sent
   there, even when it had been asleep since AutoSwitch started.
+- Device notifications are now a small status panel by the tray instead of Windows notifications:
+  it shows each device connecting, connected or released while the KVM switches, then hides by
+  itself. No sound, and nothing piles up in the notification center (Settings ▸ General ▸ Switch
+  status).
 
 - Bluetooth headphones and speakers can follow the KVM (being tested): AutoSwitch disconnects
   them when the KVM leaves this PC, keeping their pairing, so your other computer can connect

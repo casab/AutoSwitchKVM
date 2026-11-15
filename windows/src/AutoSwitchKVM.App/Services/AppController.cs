@@ -32,6 +32,9 @@ public sealed class AppController
     /// Raised (on the UI thread) whenever state the UI shows may have changed.
     public event Action? StateChanged;
 
+    /// A device dropped while this PC is selected, and Settings asks to be told (the status popup).
+    public event Action<BTDevice>? UnexpectedDisconnect;
+
     /// Preview mode (developer: `--ui-preview`): the UI runs against the real config, but nothing is
     /// started (no USB/Bluetooth/power/hotkeys) and nothing is written, so it can run next to the
     /// real app (e.g. for screenshots) without touching the devices or the settings.
@@ -57,16 +60,14 @@ public sealed class AppController
         _hostSwitcher = new CompositeHostSwitcher(_logitech, _zmk);
         Engine = new SelectionEngine(Config, _usb, _bt, new AppLogSink(), _hostSwitcher);
         Engine.Changed += () => StateChanged?.Invoke();
-        Engine.OnNotice = (title, body) =>
-        {
-            Log.Debug("notice", $"{title}: {body}");
-            if (Config.ShowNotifications) _toasts.Notify(title, body);
-        };
+        // Device events show in the status popup by the tray (StatusPopup, driven by StateChanged),
+        // not as Windows toasts: one toast and one sound per device per switch was too much
+        // (2026-11-16). Toasts are left for the rare "update ready".
+        Engine.OnNotice = (title, body) => Log.Debug("notice", $"{title}: {body}");
         Engine.OnUnexpectedDisconnect = d =>
         {
-            // The engine logs the drop itself; this only raises the optional toast.
-            if (Config.NotifyUnexpectedDisconnect)
-                _toasts.Notify("Device disconnected", $"{d.Name} dropped while still selected");
+            // The engine logs the drop itself; this only raises the optional popup.
+            if (Config.NotifyUnexpectedDisconnect) UnexpectedDisconnect?.Invoke(d);
         };
     }
 

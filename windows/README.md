@@ -94,7 +94,9 @@ Also in Settings:
 - **Profiles:** separate setups (a source plus its devices), e.g. "Desk" and "Travel".
 - **Keyboard shortcuts:** optional global shortcuts to pause, connect all and release all
   (defaults Ctrl+Alt+P / C / D).
-- **Launch at login**, **notifications**, and **timing and retry** options for unusual hardware.
+- **Switch status:** while devices switch, a small panel by the tray shows each one connecting,
+  connected or released, then hides by itself. No sound, and no pile of notifications.
+- **Launch at login** and **timing and retry** options for unusual hardware.
 - **Back up or restore** your settings as a file.
 
 AutoSwitch also releases your devices when the PC sleeps, signs out or shuts down, and catches

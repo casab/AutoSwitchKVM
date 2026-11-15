@@ -145,6 +145,7 @@ public sealed class DeviceViewModel : ObservableObject
             if (n.Contains("airpods") || n.Contains("headphone") || n.Contains("buds") || n.Contains("headset")) return "";
             if (n.Contains("speaker")) return "";
             if (n.Contains("controller") || n.Contains("gamepad")) return "";
+            if (HandoffType == HandoffType.HostConnects) return "";   // headphones, speakers (by type when the name doesn't say)
             return "";
         }
     }
