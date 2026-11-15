@@ -196,9 +196,11 @@ controller** (the operations in §5). It owns no platform APIs directly.
     each try, a device with a count > 0 waits until no device with a lower count is in a connect
     (`managePairing` devices count 0; a run lists all its devices before their tasks start; a
     device waiting out a slow-mode interval and channel switchers waiting to come over don't
-    count). No cleanup disconnect after an unanswered try (nothing came up, and a speaker whose
-    link arrives just after the 8 s would be dropped). Slow mode only for automatic connects: a
-    manual Connect still gives up after `connectRetryMax`.
+    count).
+  - **Both** (macOS 2026-11-16): no cleanup disconnect after an unanswered try (nothing came up,
+    and a speaker whose link arrives just after the try gave up would be dropped again; Windows
+    saw that race). Slow mode only for automatic connects: a manual Connect isn't ended by the KVM
+    leaving, so it still gives up after `connectRetryMax`.
 - Apply `connectDelayMs` first (stagger), re-checking cancellation after the wait.
 - **A known type 5 device is waited for, not connected** (§5a; macOS 2026-11-13). The other
   host's AutoSwitch sends it here, and it connects by itself. A host that calls it meanwhile gets
@@ -249,7 +251,9 @@ controller** (the operations in §5). It owns no platform APIs directly.
   disconnect (3.3–4.4 s on Windows) ran before the trackpad's unpair, and the Mac's trackpad
   connect went from 4–6 s to 10–15 s. Windows: known channel switchers go first; devices not
   known as switchers this session (their channel switch, if any, falls through to the usual
-  release) and everything else start together with the unpairs.
+  release) and everything else start together with the unpairs. macOS keeps every device without
+  `managePairing` ahead of the unpairs, in list order: its disconnects take 1–10 ms (a speaker
+  included), so none of them holds the trackpad up.
 - **Channel switch first** (§5a type 5; Windows and macOS implemented 2026-11-13): if
   `managePairing` is off and the device is connected here and supports host-initiated channel
   switching, send it to the target channel (`releaseToChannel`, else the single other channel
@@ -274,7 +278,8 @@ controller** (the operations in §5). It owns no platform APIs directly.
   ("press its channel key"). **Also for a device not known as a channel switcher this session**,
   quietly (no warning: it may not switch channels at all). 2026-11-16, Windows: a K380 asleep
   since launch was woken while the KVM was on the Mac; Windows made one immediate try, found no
-  control channel yet, and left it on the PC (Windows fixed the same day). **Only a device the release couldn't send** (macOS and Windows 2026-11-14): one
+  control channel yet, and left it on the PC (Windows fixed the same day; macOS already asked
+  every device for the 5 s, and made it quiet for unknown ones 2026-11-16). **Only a device the release couldn't send** (macOS and Windows 2026-11-14): one
   this host sent away and that comes back while the KVM is elsewhere was brought back on purpose
   (its channel key, or the other host), so it is left here. The user switches keyboards by hand
   while using both computers.

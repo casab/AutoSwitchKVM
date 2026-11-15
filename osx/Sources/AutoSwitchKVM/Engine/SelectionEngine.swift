@@ -993,8 +993,10 @@ final class SelectionEngine: ObservableObject {
             if !device.managePairing, f.kind == .timeout {
                 unansweredTries[device.id, default: 0] += 1
             }
+            // Automatic connects only: a manual Connect isn't ended by the KVM leaving, so it would
+            // keep trying until the next run; it gives up after `connectRetryMax` as before.
             let slow =
-                !device.managePairing && !f.kind.isSoft
+                respectSelection && !device.managePairing && !f.kind.isSoft
                 && (unansweredTries[device.id] ?? 0) >= max(1, unansweredSlowAfter)
             let wasSlow = slow && slowDevices.contains(device.id)
             // Expected refusals (the other host still holds it, an operation in flight) are routine
@@ -1005,11 +1007,19 @@ final class SelectionEngine: ObservableObject {
             setStatus(device.id, slow ? .disconnected : .error(f.message))
 
             // Don't trust a link-only state; drop any partial connection so the next try is clean.
-            if await bt.isConnected(addr) {
-                Log.engine.debug(
-                    "\(name): the device reports connected despite the failed \(step); dropping it as a partial link")
+            // Not after a try the device didn't answer: nothing came up, and a device whose link
+            // arrives just after the try gave up would be dropped again (Windows saw that race with
+            // a speaker; the next try's status check or the slow-mode watch picks it up).
+            if !device.managePairing, f.kind == .timeout {
+                Log.engine.debug("\(name): no cleanup disconnect after a try it didn't answer")
+            } else {
+                if await bt.isConnected(addr) {
+                    Log.engine.debug(
+                        "\(name): the device reports connected despite the failed \(step); dropping it as a partial link"
+                    )
+                }
+                await bestEffort(device, "cleanup disconnect") { try await self.bt.disconnect(addr) }
             }
-            await bestEffort(device, "cleanup disconnect") { try await self.bt.disconnect(addr) }
 
             // Superseded while the try was running: stop here rather than log a misleading retry.
             if let why = staleReason(run, respectSelection: respectSelection) {
@@ -1672,7 +1682,16 @@ final class SelectionEngine: ObservableObject {
         let now = Date()
         if let last = lastLateRelease[id], now.timeIntervalSince(last) < lateReleaseMinInterval { return }
         lastLateRelease[id] = now
-        Log.engine.log("\(device.name): connected while the KVM is on the other computer → sending it there")
+        // A device not known as a channel switcher this session (e.g. asleep since launch) is asked
+        // too, for the same few seconds (its control channel comes up a moment after the link),
+        // but quietly: it may not switch channels at all (a speaker). Spec §3 "Late release".
+        let known = switchesChannels(device)
+        if known {
+            Log.engine.log("\(device.name): connected while the KVM is on the other computer → sending it there")
+        } else {
+            Log.engine.debug(
+                "\(device.name): connected while the KVM is on the other computer; asking whether it switches channels")
+        }
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.markBusy(id)
@@ -1699,10 +1718,13 @@ final class SelectionEngine: ObservableObject {
                 }
                 break
             }
-            if await self.bt.isConnected(addr) {
+            guard await self.bt.isConnected(addr) else { return }
+            if known || self.switchesChannels(device) {
                 Log.engine.warn(
                     "\(device.name): couldn't send it to the other computer (its control channel didn't answer); "
                         + "press its channel key")
+            } else {
+                Log.engine.debug("\(device.name): doesn't switch channels (no control channel answered)")
             }
         }
     }

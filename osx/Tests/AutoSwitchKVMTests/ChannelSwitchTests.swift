@@ -468,6 +468,28 @@ final class ChannelSwitchTests: XCTestCase {
         XCTAssertEqual(connects(f, from: before).first, "connect:\(speaker)", "\(connects(f, from: before))")
     }
 
+    /// A manual Connect isn't ended by the KVM leaving, so it doesn't go into slow mode: it gives up
+    /// after the usual tries (Windows does the same). And a try the device didn't answer isn't
+    /// followed by a cleanup disconnect: a link arriving just after would be dropped again.
+    func testAManualConnectOfADeviceThatDoesntAnswerGivesUpWithoutCleanupDisconnects() async {
+        let f = makeSleepingK380()
+        var sleeps = 0
+        f.engine.sleepHook = { [engine = f.engine] _ in
+            sleeps += 1
+            if sleeps == 3000 { engine.disconnectAllNow() }  // only if it never gave up: end the loop
+            await Task.yield()
+        }
+        await f.engine.connectDeviceNow(f.device)
+
+        XCTAssertLessThan(sleeps, 3000, "gave up by itself")
+        guard case .error(let message) = f.engine.statuses[f.device.id] else {
+            return XCTFail("\(String(describing: f.engine.statuses[f.device.id]))")
+        }
+        XCTAssertTrue(message.hasPrefix("gave up"), message)
+        XCTAssertEqual(connects(f).count, f.store.config.connectRetryMax)
+        XCTAssertFalse(f.bt.calls.contains { $0.hasPrefix("disconnect:") }, "\(f.bt.calls)")
+    }
+
     /// Asleep, then woken up after the switch: connected as soon as it shows up, without waiting
     /// for its next try.
     func testASleepingDeviceThatWakesUpIsConnectedAtOnce() async {
