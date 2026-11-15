@@ -35,6 +35,8 @@ final class MockBluetoothController: BluetoothController {
 
     /// One-shot failures, consumed in order before the persistent ones (e.g. "busy twice, then OK").
     var connectErrors: [Error] = []
+    /// Persistent failures for one (normalized) address.
+    var connectErrorFor: [String: Error] = [:]
     var pairErrors: [Error] = []
     var unpairErrors: [Error] = []
 
@@ -69,6 +71,7 @@ final class MockBluetoothController: BluetoothController {
         if let hook = beforeConnect { await hook() }
         if let hook = beforeConnectTo { await hook(norm(address)) }
         calls.append("connect:\(norm(address))")
+        if let error = connectErrorFor[norm(address)] { throw error }
         if let error = nextError(&connectErrors, connectError) { throw error }
         connectedAddrs.insert(norm(address))
     }

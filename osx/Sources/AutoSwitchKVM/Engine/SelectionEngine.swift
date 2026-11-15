@@ -85,6 +85,12 @@ final class SelectionEngine: ObservableObject {
     var softRetryIntervalMs = 3000
     /// …up to this many times without spending `connectRetryMax`; then they count as hard.
     var maxSoftRetries = 20
+    /// A device that didn't answer this many tries in a row (asleep or off) stops spending the
+    /// retry budget: it's tried every `unansweredRetryMs`, only while no other device connects,
+    /// until it answers or the KVM leaves. It connects at once if it wakes up meanwhile.
+    var unansweredSlowAfter = 2
+    var unansweredRetryMs = 30_000
+    var unansweredPollMs = 500
     /// Delay before retrying a failed unpair during a release.
     var releaseRetryDelayMs = 1000
     /// Settle time after dropping the transient post-pair connection.
@@ -747,6 +753,7 @@ final class SelectionEngine: ObservableObject {
         var waits: [Task<Void, Never>] = []
         for device in devices where !device.managePairing {
             markBusy(device.id)
+            setStatus(device.id, .connecting)  // now, so a device that waits its turn sees them all
             waits.append(
                 Task { @MainActor [weak self] in
                     guard let self else { return }
@@ -804,6 +811,8 @@ final class SelectionEngine: ObservableObject {
         // A device that answers the channel query is one, even before it was seen this session.
         if !device.managePairing, !switchesChannels(device) { _ = await isOnOwnChannel(device) }
         if switchesChannels(device) {
+            arrivalWaits.insert(device.id)  // uses no radio: doesn't hold the others up
+            defer { arrivalWaits.remove(device.id) }
             await waitForChannelArrival(device, run: run, respectSelection: respectSelection, start: start)
             return
         }
@@ -814,8 +823,27 @@ final class SelectionEngine: ObservableObject {
         var hidFailures = 0
         var freshBond = false
         var last: Failure?
+        var slowWait = false  // a slow-mode try failed: wait `unansweredRetryMs` before the next
 
         while true {
+            // Spec §3 Connect flow "Order": a device that didn't answer lately goes after the ones
+            // that did (the stack pages one device at a time; a sleeping K380 held a speaker up).
+            if !device.managePairing, (unansweredTries[device.id] ?? 0) > 0 {
+                switch await waitForTurn(device, run: run, respectSelection: respectSelection, slowWait: slowWait) {
+                case .go:
+                    slowWait = false
+                case .connectedByItself:
+                    Log.engine.log(
+                        "\(name): connected ✓ (it woke up and connected by itself) after \(Elapsed.since(start))")
+                    setStatus(device.id, .connected)
+                    onNotice?("Connected", name)
+                    return
+                case .stale(let why):
+                    Log.engine.debug("\(name): connect stopped while waiting its turn: \(why)")
+                    markAborted(device.id)
+                    return
+                }
+            }
             if !bluetoothPowered {
                 Log.engine.debug("\(name): connect stopped: Bluetooth is off")
                 setStatus(device.id, .bluetoothOff)
@@ -936,11 +964,20 @@ final class SelectionEngine: ObservableObject {
             }
 
             last = f
+            // Didn't answer (asleep or off). Two in a row: slow mode, see `unansweredSlowAfter`.
+            if !device.managePairing, f.kind == .timeout {
+                unansweredTries[device.id, default: 0] += 1
+            }
+            let slow =
+                !device.managePairing && !f.kind.isSoft
+                && (unansweredTries[device.id] ?? 0) >= max(1, unansweredSlowAfter)
+            let wasSlow = slow && slowDevices.contains(device.id)
             // Expected refusals (the other host still holds it, an operation in flight) are routine
-            // on every switch: debug. Hard failures are warnings (spec §10).
+            // on every switch: debug, and so are the slow tries of a device that is asleep. Hard
+            // failures are warnings (spec §10).
             let tryFailed = "\(name): try \(tries): \(step) failed after \(Elapsed.since(tryStart)): \(f.summary)"
-            if f.kind.isSoft { Log.engine.debug(tryFailed) } else { Log.engine.warn(tryFailed) }
-            setStatus(device.id, .error(f.message))
+            if f.kind.isSoft || wasSlow { Log.engine.debug(tryFailed) } else { Log.engine.warn(tryFailed) }
+            setStatus(device.id, slow ? .disconnected : .error(f.message))
 
             // Don't trust a link-only state; drop any partial connection so the next try is clean.
             if await bt.isConnected(addr) {
@@ -958,6 +995,15 @@ final class SelectionEngine: ObservableObject {
             }
 
             if f.kind == .invalidAddress { break }  // retrying can never help
+            if slow {
+                if slowDevices.insert(device.id).inserted {
+                    Log.engine.log(
+                        "\(name): doesn't answer (asleep or switched off?). It connects as soon as it wakes up; "
+                            + "meanwhile it's tried every \(unansweredRetryMs / 1000) s while no other device connects")
+                }
+                slowWait = true
+                continue
+            }
             if f.kind == .hidNotReady {
                 hidFailures += 1
                 if hidFailures >= max(1, maxHidFailures) { break }  // wedged: more tries only churn it
@@ -999,6 +1045,43 @@ final class SelectionEngine: ObservableObject {
                 + "(\(hardFailures) hard, \(softRetries) soft); last error: \(last?.summary ?? cause)")
         setStatus(device.id, .error("gave up after \(triesText): \(cause)"))
         onNotice?("Connection failed", "\(name): gave up after \(triesText) — \(cause)")
+    }
+
+    /// Consecutive tries a device didn't answer (page timeouts), this session; cleared when it
+    /// connects. Spec §3 Connect flow "Order".
+    private var unansweredTries: [UUID: Int] = [:]
+    /// Devices in slow mode (logged once per stretch).
+    private var slowDevices = Set<UUID>()
+    /// Channel switchers waiting to come over: they use no radio.
+    private var arrivalWaits = Set<UUID>()
+
+    private enum Turn { case go, connectedByItself, stale(String) }
+
+    /// Wait until no device that answered more recently is connecting (the Bluetooth stack pages
+    /// one device at a time, and a page to a sleeping device holds the others ~12 s), and in slow
+    /// mode at least `unansweredRetryMs` since the last try. Meanwhile, watch for the device
+    /// connecting by itself (a keyboard reconnects when it wakes up).
+    private func waitForTurn(_ device: BTDevice, run: Run, respectSelection: Bool, slowWait: Bool) async -> Turn {
+        let addr = device.normalizedAddress
+        let mine = unansweredTries[device.id] ?? 0
+        let interval = max(1, unansweredPollMs)
+        var minPolls = slowWait ? max(0, unansweredRetryMs / interval) : 0
+        var announced = false
+        while true {
+            if let why = staleReason(run, respectSelection: respectSelection) { return .stale(why) }
+            if await bt.isConnected(addr), await bt.isHIDReady(addr) != false { return .connectedByItself }
+            let ahead = statuses.contains { id, status in
+                id != device.id && status == .connecting && isBusy(id) && !arrivalWaits.contains(id)
+                    && (unansweredTries[id] ?? 0) < mine
+            }
+            if minPolls <= 0, !ahead { return .go }
+            if ahead, !announced, minPolls <= 0 {
+                announced = true
+                Log.engine.debug("\(device.name): didn't answer last time; letting the other devices connect first")
+            }
+            minPolls -= 1
+            await sleepHook(interval)
+        }
     }
 
     /// Wait (bounded) until the device's HID connection is up. Returns true/false, or nil when the
@@ -1298,7 +1381,11 @@ final class SelectionEngine: ObservableObject {
         let old = statuses[id]
         guard old != status else { return }
         statuses[id] = status
-        if status == .connected { becameConnected(id) }
+        if status == .connected {
+            unansweredTries[id] = nil
+            slowDevices.remove(id)
+            becameConnected(id)
+        }
     }
 
     // MARK: - Channel switching (spec §5a type 5)

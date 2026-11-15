@@ -170,6 +170,15 @@ final class IOBluetoothController: NSObject, BluetoothController {
             try await waitForLowEnergy(address)
             return
         }
+        // bluetoothd keeps one "this app asked for pairing" flag per app, and every connect request
+        // resets it. A connect during another device's pairing ceremony made bluetoothd treat the
+        // trackpad's pairing request as unsolicited and show its own "Connection Request" dialog
+        // (hardware 2026-11-15, after devices began connecting alongside each other). So no
+        // connect while another device pairs: a soft failure, retried in a few seconds.
+        if let other = activePairings.keys.first(where: { $0 != key }) {
+            Log.bluetooth.debug("connect \(address): waiting for the pairing with \(other) to finish")
+            throw BTError.classified(.operationInProgress, "another device is pairing")
+        }
         let wasConnected = dev.isConnected()
         let note = wasConnected ? " (already connected; reopening for a clean connect)" : ""
         Log.bluetooth.debug("openConnection \(address) (async)…\(note)")

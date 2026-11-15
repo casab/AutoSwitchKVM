@@ -162,6 +162,26 @@ controller** (the operations in §5). It owns no platform APIs directly.
   arrival or connect. On hardware a K380 that was off took five ~12 s connect tries, and the
   speaker after it in the list was never tried before the KVM left again (Mac, 2026-11-15);
   on Windows it waited 59 s.
+  **macOS: no Classic connect while another device's pairing ceremony runs** (it fails soft and
+  is retried). bluetoothd keeps one "this app requested pairing" flag per app, and each connect
+  request resets it; a speaker connect during the trackpad's pairing made bluetoothd show its own
+  "Connection Request" dialog for the trackpad (hardware 2026-11-15).
+- **A device that doesn't answer goes last and is tried slowly** (macOS 2026-11-15; Windows
+  pending). The macOS Bluetooth stack pages one device at a time (bluetoothd queues the rest), and
+  a page to a device that is asleep or off holds that queue ~12 s; a K380 untouched for days kept
+  a speaker that was ready ~15 s late. Rules, for devices with `managePairing` off:
+  - Count each device's consecutive unanswered tries (page timeouts) this session; reset when it
+    connects by any path.
+  - Before each try, a device with a count > 0 waits until no device with a lower count is
+    connecting (channel switchers waiting to come over don't count: they use no radio). So on the
+    next switch the sleeping device goes after the ones that answered.
+  - From 2 in a row: **slow mode**. Further failures don't spend `connectRetryMax` and are logged
+    at debug; the device is tried every ~30 s (still only when nobody with a lower count is
+    connecting) until it connects or the KVM leaves. Status "Disconnected", not an error, and no
+    "gave up" notice. Logged once: "doesn't answer (asleep or switched off?) …".
+  - While waiting, poll the link (~0.5 s): a keyboard that wakes up reconnects by itself, and a
+    channel switcher woken on the other host's channel is sent over by that host. Either way it
+    counts as connected at once ("connected by itself"), not at its next try.
 - Apply `connectDelayMs` first (stagger), re-checking cancellation after the wait.
 - **A known type 5 device is waited for, not connected** (§5a; macOS 2026-11-13). The other
   host's AutoSwitch sends it here, and it connects by itself. A host that calls it meanwhile gets

@@ -411,6 +411,72 @@ final class ChannelSwitchTests: XCTestCase {
         await run.value
     }
 
+    // MARK: - A device that doesn't answer (hardware 2026-11-15: a K380 asleep for days)
+
+    private let speaker = "f4-2b-7d-12-c8-21"
+    private let pageTimeout = BTError.connectFailed(Int32(bitPattern: 0xE000_02D6))  // kIOReturnTimeout
+
+    private func makeSleepingK380() -> Fixture {
+        let f = make(
+            supported: false,
+            more: [BTDevice(name: "Speaker", address: speaker, managePairing: false, connectDelayMs: 0)])
+        f.bt.connectErrorFor[addr] = pageTimeout
+        f.engine.unansweredRetryMs = 2000
+        f.engine.unansweredPollMs = 500
+        return f
+    }
+
+    private func connects(_ f: Fixture, from index: Int = 0) -> [String] {
+        f.bt.calls.dropFirst(index).filter { $0.hasPrefix("connect:") }
+    }
+
+    /// It doesn't spend the retry budget and give up: it keeps being tried, slowly, until the KVM
+    /// leaves. Next time it goes after the devices that answered.
+    func testADeviceThatDoesntAnswerIsTriedSlowlyAndGoesLastNextTime() async {
+        let f = makeSleepingK380()
+        var sleeps = 0
+        f.engine.sleepHook = { [engine = f.engine] _ in
+            sleeps += 1
+            if sleeps == 400 { engine.handleUSB((vendorID: 0x05E3, productID: 0x0626, added: false)) }
+            await Task.yield()
+        }
+        await arrive(f)
+        let k380Tries = connects(f).filter { $0 == "connect:\(addr)" }.count
+        XCTAssertGreaterThan(k380Tries, f.store.config.connectRetryMax, "never gave up")
+        if case .error(let m) = f.engine.statuses[f.device.id] { XCTFail("gave up: \(m)") }
+        await f.engine.evaluateNow()  // the KVM left
+        await settle()
+
+        sleeps = -100_000  // no more leaving
+        let before = f.bt.calls.count
+        await arrive(f)
+        XCTAssertEqual(connects(f, from: before).first, "connect:\(speaker)", "\(connects(f, from: before))")
+    }
+
+    /// Asleep, then woken up after the switch: connected as soon as it shows up, without waiting
+    /// for its next try.
+    func testASleepingDeviceThatWakesUpIsConnectedAtOnce() async {
+        let f = makeSleepingK380()
+        f.engine.unansweredRetryMs = 3_600_000  // its next try would be in an hour
+        var woke = false
+        var waitsAfterWaking = 0
+        f.engine.sleepHook = { [bt = f.bt, addr] _ in
+            if woke { waitsAfterWaking += 1 }
+            if !woke, bt.calls.filter({ $0 == "connect:\(addr)" }).count >= 2 {
+                woke = true  // the user touches it
+                bt.connectErrorFor[addr] = nil
+                bt.preset(paired: true, connected: true, addr)
+            }
+            await Task.yield()
+        }
+        await arrive(f)
+        XCTAssertTrue(woke)
+        XCTAssertEqual(f.engine.statuses[f.device.id], .connected)
+        XCTAssertLessThan(waitsAfterWaking, 5, "noticed at once, not at its next try")
+        XCTAssertEqual(f.bt.calls.filter { $0 == "connect:\(addr)" }.count, 2, "not paged again: \(f.bt.calls)")
+        XCTAssertEqual(f.engine.statuses[f.store.config.devices[1].id], .connected)
+    }
+
     // MARK: - Late release timing (hardware 2026-11-13: the query 7 ms after the connection was too early)
 
     /// It lands while the KVM is away, but its control channel needs a moment: keep asking.

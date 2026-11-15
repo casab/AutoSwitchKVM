@@ -16,6 +16,12 @@ GitHub release (and from there into the in-app update notes).
   (keyboards, speakers, headphones) connect at the same time. A switched-off K380 had kept a
   Bluetooth speaker waiting, on the Mac until the KVM left again.
 
+### macOS
+
+- A device that's asleep or switched off (say, a keyboard you haven't touched for days) no longer
+  delays the others: the devices that answer connect first, and it connects as soon as you wake
+  it up. AutoSwitch keeps trying it every 30 seconds instead of giving up with an error.
+
 ### Windows
 
 - Bluetooth headphones and speakers can follow the KVM (being tested): AutoSwitch disconnects

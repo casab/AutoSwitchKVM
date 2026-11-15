@@ -306,6 +306,17 @@ the new profile but does not force-disconnect the previous profile's devices.
 - **Connect order** (`connectAll`): only `managePairing` devices go one at a time; every other
   device runs in its own task alongside. A K380 that was off (five ~12 s page timeouts) kept a
   speaker later in the list from ever being tried (hardware 2026-11-15; spec §3, same on Windows).
+  **But no Classic `openConnection` while another device pairs** (`IOBluetoothController.connect`
+  throws soft `operationInProgress`): every connect request resets bluetoothd's per-app
+  `didRequestPairing` flag, and the trackpad's pairing request then got the system's "Connection
+  Request" dialog. In the unified log: "Setting didRequestPairing for Application … to 0" between
+  the pair start and "CBClassicSession::pairingRequested: Resetting didRequestPairing".
+  **A device that doesn't answer goes last** (spec §3 Connect flow): `unansweredTries` (page
+  timeouts in a row, cleared in `setStatus(.connected)`), `waitForTurn` before each try (waits for
+  devices with a lower count that are `.connecting` and busy, except `arrivalWaits`; polls the link
+  so a woken device counts at once), and slow mode from `unansweredSlowAfter` (2): no retry budget,
+  every `unansweredRetryMs` (30 s), status `.disconnected`. bluetoothd pages one device at a time
+  ("Queued up connection request - queue size is 2" in the unified log).
 - **Release order:** devices without `managePairing` first (`releaseOrder`), so an unpair never
   holds back a keyboard the other computer is waiting for (spec §3, same on Windows).
 - **Fast switch-back:** an automatic release stops as soon as the source is back
