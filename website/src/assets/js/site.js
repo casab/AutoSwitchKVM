@@ -13,6 +13,13 @@
     group.prepend(win);
   });
 
+  // ---------- Phone menu: close it after a tap on a link, or a tap outside ----------
+  const menu = document.querySelector("[data-navmenu]");
+  if (menu) {
+    menu.querySelectorAll("a").forEach((a) => a.addEventListener("click", () => menu.removeAttribute("open")));
+    document.addEventListener("click", (e) => { if (menu.open && !menu.contains(e.target)) menu.removeAttribute("open"); });
+  }
+
   // ---------- The desk demo ----------
   const demo = document.querySelector("[data-demo]");
   if (!demo) return;
@@ -37,7 +44,7 @@
     kvm.classList.add("is-pressed");
     later(140, () => kvm.classList.remove("is-pressed"));
     demo.classList.remove("is-paired");
-    status.textContent = `The ${names[from]} lets go of the trackpad and keyboard…`;
+    status.textContent = `The ${names[from]} lets go of your devices…`;
 
     later(450, () => {
       buddies.forEach((b) => {
@@ -49,9 +56,9 @@
       status.textContent = `…and they hop over to the ${names[target]}…`;
     });
 
-    later(1750, () => {
+    later(1900, () => {
       demo.classList.add("is-paired");
-      status.textContent = `Paired! They work with the ${names[target]} now.`;
+      status.textContent = `Connected! All set on the ${names[target]} now.`;
       busy = false;
     });
     later(3200, () => demo.classList.remove("is-paired"));

@@ -5,12 +5,12 @@ layout: base.njk
 <section class="hero">
   <div class="wrap hero__inner">
     <div class="hero__copy">
-      <p class="eyebrow">For one desk, two computers, and a KVM switch</p>
+      <p class="eyebrow">Free for Mac and Windows</p>
       <h1><span class="nowrap">Press the KVM button.</span><br><span class="hl nowrap">Your devices follow.</span></h1>
       <p class="lead">
-        AutoSwitch KVM moves your Bluetooth keyboard, mouse, trackpad and speakers to whichever computer your
-        KVM switch picks. Apple Magic accessories, Logitech Easy-Switch keyboards and mice, ZMK keyboards, headphones and more.
-        No Bluetooth settings. No re-pairing. No channel keys. You just switch.
+        Your KVM switch moves the screen and the USB devices. AutoSwitch KVM moves your
+        <strong>Bluetooth</strong> keyboard, mouse, trackpad and headphones along with it.
+        No Bluetooth settings, no re-pairing, no channel keys.
       </p>
       <div class="cta" data-downloads>
         <a class="btn btn--primary" data-os="mac" href="{{ site.download.mac }}">
@@ -22,7 +22,7 @@ layout: base.njk
           Download for Windows
         </a>
       </div>
-      <p class="fineprint">Free · macOS 13+ · Windows 10 &amp; 11 · No account, no tracking</p>
+      <p class="fineprint">macOS 13+ · Windows 10 &amp; 11 · No account, no tracking</p>
     </div>
 
     {# The interactive desk. site.js runs it; without JS it shows the Mac side, still and cute. #}
@@ -70,7 +70,8 @@ layout: base.njk
           </svg>
         </div>
 
-        {# The buddies: the trackpad leads, the keyboard follows a beat later. #}
+        {# The buddies: the trackpad leads, the keyboard follows a beat later, and the headphones
+           hop off the top of one monitor onto the other. #}
         <div class="buddy buddy--trackpad">
           <div class="buddy__hop">
             <svg viewBox="0 0 90 70" aria-hidden="true">
@@ -98,8 +99,22 @@ layout: base.njk
           </div>
           <span class="buddy__name">Keyboard</span>
         </div>
+        <div class="buddy buddy--headphones">
+          <div class="buddy__hop">
+            <svg viewBox="0 0 100 92" aria-hidden="true">
+              <path class="buddy__band buddy__band--edge" d="M19 56V46a31 31 0 0 1 62 0v10"/>
+              <path class="buddy__band" d="M19 56V46a31 31 0 0 1 62 0v10"/>
+              <rect class="buddy__shape" x="5" y="48" width="28" height="38" rx="11"/>
+              <rect class="buddy__shape" x="67" y="48" width="28" height="38" rx="11"/>
+              <g class="buddy__eyes"><circle cx="19" cy="63" r="4.2"/><circle cx="81" cy="63" r="4.2"/></g>
+              <circle class="buddy__blush" cx="19" cy="75" r="4"/><circle class="buddy__blush" cx="81" cy="75" r="4"/>
+            </svg>
+            <span class="notes" aria-hidden="true"><i>♪</i><i>♫</i></span>
+          </div>
+          <span class="buddy__name">Headphones</span>
+        </div>
 
-        <div class="bubble" aria-hidden="true">paired!</div>
+        <div class="bubble" aria-hidden="true">connected!</div>
 
         <button class="kvm" type="button" data-kvm aria-label="Press the KVM switch">
           <span class="kvm__led kvm__led--mac"></span>
@@ -110,206 +125,210 @@ layout: base.njk
       </div>
       <figcaption>
         <span class="demo__hint">Go on, press the KVM button.</span>
-        <span class="demo__status" data-status aria-live="polite">The trackpad and keyboard are with the Mac.</span>
+        <span class="demo__status" data-status aria-live="polite">Your devices are with the Mac.</span>
       </figcaption>
     </figure>
   </div>
 </section>
 
-{# ---------- Works with ---------- #}
-<section class="section works" id="works">
+{# ---------- How it works ---------- #}
+<section class="section section--tint" id="how">
   <div class="wrap">
-    <p class="eyebrow">Works with</p>
-    <h2>Three kinds of devices, three ways to switch</h2>
-    <ul class="works__list">
-      <li class="works__item">
+    <div class="section__head">
+      <p class="eyebrow">How it works</p>
+      <h2>You switch. AutoSwitch does the rest.</h2>
+      <p class="section__lead">
+        A KVM switch shares one desk between two computers. Wired things follow it; Bluetooth
+        things stay behind. AutoSwitch runs quietly on both computers and closes that gap.
+      </p>
+    </div>
+    <ol class="flow">
+      <li>
+        <span class="flow__icon"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="9" rx="3"/><circle cx="12" cy="12.5" r="2.2"/><path d="M7 12.5h.01M17 12.5h.01"/></svg></span>
+        <h3>You press the KVM button</h3>
+        <p>Like always. The KVM moves your screen and USB devices to the other computer.</p>
+      </li>
+      <li>
+        <span class="flow__icon"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/></svg></span>
+        <h3>AutoSwitch notices</h3>
+        <p>It watches the USB hub inside your KVM, so each computer knows whether it was picked.</p>
+      </li>
+      <li>
+        <span class="flow__icon"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12h13m0 0-4-4m4 4-4 4"/><path d="M20 6v12"/></svg></span>
+        <h3>Your Bluetooth devices follow</h3>
+        <p>The computer you leave lets go, the one you picked takes over. A few seconds, nothing to click.</p>
+      </li>
+    </ol>
+    <div class="compare">
+      <div class="compare__side compare__side--before">
+        <h3>Without it, every switch</h3>
+        <ol>
+          <li>Open Bluetooth settings</li>
+          <li>Forget the trackpad</li>
+          <li>Pair it on the other computer</li>
+          <li>Press the channel key on the keyboard, reconnect the headphones…</li>
+        </ol>
+      </div>
+      <div class="compare__side compare__side--after">
+        <h3>With AutoSwitch</h3>
+        <p class="compare__big">Press the KVM button.</p>
+        <p>That's it. A small panel shows each device arriving, then gets out of the way.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+{# ---------- Works with ---------- #}
+<section class="section" id="works">
+  <div class="wrap">
+    <div class="section__head">
+      <p class="eyebrow">Works with</p>
+      <h2>The devices on your desk</h2>
+      <p class="section__lead">Each kind of device switches its own way. AutoSwitch knows which, and does the right thing.</p>
+    </div>
+    <ul class="devices">
+      <li class="device">
+        <svg class="device__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="7" y="9" width="34" height="30" rx="6"/><path d="M7 31h34"/></svg>
         <h3>Apple Magic Trackpad, Keyboard &amp; Mouse</h3>
-        <p>
-          They only pair with one computer at a time. AutoSwitch removes the pairing on the computer
-          you leave and pairs again on the one you arrive at, in a few seconds.
-        </p>
-        <p class="works__how">Hands off by pairing<br>Mac ✓ · Windows ✓</p>
+        <p>They pair with one computer at a time. AutoSwitch unpairs on the way out and pairs on the way in.</p>
+        <p class="device__os"><span>Mac ✓</span><span>Windows ✓</span></p>
       </li>
-      <li class="works__item">
-        <h3>Logitech Easy-Switch &amp; ZMK keyboards</h3>
-        <p>
-          The K380 and other Easy-Switch devices keep a channel per computer, and so does a ZMK
-          keyboard with the free <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> firmware module.
-          AutoSwitch tells the device to hop to the other computer's channel, and finds that
-          channel by itself.
-        </p>
-        <p class="works__how">Switches channel on request<br>Mac ✓ · Windows ✓</p>
+      <li class="device">
+        <svg class="device__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="4" y="15" width="40" height="20" rx="5"/><path d="M11 22h0M17 22h0M23 22h0M29 22h0M35 22h0M14 28h20"/><path d="M33 6l4 4-4 4M37 10H27"/></svg>
+        <h3>Logitech Easy-Switch</h3>
+        <p>K380, MX keyboards and mice keep a channel per computer. AutoSwitch tells them to hop to the other one.</p>
+        <p class="device__os"><span>Mac ✓</span><span>Windows ✓</span></p>
       </li>
-      <li class="works__item">
+      <li class="device">
+        <svg class="device__icon" aria-hidden="true" viewBox="0 0 48 48"><rect x="4" y="15" width="40" height="20" rx="5"/><path d="M11 22h0M17 22h0M23 22h0M29 22h0M35 22h0M14 28h20"/><path d="M18 9l6-4 6 4"/></svg>
+        <h3>ZMK keyboards</h3>
+        <p>With the free <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> module, their Bluetooth profiles switch the same way.</p>
+        <p class="device__os"><span>Mac ✓</span><span>Windows ✓</span></p>
+      </li>
+      <li class="device">
+        <svg class="device__icon" aria-hidden="true" viewBox="0 0 48 48"><path d="M9 30v-6a15 15 0 0 1 30 0v6"/><rect x="6" y="28" width="8" height="12" rx="3"/><rect x="34" y="28" width="8" height="12" rx="3"/></svg>
         <h3>Headphones &amp; speakers</h3>
-        <p>
-          Most remember several computers and go to the one that asks. AutoSwitch disconnects them
-          from the computer you leave, keeping the pairing, and connects them on the one you arrive at.
-        </p>
-        <p class="works__how">Joins whichever computer connects<br>Mac ✓ · Windows ✓</p>
-      </li>
-      <li class="works__item works__item--other">
-        <h3>Everything else</h3>
-        <p>
-          Game controllers and the rest: AutoSwitch tells you what's possible for each
-          one, shows its status, and points you to the easy fixes (like a USB adapter on the KVM).
-        </p>
-        <p class="works__how"><a href="/devices/">See the device guide →</a></p>
+        <p>Most join whichever computer asks. AutoSwitch disconnects them on one and connects them on the other.</p>
+        <p class="device__os"><span>Mac ✓</span><span>Windows ✓</span></p>
       </li>
     </ul>
-  </div>
-</section>
-
-{# ---------- The problem ---------- #}
-<section class="section section--tint" id="problem">
-  <div class="wrap">
-    <p class="eyebrow">The problem</p>
-    <h2>The Bluetooth shuffle</h2>
-    <p class="section__lead">
-      A KVM switch shares your monitor, keyboard and mouse between two computers. Plugged-in things
-      switch along. Bluetooth things <em>don't</em>. Some only pair with one computer at a time (hello,
-      Magic Trackpad); others want you to press a channel key on every single device. So every
-      switch goes something like this:
+    <p class="devices__more">
+      Game controllers, other keyboards? AutoSwitch tells you what's possible for each device.
+      <a href="/devices/">See the device guide →</a>
     </p>
-    <ol class="shuffle">
-      <li>
-        <span class="shuffle__num">1</span>
-        <h3>Open Bluetooth settings</h3>
-        <p>On the computer you're leaving. Find your trackpad, keyboard or mouse in the list.</p>
-      </li>
-      <li>
-        <span class="shuffle__num">2</span>
-        <h3>Forget the device</h3>
-        <p>"Are you sure?" Yes. It's fine. It's not personal.</p>
-      </li>
-      <li>
-        <span class="shuffle__num">3</span>
-        <h3>Pair it on the other one</h3>
-        <p>Search. Wait. Click it. Wait some more. Hold your breath.</p>
-      </li>
-      <li>
-        <span class="shuffle__num">4</span>
-        <h3>Repeat after lunch</h3>
-        <p>And again before your 3 pm call. Forever.</p>
-      </li>
-    </ol>
-    <p class="punchline">AutoSwitch KVM does the shuffle for you. Every single time. In a few seconds.</p>
   </div>
 </section>
 
-{# ---------- How it works ---------- #}
-<section class="section" id="how">
-  <div class="wrap">
-    <p class="eyebrow">How it works</p>
-    <h2>Set it up once. Then forget it exists.</h2>
-    <ol class="steps">
-      <li>
-        <span class="steps__badge">1</span>
-        <h3>Install it on both computers</h3>
-        <p>The one being left lets go of your devices, so the other one can grab them. Teamwork.</p>
-      </li>
-      <li>
-        <span class="steps__badge">2</span>
-        <h3>Show it your KVM</h3>
-        <p>
-          Press <em>Learn</em>, switch the KVM away and back. AutoSwitch notices which USB gadget
-          comes and goes with the switch, and that's how it knows which computer is in charge.
-        </p>
-      </li>
-      <li>
-        <span class="steps__badge">3</span>
-        <h3>Pick your devices</h3>
-        <p>Keyboard, mouse, trackpad. AutoSwitch tells you which ones it can switch, and you choose the order.</p>
-      </li>
-    </ol>
-
+{# ---------- Set up ---------- #}
+<section class="section section--tint" id="setup">
+  <div class="wrap setup">
+    <div class="setup__copy">
+      <p class="eyebrow">Set up</p>
+      <h2>Two minutes, once</h2>
+      <ol class="steps">
+        <li>
+          <span class="steps__badge">1</span>
+          <div>
+            <h3>Install it on both computers</h3>
+            <p>The computer you leave lets go of your devices, so the other one can take them.</p>
+          </div>
+        </li>
+        <li>
+          <span class="steps__badge">2</span>
+          <div>
+            <h3>Show it your KVM</h3>
+            <p>Press <em>Learn</em>, then switch the KVM away and back. AutoSwitch spots the USB device that comes and goes.</p>
+          </div>
+        </li>
+        <li>
+          <span class="steps__badge">3</span>
+          <div>
+            <h3>Add your devices</h3>
+            <p>Pick them from the list. AutoSwitch tells you how each one switches and sets it up to match.</p>
+          </div>
+        </li>
+      </ol>
+    </div>
     <div class="shots">
       <figure class="shot">
         <img src="/assets/img/mac-panel.png" alt="AutoSwitch KVM in the macOS menu bar: three devices, two connected, one connecting" width="300" height="319" loading="lazy">
-        <figcaption>On the Mac, it lives in the menu bar.</figcaption>
+        <figcaption>Mac: in the menu bar</figcaption>
       </figure>
       <figure class="shot">
         <img src="/assets/img/windows-panel.png" alt="AutoSwitch KVM in the Windows tray: three devices, two connected, one connecting" width="312" height="323" loading="lazy">
-        <figcaption>On Windows, it lives in the tray.</figcaption>
+        <figcaption>Windows: in the tray</figcaption>
       </figure>
     </div>
   </div>
 </section>
 
 {# ---------- Features ---------- #}
-<section class="section section--tint" id="features">
+<section class="section" id="features">
   <div class="wrap">
-    <p class="eyebrow">The good stuff</p>
-    <h2>Small app. Big sigh of relief.</h2>
+    <div class="section__head">
+      <p class="eyebrow">The good stuff</p>
+      <h2>Small app, big sigh of relief</h2>
+    </div>
     <ul class="features">
       <li>
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12h12m0 0-4-4m4 4-4 4M20 5v14"/></svg>
-        <h3>Hands-off switching</h3>
-        <p>Devices connect when your computer is picked and step aside when it isn't. Nothing to click, and one click to pause.</p>
-      </li>
-      <li>
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>
-        <h3>Handles the loyal ones</h3>
-        <p>Some devices only love one computer at a time. AutoSwitch unpairs on the way out and pairs on the way in.</p>
+        <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="12" rx="3"/><path d="M8 10h8M8 13h5M9 21h6"/></svg>
+        <div><h3>Tells you, quietly</h3><p>A small panel shows each device arriving, then hides. No pings, no pile of notifications.</p></div>
       </li>
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 18h14M7 14h10M9 10h6M11 6h2"/></svg>
-        <h3>Brings the whole gang</h3>
-        <p>Keyboard, mouse, trackpad: several devices at once, in your order, with profiles like "Desk" and "Travel".</p>
+        <div><h3>The whole desk at once</h3><p>Keyboard, mouse, trackpad, headphones, with profiles like "Desk" and "Travel".</p></div>
       </li>
       <li>
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
-        <h3>Speaks Easy-Switch</h3>
-        <p>Logitech keyboards and mice, and ZMK keyboards with zmk-autoswitch, change channel when AutoSwitch asks. It even shows which computer is on which channel, and leaves a keyboard you switched by hand where you put it.</p>
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 11V7a2 2 0 1 1 4 0v4m0-1V5a2 2 0 1 1 4 0v6m0-2a2 2 0 1 1 4 0v4a7 7 0 0 1-14 0v-2a2 2 0 1 1 4 0"/></svg>
+        <div><h3>Respects your hands</h3><p>Switched a keyboard yourself with its own key? AutoSwitch leaves it where you put it.</p></div>
       </li>
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
-        <h3>Naps when you nap</h3>
-        <p>Your computer goes to sleep, your devices are released. It wakes, everything catches up.</p>
+        <div><h3>Naps when you nap</h3><p>Devices are released when the computer sleeps. A sleeping keyboard never holds up the rest.</p></div>
       </li>
       <li>
-        <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="12" rx="3"/><path d="M8 10h8M8 13h5M9 21h6"/></svg>
-        <h3>Tells you, quietly</h3>
-        <p>While the KVM switches, a small panel shows each device connecting and arriving, then gets out of the way. No pings, no pile of notifications.</p>
-      </li>
-      <li>
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>
-        <h3>Keeps itself fresh</h3>
-        <p>Updates download quietly in the background. Restart when it suits you.</p>
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></svg>
+        <div><h3>Pause any time</h3><p>One click to pause, Connect all and Release all buttons, optional keyboard shortcuts.</p></div>
       </li>
       <li>
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/></svg>
-        <h3>Minds its own business</h3>
-        <p>No account, no analytics. The only thing it talks to is GitHub, to check for updates.</p>
+        <div><h3>Minds its own business</h3><p>No account, no analytics. It only talks to GitHub, to check for updates, which install themselves.</p></div>
       </li>
     </ul>
   </div>
 </section>
 
 {# ---------- Download ---------- #}
-<section class="section" id="download">
+<section class="section section--tint" id="download">
   <div class="wrap">
-    <p class="eyebrow">Download</p>
-    <h2>Free. For both of your computers.</h2>
+    <div class="section__head">
+      <p class="eyebrow">Download</p>
+      <h2>Free, for both of your computers</h2>
+    </div>
     <div class="downloads">
       <article class="dl">
         <h3>macOS</h3>
         <p class="dl__req">macOS 13 Ventura or later · Apple silicon &amp; Intel</p>
-        <a class="btn btn--primary" href="{{ site.download.mac }}">Download for Mac</a>
+        <a class="btn btn--primary" href="{{ site.download.mac }}">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14"/></svg>
+          Download for Mac
+        </a>
         <p class="dl__note">
-          Open the DMG and drag AutoSwitch KVM into Applications. The first launch gets blocked
-          (we haven't bought Apple's fancy certificate yet): go to <strong>System Settings ▸
-          Privacy &amp; Security</strong> and click <strong>Open Anyway</strong>. Then allow
-          Bluetooth when it asks: without it, AutoSwitch can't reach your devices.
+          Open the DMG and drag AutoSwitch KVM into Applications. The first launch is blocked
+          (no paid Apple certificate yet): go to <strong>System Settings ▸ Privacy &amp; Security</strong>
+          and click <strong>Open Anyway</strong>. Then allow Bluetooth when it asks.
         </p>
       </article>
       <article class="dl">
         <h3>Windows</h3>
         <p class="dl__req">Windows 10 (1809+) or 11 · x64 · <a href="{{ site.download.windowsArm }}">ARM64 here</a></p>
-        <a class="btn btn--primary" href="{{ site.download.windows }}">Download for Windows</a>
+        <a class="btn btn--primary" href="{{ site.download.windows }}">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14"/></svg>
+          Download for Windows
+        </a>
         <p class="dl__note">
           Run the installer, no admin needed. If SmartScreen says "Windows protected your PC",
-          click <strong>More info ▸ Run anyway</strong> (same story: no fancy certificate yet).
+          click <strong>More info ▸ Run anyway</strong> (same story: no paid certificate yet).
         </p>
       </article>
     </div>
@@ -318,17 +337,19 @@ layout: base.njk
 </section>
 
 {# ---------- FAQ ---------- #}
-<section class="section section--tint" id="faq">
+<section class="section" id="faq">
   <div class="wrap wrap--narrow">
-    <p class="eyebrow">Questions</p>
-    <h2>Good to know</h2>
+    <div class="section__head">
+      <p class="eyebrow">Questions</p>
+      <h2>Good to know</h2>
+    </div>
     <div class="faq">
       <details>
-        <summary>Do I really need it on both computers?</summary>
+        <summary>Do I need it on both computers?</summary>
         <p>
-          Yes. A device like the Magic Trackpad can only be paired with one computer at a time, so the
-          computer you're leaving has to let go before the other one can pair. Each copy handles its
-          own side of that handoff.
+          Yes. A Magic Trackpad can only be paired with one computer at a time, so the computer
+          you're leaving has to let go before the other one can pair. Each copy handles its own
+          side of that handoff.
         </p>
       </details>
       <details>
@@ -342,14 +363,10 @@ layout: base.njk
       <details>
         <summary>Which Bluetooth devices work?</summary>
         <p>
-          Devices that hold one pairing and accept the next computer once released, like the Apple
-          Magic Trackpad, Keyboard and Mouse: those switch automatically, and so do Logitech
-          Easy-Switch devices like the K380 and ZMK keyboards with the
-          <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a> module. Most headphones and speakers
-          switch too: AutoSwitch disconnects them on one computer and connects them on the other.
-          Game controllers can't be switched by any app;
-          AutoSwitch tells you so when you add one, and shows their status.
-          <a href="/devices/">The device guide</a> explains all four kinds.
+          Apple Magic Trackpad, Keyboard and Mouse; Logitech Easy-Switch keyboards and mice like the
+          K380; ZMK keyboards with the <a href="https://github.com/casab/zmk-autoswitch">zmk-autoswitch</a>
+          module; and most headphones and speakers. Game controllers can't be switched by any app;
+          AutoSwitch tells you so when you add one. <a href="/devices/">The device guide</a> has the details.
         </p>
       </details>
       <details>
@@ -382,7 +399,6 @@ layout: base.njk
 <section class="finale">
   <div class="wrap finale__inner">
     <h2>Go on. Switch something.</h2>
-    <p>Your keyboard, mouse and trackpad are ready to follow you around.</p>
-    <a class="btn btn--primary btn--big" href="#download">Get AutoSwitch KVM</a>
+    <a class="btn btn--big" href="#download">Get AutoSwitch KVM</a>
   </div>
 </section>
