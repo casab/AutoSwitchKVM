@@ -91,6 +91,9 @@ final class SelectionEngine: ObservableObject {
     var unansweredSlowAfter = 2
     var unansweredRetryMs = 30_000
     var unansweredPollMs = 500
+    /// Page timeout for a device that didn't answer last time (the system default holds the radio
+    /// ~12-15 s per try, and the radio sets up one connection at a time).
+    var unansweredPageTimeoutMs = 3000
     /// Delay before retrying a failed unpair during a release.
     var releaseRetryDelayMs = 1000
     /// Settle time after dropping the transient post-pair connection.
@@ -750,10 +753,14 @@ final class SelectionEngine: ObservableObject {
         // itself, and a slow pair (17 s on hardware) mustn't keep it waiting in line; a device
         // that doesn't answer (a K380 that is off: five 12 s tries) mustn't keep a speaker waiting
         // until the KVM leaves again (hardware 2026-11-15; Windows does the same).
+        // Announce who will need the radio, so the first device to ask doesn't take it from a
+        // better one whose task hasn't started yet.
+        for device in devices where bt.pagesToConnect(device.normalizedAddress) && !switchesChannels(device) {
+            radio.expect(device.id, priority: device.managePairing ? 0 : 1 + (unansweredTries[device.id] ?? 0))
+        }
         var waits: [Task<Void, Never>] = []
         for device in devices where !device.managePairing {
             markBusy(device.id)
-            setStatus(device.id, .connecting)  // now, so a device that waits its turn sees them all
             waits.append(
                 Task { @MainActor [weak self] in
                     guard let self else { return }
@@ -770,6 +777,7 @@ final class SelectionEngine: ObservableObject {
             defer { clearBusy(device.id) }
             await connectOne(device, run: run, respectSelection: true)
         }
+        for device in devices where device.managePairing { radio.forget(device.id) }  // e.g. the run stopped
         for wait in waits { await wait.value }
     }
 
@@ -789,6 +797,10 @@ final class SelectionEngine: ObservableObject {
         let maxHard = max(1, cfg.connectRetryMax)
         let start = ContinuousClock.now
         releaseRequested.remove(device.id)
+        defer {  // whatever way a try ends
+            radio.release(device.id)
+            radio.forget(device.id)
+        }
 
         Log.engine.debug(
             "\(name): connect started (run #\(run.token), \(run.trigger); managePairing=\(device.managePairing))")
@@ -811,8 +823,7 @@ final class SelectionEngine: ObservableObject {
         // A device that answers the channel query is one, even before it was seen this session.
         if !device.managePairing, !switchesChannels(device) { _ = await isOnOwnChannel(device) }
         if switchesChannels(device) {
-            arrivalWaits.insert(device.id)  // uses no radio: doesn't hold the others up
-            defer { arrivalWaits.remove(device.id) }
+            radio.forget(device.id)  // its wait uses no radio
             await waitForChannelArrival(device, run: run, respectSelection: respectSelection, start: start)
             return
         }
@@ -843,6 +854,16 @@ final class SelectionEngine: ObservableObject {
                     markAborted(device.id)
                     return
                 }
+            }
+            // Spec §3 Connect flow "Order" (macOS): the radio sets up one Classic connection at a
+            // time, so the app queues them itself: pairing devices first, then devices that
+            // answered, then those that didn't. Held for the whole try (pair, connect, HID check).
+            if bt.pagesToConnect(addr) {
+                let priority = device.managePairing ? 0 : 1 + (unansweredTries[device.id] ?? 0)
+                if !radio.isFree {
+                    Log.engine.debug("\(name): waiting for the radio (priority \(priority))")
+                }
+                await radio.acquire(device.id, priority: priority)
             }
             if !bluetoothPowered {
                 Log.engine.debug("\(name): connect stopped: Bluetooth is off")
@@ -914,7 +935,10 @@ final class SelectionEngine: ObservableObject {
                 }
                 if !hidOnPairingLink {
                     step = "connect"
-                    try await self.step(name, tries, "openConnection") { try await self.bt.connect(addr) }
+                    let pageTimeout = (unansweredTries[device.id] ?? 0) > 0 ? unansweredPageTimeoutMs : nil
+                    try await self.step(name, tries, "openConnection") {
+                        try await self.bt.connect(addr, pageTimeoutMs: pageTimeout)
+                    }
                     step = "verify"
                     // A clean connect is necessary but not sufficient: isConnected must agree.
                     if !(await bt.isConnected(addr)) {
@@ -939,6 +963,7 @@ final class SelectionEngine: ObservableObject {
             if failure == nil, let hidUp = await waitForHID(device, addr), !hidUp {
                 failure = Failure(BTError.hidNotReady(seconds: Double(hidReadyTimeoutMs) / 1000))
             }
+            radio.release(device.id)  // the setup is over; backoffs and cleanup don't need the radio
 
             guard let f = failure else {
                 // Connected. If a release was requested meanwhile (source left, sleep, manual
@@ -1052,37 +1077,27 @@ final class SelectionEngine: ObservableObject {
     private var unansweredTries: [UUID: Int] = [:]
     /// Devices in slow mode (logged once per stretch).
     private var slowDevices = Set<UUID>()
-    /// Channel switchers waiting to come over: they use no radio.
-    private var arrivalWaits = Set<UUID>()
 
     private enum Turn { case go, connectedByItself, stale(String) }
 
-    /// Wait until no device that answered more recently is connecting (the Bluetooth stack pages
-    /// one device at a time, and a page to a sleeping device holds the others ~12 s), and in slow
-    /// mode at least `unansweredRetryMs` since the last try. Meanwhile, watch for the device
-    /// connecting by itself (a keyboard reconnects when it wakes up).
+    /// In slow mode, wait `unansweredRetryMs` before the next try; meanwhile watch for the device
+    /// connecting by itself (a keyboard reconnects when it wakes up), so it counts at once.
     private func waitForTurn(_ device: BTDevice, run: Run, respectSelection: Bool, slowWait: Bool) async -> Turn {
         let addr = device.normalizedAddress
-        let mine = unansweredTries[device.id] ?? 0
         let interval = max(1, unansweredPollMs)
-        var minPolls = slowWait ? max(0, unansweredRetryMs / interval) : 0
-        var announced = false
+        var polls = slowWait ? max(0, unansweredRetryMs / interval) : 0
         while true {
             if let why = staleReason(run, respectSelection: respectSelection) { return .stale(why) }
             if await bt.isConnected(addr), await bt.isHIDReady(addr) != false { return .connectedByItself }
-            let ahead = statuses.contains { id, status in
-                id != device.id && status == .connecting && isBusy(id) && !arrivalWaits.contains(id)
-                    && (unansweredTries[id] ?? 0) < mine
-            }
-            if minPolls <= 0, !ahead { return .go }
-            if ahead, !announced, minPolls <= 0 {
-                announced = true
-                Log.engine.debug("\(device.name): didn't answer last time; letting the other devices connect first")
-            }
-            minPolls -= 1
+            if polls <= 0 { return .go }
+            polls -= 1
             await sleepHook(interval)
         }
     }
+
+    /// One Classic connection setup at a time, in priority order (lower first; ties first come,
+    /// first served). See `connectOne`.
+    let radio = RadioQueue()
 
     /// Wait (bounded) until the device's HID connection is up. Returns true/false, or nil when the
     /// backend can't tell (then the link alone counts, as before).
@@ -1702,5 +1717,62 @@ final class SelectionEngine: ObservableObject {
             guard let self, await self.bt.isConnected(device.normalizedAddress) else { return }
             self.startLateRelease(device)
         }
+    }
+}
+
+/// One Classic connection setup at a time (spec §3 Connect flow "Order", macOS): bluetoothd pages
+/// one device at a time and queues the rest in arrival order, so a page to a sleeping device held
+/// a ready speaker up, and a page still running when the trackpad's pairing started made the
+/// pairing time out (hardware 2026-11-15). Here the app decides the order: lower priority first,
+/// ties first come, first served. `expect` announces a device that will ask soon (a run's devices,
+/// before their tasks start), so the radio isn't handed to a worse one meanwhile.
+@MainActor
+final class RadioQueue {
+    private var holder: UUID?
+    private var waiters: [(id: UUID, priority: Int, seq: Int, resume: CheckedContinuation<Void, Never>)] = []
+    private var expected: [UUID: Int] = [:]
+    private var seq = 0
+
+    var isFree: Bool { holder == nil && waiters.isEmpty }
+
+    func expect(_ id: UUID, priority: Int) { expected[id] = priority }
+
+    /// The device won't ask after all (it connected, waits without the radio, or its run ended).
+    func forget(_ id: UUID) {
+        guard expected.removeValue(forKey: id) != nil else { return }
+        grantIfFree()
+    }
+
+    func acquire(_ id: UUID, priority: Int) async {
+        expected[id] = nil
+        if holder == id { return }
+        if holder == nil, !waiters.contains(where: { $0.priority <= priority }),
+            !expected.values.contains(where: { $0 < priority })
+        {
+            holder = id
+            return
+        }
+        seq += 1
+        let n = seq
+        await withCheckedContinuation { waiters.append((id, priority, n, $0)) }
+    }
+
+    /// Release the radio if `id` holds it (safe to call when it doesn't).
+    func release(_ id: UUID) {
+        guard holder == id else { return }
+        holder = nil
+        grantIfFree()
+    }
+
+    private func grantIfFree() {
+        guard holder == nil,
+            let next = waiters.indices.min(by: {
+                (waiters[$0].priority, waiters[$0].seq) < (waiters[$1].priority, waiters[$1].seq)
+            })
+        else { return }
+        if expected.values.contains(where: { $0 < waiters[next].priority }) { return }  // a better one is coming
+        let w = waiters.remove(at: next)
+        holder = w.id
+        w.resume.resume()
     }
 }

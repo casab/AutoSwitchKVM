@@ -156,29 +156,35 @@ controller** (the operations in §5). It owns no platform APIs directly.
    and macOS implemented). A removed device is forgotten and left as it is.
 
 ### Connect flow (per enabled device)
-- **Order** (Windows and macOS 2026-11-15): only `managePairing` devices connect one at a time,
-  in list order (each pair is a ceremony timed against the other host's release). Every device
-  with `managePairing` off runs **alongside** them and each other: channel query, then wait for
-  arrival or connect. On hardware a K380 that was off took five ~12 s connect tries, and the
-  speaker after it in the list was never tried before the KVM left again (Mac, 2026-11-15);
-  on Windows it waited 59 s.
-  **macOS: no Classic connect while another device's pairing ceremony runs** (it fails soft and
-  is retried). bluetoothd keeps one "this app requested pairing" flag per app, and each connect
-  request resets it; a speaker connect during the trackpad's pairing made bluetoothd show its own
-  "Connection Request" dialog for the trackpad (hardware 2026-11-15).
+- **Order** (Windows 2026-11-15; macOS revised the same day, below). Windows: only
+  `managePairing` devices connect one at a time, in list order (each pair is a ceremony timed
+  against the other host's release); every device with `managePairing` off runs **alongside**
+  them and each other (channel query, then wait for arrival or connect). On hardware a K380 that
+  was off took five ~12 s connect tries in list order and held a speaker up (59 s on Windows; on
+  the Mac the KVM left before the speaker's turn).
+- **macOS: one Classic connection setup at a time, in the app's own order** (2026-11-15). The
+  Mac's radio sets up one connection at a time: bluetoothd queues connect requests in arrival
+  order ("Queued up connection request - queue size is 2"). Running devices "alongside" made it
+  worse: a sleeping K380's pages held a ready speaker ~15 s, and a page still running when the
+  trackpad's pairing started made the pairing time out (44 s once). So the engine queues setups
+  itself (`RadioQueue`): one try at a time (pair, connect and the HID check), lower priority
+  first, ties in request order. Priority: `managePairing` devices 0; others 1 + their unanswered
+  count (below). A run announces its devices' priorities before their tasks start, so the radio
+  isn't handed to a worse device whose task happened to ask first. Channel switchers waiting to
+  come over and LE devices (which connect by themselves) don't use the queue. Also **no Classic
+  connect while another device's pairing ceremony runs** (fails soft, retried): bluetoothd keeps
+  one "this app requested pairing" flag per app, each connect request resets it, and a speaker
+  connect during the trackpad's pairing made bluetoothd show its own "Connection Request" dialog.
 - **A device that doesn't answer goes last and is tried slowly** (macOS 2026-11-15; Windows
-  pending). The macOS Bluetooth stack pages one device at a time (bluetoothd queues the rest), and
-  a page to a device that is asleep or off holds that queue ~12 s; a K380 untouched for days kept
-  a speaker that was ready ~15 s late. Rules, for devices with `managePairing` off:
+  pending). For devices with `managePairing` off:
   - Count each device's consecutive unanswered tries (page timeouts) this session; reset when it
-    connects by any path.
-  - Before each try, a device with a count > 0 waits until no device with a lower count is
-    connecting (channel switchers waiting to come over don't count: they use no radio). So on the
-    next switch the sleeping device goes after the ones that answered.
+    connects by any path. The count lowers its place in the queue (above), and with a count > 0
+    its tries use a **short page timeout** (macOS 3 s instead of the default, which holds the radio
+    ~12-15 s with bluetoothd's own retries).
   - From 2 in a row: **slow mode**. Further failures don't spend `connectRetryMax` and are logged
-    at debug; the device is tried every ~30 s (still only when nobody with a lower count is
-    connecting) until it connects or the KVM leaves. Status "Disconnected", not an error, and no
-    "gave up" notice. Logged once: "doesn't answer (asleep or switched off?) …".
+    at debug; the device is tried every ~30 s (still behind everyone else in the queue) until it
+    connects or the KVM leaves. Status "Disconnected", not an error, and no "gave up" notice.
+    Logged once: "doesn't answer (asleep or switched off?) …".
   - While waiting, poll the link (~0.5 s): a keyboard that wakes up reconnects by itself, and a
     channel switcher woken on the other host's channel is sent over by that host. Either way it
     counts as connected at once ("connected by itself"), not at its next try.

@@ -303,20 +303,22 @@ the new profile but does not force-disconnect the previous profile's devices.
   (~3.4 s) runs before the K380 switch. "Known" = it answered the channel query this session or
   `releaseToChannel` is set; an unknown device (first switch after launch) is still connected the
   usual way.
-- **Connect order** (`connectAll`): only `managePairing` devices go one at a time; every other
-  device runs in its own task alongside. A K380 that was off (five ~12 s page timeouts) kept a
-  speaker later in the list from ever being tried (hardware 2026-11-15; spec §3, same on Windows).
-  **But no Classic `openConnection` while another device pairs** (`IOBluetoothController.connect`
+- **Connect order: one Classic setup at a time, through `RadioQueue`** (spec §3 Connect flow).
+  bluetoothd pages one device at a time and queues the rest in arrival order ("Queued up
+  connection request - queue size is 2" in the unified log), so "alongside" only moved the
+  queueing into bluetoothd, in the wrong order. Each try (pair / connect / HID check) holds the
+  queue; priority: managePairing 0, else 1 + `unansweredTries`; `connectAll` announces its
+  devices (`radio.expect`) before spawning, and `connectOne` forgets/releases on every exit.
+  Channel-switcher waits and LE devices (`bt.pagesToConnect` false) skip it. A device with
+  unanswered tries pages with `unansweredPageTimeoutMs` (3 s, `openConnection(_:withPageTimeout:)`);
+  from `unansweredSlowAfter` (2) it's in slow mode: no retry budget, a try every
+  `unansweredRetryMs` (30 s), status `.disconnected`, and `waitForTurn` polls the link so a
+  device that wakes up counts at once.
+  **No Classic `openConnection` while another device pairs** (`IOBluetoothController.connect`
   throws soft `operationInProgress`): every connect request resets bluetoothd's per-app
   `didRequestPairing` flag, and the trackpad's pairing request then got the system's "Connection
   Request" dialog. In the unified log: "Setting didRequestPairing for Application … to 0" between
   the pair start and "CBClassicSession::pairingRequested: Resetting didRequestPairing".
-  **A device that doesn't answer goes last** (spec §3 Connect flow): `unansweredTries` (page
-  timeouts in a row, cleared in `setStatus(.connected)`), `waitForTurn` before each try (waits for
-  devices with a lower count that are `.connecting` and busy, except `arrivalWaits`; polls the link
-  so a woken device counts at once), and slow mode from `unansweredSlowAfter` (2): no retry budget,
-  every `unansweredRetryMs` (30 s), status `.disconnected`. bluetoothd pages one device at a time
-  ("Queued up connection request - queue size is 2" in the unified log).
 - **Release order:** devices without `managePairing` first (`releaseOrder`), so an unpair never
   holds back a keyboard the other computer is waiting for (spec §3, same on Windows).
 - **Fast switch-back:** an automatic release stops as soon as the source is back
@@ -409,6 +411,7 @@ the new profile but does not force-disconnect the previous profile's devices.
 - Adding a config field → for backward-compatible decoding of existing saved configs, decode with
   `decodeIfPresent ?? default` (Swift's synthesized `Decodable` throws on missing keys). `BTDevice`
   and `AppConfig` already have custom `init(from:)` doing this; follow that pattern.
-- Connect order = the profile's device-list order (reorderable in the Devices tab); `BTDevice`
+- Connect order: the radio queue's priority (pairing devices, then devices that answered, then
+  those that didn't), ties in device-list order (reorderable in the Devices tab); `BTDevice`
   `connectDelayMs` staggers an individual device.
 - After finishing a roadmap item, prune it from `IMPROVEMENTS.md`.

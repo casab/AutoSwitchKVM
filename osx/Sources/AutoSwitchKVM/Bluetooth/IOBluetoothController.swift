@@ -156,7 +156,12 @@ final class IOBluetoothController: NSObject, BluetoothController {
     /// How long `connect` waits for the link before failing. It never blocks the main thread.
     private static let connectWait: Duration = .seconds(12)
 
-    func connect(_ address: String) async throws {
+    func pagesToConnect(_ address: String) -> Bool {
+        guard let dev = try? device(address) else { return true }
+        return !isLowEnergy(dev, address)
+    }
+
+    func connect(_ address: String, pageTimeoutMs: Int?) async throws {
         let key = Self.normalize(address)
         let dev = try device(address)
         // Asynchronous open, then wait cooperatively. Until 2026-11-12 this used the synchronous
@@ -184,7 +189,17 @@ final class IOBluetoothController: NSObject, BluetoothController {
         Log.bluetooth.debug("openConnection \(address) (async)…\(note)")
         let start = ContinuousClock.now
         connectAttempts[key] = .pending
-        let rc = dev.openConnection(self)
+        // Page timeout in 0.625 ms slots. A short one keeps a device that doesn't answer from
+        // holding the radio (bluetoothd pages one device at a time).
+        let rc: IOReturn
+        var wait = Self.connectWait
+        if let ms = pageTimeoutMs {
+            let slots = BluetoothHCIPageTimeout(clamping: ms * 8 / 5)
+            rc = dev.openConnection(self, withPageTimeout: slots, authenticationRequired: false)
+            wait = .milliseconds(ms + 1500)
+        } else {
+            rc = dev.openConnection(self)
+        }
         guard rc == kIOReturnSuccess else {
             connectAttempts[key] = nil
             Log.bluetooth.debug("openConnection \(address) could not start: \(BTCode.describe(rc))")
@@ -206,7 +221,7 @@ final class IOBluetoothController: NSObject, BluetoothController {
                     "openConnection \(address): link up after \(Elapsed.since(start)) (callback pending)")
                 return
             }
-            if start.duration(to: .now) > Self.connectWait {
+            if start.duration(to: .now) > wait {
                 Log.bluetooth.debug("openConnection \(address): no link after \(Elapsed.since(start)); giving up")
                 throw BTError.connectFailed(Int32(bitPattern: 0xE000_02D6))  // kIOReturnTimeout
             }

@@ -67,7 +67,21 @@ final class MockBluetoothController: BluetoothController {
         return hidWorks && connectedAddrs.contains(norm(address))
     }
 
-    func connect(_ address: String) async throws {
+    /// The page timeout of each connect call, in order (nil: the default).
+    private(set) var pageTimeouts: [String: [Int?]] = [:]
+    /// Connect/pair calls running at once, and the most seen (the radio sets up one at a time).
+    private(set) var inFlight = 0
+    private(set) var maxInFlight = 0
+    /// Addresses that "connect by themselves" (LE): no page.
+    var lowEnergy = Set<String>()
+
+    func pagesToConnect(_ address: String) -> Bool { !lowEnergy.contains(norm(address)) }
+
+    func connect(_ address: String, pageTimeoutMs: Int?) async throws {
+        inFlight += 1
+        maxInFlight = max(maxInFlight, inFlight)
+        defer { inFlight -= 1 }
+        pageTimeouts[norm(address), default: []].append(pageTimeoutMs)
         if let hook = beforeConnect { await hook() }
         if let hook = beforeConnectTo { await hook(norm(address)) }
         calls.append("connect:\(norm(address))")
@@ -84,6 +98,9 @@ final class MockBluetoothController: BluetoothController {
     }
 
     func pair(_ address: String) async throws {
+        inFlight += 1
+        maxInFlight = max(maxInFlight, inFlight)
+        defer { inFlight -= 1 }
         if let hook = beforePair { await hook() }
         calls.append("pair:\(norm(address))")
         if let error = nextError(&pairErrors, nil) { throw error }

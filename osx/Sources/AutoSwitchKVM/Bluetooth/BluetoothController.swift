@@ -18,7 +18,12 @@ protocol BluetoothController: Sendable {
     /// connected on hardware. `nil` when the backend can't tell (the engine then trusts
     /// `isConnected`).
     func isHIDReady(_ address: String) async -> Bool?
-    func connect(_ address: String) async throws
+    /// Open a Classic connection. `pageTimeoutMs`: how long the radio calls the device (nil: the
+    /// system default, ~5 s per page with retries, ~12-15 s in all on hardware).
+    func connect(_ address: String, pageTimeoutMs: Int?) async throws
+    /// Whether connecting this device pages it over the radio (Classic). An LE device connects by
+    /// itself; "connecting" it is a wait that uses no radio.
+    func pagesToConnect(_ address: String) -> Bool
     func disconnect(_ address: String) async throws
     func pair(_ address: String) async throws
     func unpair(_ address: String) async throws
@@ -31,6 +36,10 @@ protocol BluetoothController: Sendable {
     /// on the main actor as `(normalizedAddress, isConnected)`. Replaces any prior monitoring.
     func startMonitoring(addresses: [String], onChange: @escaping (String, Bool) -> Void)
     func stopMonitoring()
+}
+
+extension BluetoothController {
+    func connect(_ address: String) async throws { try await connect(address, pageTimeoutMs: nil) }
 }
 
 /// Claim-once gate so exactly one side of a race resumes the continuation.

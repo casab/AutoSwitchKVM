@@ -384,33 +384,6 @@ final class ChannelSwitchTests: XCTestCase {
         await run.value
     }
 
-    /// Hardware 2026-11-15: a K380 that was off took five 12 s tries, and the speaker after it in
-    /// the list was never tried before the KVM left again. Devices without Manage pairing connect
-    /// alongside each other.
-    func testADeviceThatDoesntAnswerDoesntHoldUpTheOthers() async {
-        // The K380 never answered: not known to switch channels.
-        let f = make(
-            supported: false,
-            more: [BTDevice(name: "Speaker", address: "f4-2b-7d-12-c8-21", managePairing: false, connectDelayMs: 0)])
-        var gate = false
-        f.bt.beforeConnectTo = { a in
-            guard a == "aa-bb-cc-dd-ee-ff" else { return }
-            while !gate { try? await Task.sleep(nanoseconds: 1_000_000) }
-        }
-        f.engine.handleUSB((vendorID: 0x05E3, productID: 0x0626, added: true))
-        let run = Task { await f.engine.evaluateNow() }
-
-        let speakerID = f.store.config.devices[1].id
-        let deadline = Date().addingTimeInterval(3)
-        while f.engine.statuses[speakerID] != .connected, Date() < deadline {
-            try? await Task.sleep(nanoseconds: 5_000_000)
-        }
-        XCTAssertEqual(f.engine.statuses[speakerID], .connected, "connected while the K380 still hangs")
-        XCTAssertNotEqual(f.engine.statuses[f.device.id], .connected)
-        gate = true
-        await run.value
-    }
-
     // MARK: - A device that doesn't answer (hardware 2026-11-15: a K380 asleep for days)
 
     private let speaker = "f4-2b-7d-12-c8-21"
@@ -424,6 +397,48 @@ final class ChannelSwitchTests: XCTestCase {
         f.engine.unansweredRetryMs = 2000
         f.engine.unansweredPollMs = 500
         return f
+    }
+
+    /// Hardware 2026-11-15: the radio sets up one Classic connection at a time and bluetoothd
+    /// queues the rest in arrival order, so a sleeping K380's pages held a ready speaker up, and a
+    /// page still running made the trackpad's pairing time out. The app queues them itself: one at
+    /// a time, the pairing device first, a device that didn't answer after the others, with a
+    /// short page.
+    func testConnectionSetupsGoOneAtATimePairingFirstUnansweredLast() async {
+        let trackpad = "11-22-33-44-55-66"
+        let f = make(
+            supported: false,
+            more: [
+                BTDevice(name: "Speaker", address: speaker, managePairing: false, connectDelayMs: 0),
+                BTDevice(name: "Trackpad", address: trackpad, managePairing: true, connectDelayMs: 0),
+            ])
+        f.bt.pairLeavesLinkUp = true
+        f.bt.connectErrorFor[addr] = pageTimeout  // the K380 is asleep
+        f.engine.unansweredRetryMs = 2000
+        f.bt.beforeConnect = { for _ in 0..<5 { await Task.yield() } }  // room to overlap, if allowed
+        f.bt.beforePair = { for _ in 0..<5 { await Task.yield() } }
+        var sleeps = 0
+        f.engine.sleepHook = { [engine = f.engine] _ in
+            sleeps += 1
+            if sleeps == 300 { engine.handleUSB((vendorID: 0x05E3, productID: 0x0626, added: false)) }
+            await Task.yield()
+        }
+        await arrive(f)
+
+        XCTAssertEqual(f.bt.maxInFlight, 1, "one connection setup at a time")
+        let setups = f.bt.calls.filter { $0.hasPrefix("connect:") || $0.hasPrefix("pair:") }
+        XCTAssertEqual(setups.first, "pair:\(trackpad)", "\(setups)")
+        let k380 = setups.indices.filter { setups[$0] == "connect:\(addr)" }
+        let speakerAt = setups.firstIndex(of: "connect:\(speaker)")
+        XCTAssertGreaterThanOrEqual(k380.count, 2, "\(setups)")
+        if let speakerAt, k380.count >= 2 {
+            XCTAssertLessThan(speakerAt, k380[1], "after its first miss, the K380 goes after the speaker: \(setups)")
+        } else {
+            XCTFail("speaker never connected: \(setups)")
+        }
+        let pages = f.bt.pageTimeouts[addr] ?? []
+        XCTAssertEqual(pages.first, .some(nil), "first try: the default page")
+        XCTAssertEqual(pages.dropFirst().first, .some(f.engine.unansweredPageTimeoutMs), "then a short one")
     }
 
     private func connects(_ f: Fixture, from index: Int = 0) -> [String] {
