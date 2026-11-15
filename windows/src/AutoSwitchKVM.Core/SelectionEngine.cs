@@ -1275,7 +1275,10 @@ public sealed class SelectionEngine
             last = failure;
             var unanswered = !device.ManagePairing && failure.Kind == BluetoothFailureKind.NoAnswer;
             var count = unanswered ? _unanswered.AddOrUpdate(device.Id, 1, (_, n) => n + 1) : 0;
-            var slow = unanswered && respectSelection && count >= SlowModeAfter;   // never for a manual connect
+            // Never for a manual connect. Once in slow mode, any failure stays there, quietly: a
+            // speaker switched off (2026-11-16) failed one slow try with a 30 s timeout instead of
+            // NoAnswer, flipped to "Problem" and back, and each flip popped the status panel.
+            var slow = respectSelection && !device.ManagePairing && (slowLogged || (unanswered && count >= SlowModeAfter));
             var tryLine = $"{name}: try {tries}: {step} failed after {Ms(attempt)}: {failure.Summary}";
             if (failure.Kind is BluetoothFailureKind.DeviceBusy or BluetoothFailureKind.OperationInProgress || slowLogged) Debug(tryLine);
             else Warn(tryLine);

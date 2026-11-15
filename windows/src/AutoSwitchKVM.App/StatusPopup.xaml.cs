@@ -35,7 +35,7 @@ public sealed partial class StatusPopup : Window
     private readonly Func<bool> _trayPanelOpen;
     private readonly Action _openTrayPanel;
     private readonly DispatcherQueueTimer _timer;
-    private readonly Dictionary<Guid, DeviceStatusKind> _last = new();
+    private readonly StatusChangeFilter _filter = new();
     private long _lastChange;
     private bool _hover;
     private double _contentHeight;
@@ -66,7 +66,7 @@ public sealed partial class StatusPopup : Window
         _timer.Interval = TimeSpan.FromMilliseconds(250);
         _timer.Tick += (_, _) => Tick();
 
-        foreach (var d in _c.Config.Devices) _last[d.Id] = _c.StatusFor(d).Kind;
+        _filter.Seed(_c.Config.Devices.Select(d => (d.Id, _c.StatusFor(d).Kind)));
 
         // A WinUI window shown without ever being activated doesn't load its content (only the
         // caption rendered). Activate it once, off-screen, at creation (app start), then hide it;
@@ -80,14 +80,9 @@ public sealed partial class StatusPopup : Window
     /// way worth showing, refreshes the rows, and shows the panel.
     public void OnStateChanged()
     {
-        var changed = new List<BTDevice>();
-        foreach (var d in _c.Config.Devices.Where(d => d.Enabled))
-        {
-            var kind = _c.StatusFor(d).Kind;
-            var had = _last.TryGetValue(d.Id, out var previous);
-            _last[d.Id] = kind;
-            if (had && Worth(previous, kind)) changed.Add(d);
-        }
+        var enabled = _c.Config.Devices.Where(d => d.Enabled).ToList();
+        var ids = _filter.Changed(enabled.Select(d => (d.Id, _c.StatusFor(d).Kind)), _c.Selected);
+        var changed = enabled.Where(d => ids.Contains(d.Id)).ToList();
         if (changed.Count > 0 && _c.Config.ShowNotifications && !_trayPanelOpen())
             Show(changed);
         else if (AppWindow.IsVisible)
@@ -104,15 +99,6 @@ public sealed partial class StatusPopup : Window
 
     /// Developer preview: every device, as it is now.
     public void ShowAllForPreview() => Show(_c.Config.Devices);
-
-    /// Worth showing: the start of a connect, and where it ends. Not the quiet bookkeeping
-    /// (into Idle; from Idle straight to a resting state, e.g. the first status poll at launch).
-    private static bool Worth(DeviceStatusKind from, DeviceStatusKind to)
-    {
-        if (from == to || to == DeviceStatusKind.Idle) return false;
-        if (from == DeviceStatusKind.Idle && to != DeviceStatusKind.Connecting) return false;
-        return true;
-    }
 
     private void Show(IEnumerable<BTDevice> devices)
     {

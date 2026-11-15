@@ -28,7 +28,7 @@ GitHub release (and from there into the in-app update notes).
 - Device notifications are now a small status panel by the tray instead of Windows notifications:
   it shows each device connecting, connected or released while the KVM switches, then hides by
   itself. No sound, and nothing piles up in the notification center (Settings ▸ General ▸ Switch
-  status).
+  status). A device that's switched off is reported once, not at every retry or switch.
 
 - Bluetooth headphones and speakers can follow the KVM (being tested): AutoSwitch disconnects
   them when the KVM leaves this PC, keeping their pairing, so your other computer can connect

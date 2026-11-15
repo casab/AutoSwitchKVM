@@ -494,6 +494,34 @@ public class FailureHandlingTests
     }
 
     [Fact]
+    public async Task Other_failures_in_slow_mode_stay_quiet()
+    {
+        // 2026-11-16: a switched-off speaker in slow mode failed a try with a 30 s timeout; it
+        // flipped to "Problem" and back, and each flip popped the status panel.
+        var engine = MakeEngine(out var bt, out var config, out var log, managePairing: false);
+        bt.ConnectErrors.Enqueue(Fail(BluetoothFailureKind.NoAnswer, "didn't come"));
+        bt.ConnectErrors.Enqueue(Fail(BluetoothFailureKind.NoAnswer, "didn't come"));
+        bt.ConnectErrors.Enqueue(Fail(BluetoothFailureKind.Timeout, "no response within 30 s"));
+        bt.ConnectError = Fail(BluetoothFailureKind.NoAnswer, "didn't come");
+        var errorAfterSlow = false;
+        engine.Changed += () =>
+        {
+            if (log.Has(LogLevel.Info, "doesn't answer")
+                && engine.Statuses.Values.Any(s => s.Kind == DeviceStatusKind.Error)) errorAfterSlow = true;
+        };
+
+        engine.HandleUsb(Vendor, Product, added: true);
+        var arrival = engine.EvaluateNowAsync();
+        await WaitFor(() => Count(bt, "connect") >= 5, "slow tries past the timeout");
+
+        Assert.False(errorAfterSlow, log.Dump());
+        Assert.Equal(DeviceStatus.Disconnected, engine.Statuses.Values.Single());
+        Assert.False(log.Has(LogLevel.Warn, "try 3"), log.Dump());
+        await Leave(engine);
+        await arrival.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task Manual_connect_of_a_device_that_doesnt_answer_still_gives_up()
     {
         var engine = MakeEngine(out var bt, out var config, out var log, managePairing: false);
