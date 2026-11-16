@@ -47,7 +47,8 @@ src/_redirects          /download/mac, /download/windows, /download/windows-arm6
 src/_headers            security headers (strict CSP: everything is same-origin) and caching
 src/assets/css, js      styles (light + dark) and the demo / OS-aware download button
 src/assets/icon.png     the app icon (copied from windows/src/AutoSwitchKVM.App/Assets/app.png)
-src/assets/og.png       social preview, made by tools/make-og.py
+src/assets/og.png       social preview (og:image), made by tools/make-og.py from the hero; it also
+                        writes tools/github-social-preview.png for the GitHub repo settings
 ```
 
 - **Screenshots** are not copied into this folder: `eleventy.config.js` takes them from
