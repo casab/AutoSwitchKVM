@@ -1,0 +1,10 @@
+---
+permalink: /robots.txt
+eleventyExcludeFromCollections: true
+---
+# Everything here may be crawled. The /download/* links redirect to installer files on GitHub
+# (whose robots.txt blocks them); they're marked nofollow on the pages.
+User-agent: *
+Allow: /
+
+Sitemap: {{ site.url }}/sitemap.xml
