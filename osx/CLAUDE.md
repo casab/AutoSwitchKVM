@@ -322,7 +322,8 @@ the new profile but does not force-disconnect the previous profile's devices.
 - **Switch status panel, not notifications** (2026-11-16, as Windows' `StatusPopup`; spec and plan in
   `osx/docs/superpowers/`). `UI/SwitchStatusModel.swift` (no UI, tested in `SwitchStatusModelTests`)
   decides rows, texts and hiding: a row per device whose status kind changes (not into Idle, not
-  Idle/unknown → resting, the first update only primes), a KVM move starts a new burst, hides 3.5 s
+  unknown → resting), only during a switch (a KVM move after the engine's first evaluation, until
+  the panel hides; a quiet device connecting again shows anyway), hides 3.5 s
   after the last change with nothing connecting (8 s with a problem), never while the pointer is
   over it. `UI/SwitchStatusPanel.swift`: `NonActivatingPanel` (`canBecomeKey/Main` false,
   `.nonactivatingPanel`, `.statusBar` level, all Spaces), shown with `orderFrontRegardless`, top-right

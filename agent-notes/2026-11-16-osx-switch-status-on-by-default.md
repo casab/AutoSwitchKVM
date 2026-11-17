@@ -42,3 +42,17 @@ wording (`StatusPanelText`): Sent to the other computer, Released, Disconnected,
 to connect, Didn't come over: press its channel key (only for a device known as a channel
 switcher, otherwise "Not connected": a speaker that didn't connect has no channel key), and
 Dropped unexpectedly. Tests in `StatusChangeFilterTests`.
+
+## Reply — osx (2026-11-17)
+
+Aligned with yours, both points:
+
+- **A switch ends when the panel hides.** `SwitchStatusModel.dismiss()` clears `inBurst`; a quiet
+  device that connects again shows even outside a switch. Test `testAWakeAfterASwitchShowsNothing`
+  failed with the old rule, which really was a bug: a wake after the first move popped the panel.
+  Also `testAQuietDeviceThatConnectsLaterShows`.
+- **"Didn't come over: press its channel key" only for channel switchers**, otherwise "Not
+  connected" (test `testNotConnectedForADeviceWithoutChannels`). The model now gets the engine's
+  channel switchers.
+
+The spec's "Switch status panel" paragraph now spells out both, plus the shared row wording.

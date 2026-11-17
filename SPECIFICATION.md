@@ -644,9 +644,14 @@ so it classifies every device as Classic (rule 6 never fires on the Mac).
   panel that never takes focus (by the tray on Windows, under the menu bar on macOS) shows where
   the KVM went and each changing device live, then hides by itself (3.5 s after the last change
   with nothing connecting, 8 s with a problem, never while hovered). Gated by `showNotifications`
-  (on by default); unexpected drops by `notifyUnexpectedDisconnect`. Not shown at launch, wake or
-  a profile switch; a device that ended up not connected while selected is reported once, then
-  left out until it connects again.
+  (on by default); unexpected drops by `notifyUnexpectedDisconnect`. Rows are added only during a
+  switch: from a KVM move (seen after the engine's first evaluation) until the panel hides, so
+  nothing shows at launch, wake or a profile switch. A device that ended up not connected while
+  selected is reported once, then left out until it connects again; when it does, that shows even
+  outside a switch ("it's back"). Row wording (both): Connecting…, Connected, Released, Sent to the
+  other computer, Disconnected, Asleep: wake it to connect, Didn't come over: press its channel
+  key (channel switchers only), Not connected (anything else), Dropped unexpectedly, or the
+  problem.
 - **Global shortcuts:** system-wide hotkeys for Pause/Connect-all/Disconnect-all, off by default,
   user-assignable, with a restore-defaults action. Should not require elevated/Accessibility
   permission where avoidable.

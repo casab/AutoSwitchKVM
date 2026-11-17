@@ -205,12 +205,15 @@ final class AppController: ObservableObject {
         let devices = Publishers.CombineLatest3(engine.$statuses, engine.$slowDevices, engine.$sentAway)
         Publishers.CombineLatest3(presence, devices, store.$config)
             .receive(on: DispatchQueue.main)
-            .sink { presence, devices, config in
+            .sink { [weak self] presence, devices, config in
+                guard let self else { return }
                 model.showSwitches = config.showNotifications
                 model.showDrops = config.notifyUnexpectedDisconnect
+                let enabled = config.devices.filter(\.enabled)
                 model.update(
-                    devices: config.devices.filter(\.enabled), statuses: devices.0, selected: presence.0,
-                    evaluated: presence.1, asleep: devices.1, sentAway: devices.2, now: Date())
+                    devices: enabled, statuses: devices.0, selected: presence.0, evaluated: presence.1,
+                    asleep: devices.1, sentAway: devices.2,
+                    channelSwitchers: Set(enabled.filter { self.engine.switchesChannels($0) }.map(\.id)), now: Date())
             }
             .store(in: &cancellables)
         let panel = SwitchStatusPanel(model: model) { [weak self] in
@@ -234,14 +237,16 @@ final class AppController: ObservableObject {
         var off = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, DeviceStatus.disconnected) })
         off[kb.id] = .connecting  // so its asleep row counts as a change
         demo.update(
-            devices: devices, statuses: off, selected: false, evaluated: true, asleep: [], sentAway: [], now: Date())
+            devices: devices, statuses: off, selected: false, evaluated: true, asleep: [], sentAway: [],
+            channelSwitchers: [], now: Date())
         demo.update(
             devices: devices,
             statuses: [
                 pad.id: .connecting, zmk.id: .connected, spk.id: .error("the other computer still has it"),
                 kb.id: .disconnected,
             ],
-            selected: true, evaluated: true, asleep: [kb.id], sentAway: [], now: Date().addingTimeInterval(6))
+            selected: true, evaluated: true, asleep: [kb.id], sentAway: [], channelSwitchers: [],
+            now: Date().addingTimeInterval(6))
         let panel = SwitchStatusPanel(model: demo, openSettings: {})
         panel.start()
         demoPanel = panel

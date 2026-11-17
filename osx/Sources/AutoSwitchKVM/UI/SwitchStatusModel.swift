@@ -32,8 +32,9 @@ final class SwitchStatusModel: ObservableObject {
     private var lastKinds: [UUID: Kind] = [:]
     private var lastSelected: Bool?
     private var lastChange = Date.distantPast
-    /// Rows are added only after a KVM move seen since the engine's first evaluation: launch, wake
-    /// and profile switches connect everything without the KVM having moved.
+    /// Rows are added only between a KVM move (seen since the engine's first evaluation) and the
+    /// panel hiding: launch, wake and profile switches connect everything without the KVM having
+    /// moved (as Windows' StatusChangeFilter).
     private var inBurst = false
     /// Drop rows keep their text while the device stays disconnected (the engine reports the drop
     /// right after setting it Disconnected).
@@ -47,7 +48,7 @@ final class SwitchStatusModel: ObservableObject {
     /// at its first evaluation, this only records it.
     func update(
         devices: [BTDevice], statuses: [UUID: DeviceStatus], selected: Bool, evaluated: Bool, asleep: Set<UUID>,
-        sentAway: Set<UUID>, now: Date
+        sentAway: Set<UUID>, channelSwitchers: Set<UUID>, now: Date
     ) {
         let ids = Set(devices.map(\.id))
         rows.removeAll { !ids.contains($0.id) }
@@ -58,6 +59,7 @@ final class SwitchStatusModel: ObservableObject {
             for d in devices { if let s = statuses[d.id] { lastKinds[d.id] = Self.kind(s) } }
             return
         }
+        if !showSwitches { inBurst = false }  // nothing shown: no switch left open for later
         if previous != selected {  // the KVM moved: a new burst
             lastSelected = selected
             header = selected ? "KVM → this Mac" : "KVM → the other computer"
@@ -72,9 +74,11 @@ final class SwitchStatusModel: ObservableObject {
             let new = Self.kind(status)
             let old = lastKinds[d.id]
             lastKinds[d.id] = new
-            if new == .connected { quiet.remove(d.id) }
+            // A quiet device that connects again is shown even outside a switch: it's back.
+            let back = new == .connected && quiet.remove(d.id) != nil
             let line = Self.line(
-                d, status, selected: selected, asleep: asleep.contains(d.id), sent: sentAway.contains(d.id))
+                d, status, selected: selected, asleep: asleep.contains(d.id), sent: sentAway.contains(d.id),
+                switches: channelSwitchers.contains(d.id))
             if dropped.contains(d.id) {
                 if new == .disconnected { continue }
                 dropped.remove(d.id)
@@ -86,7 +90,7 @@ final class SwitchStatusModel: ObservableObject {
                 }
                 continue
             }
-            guard inBurst, showSwitches, old != new, new != .idle, !quiet.contains(d.id) else { continue }
+            guard inBurst || back, showSwitches, old != new, new != .idle, !quiet.contains(d.id) else { continue }
             // A device first seen at rest (e.g. just added) didn't switch.
             guard !(old == nil && (new == .connected || new == .disconnected)) else { continue }
             rows.append(line)
@@ -124,10 +128,12 @@ final class SwitchStatusModel: ObservableObject {
         if now.timeIntervalSince(lastChange) >= hold { dismiss() }
     }
 
+    /// Hide; this ends the switch (later reconnects, e.g. after a wake, aren't shown).
     func dismiss() {
         visible = false
         rows = []
         dropped = []
+        inBurst = false
     }
 
     private static func kind(_ s: DeviceStatus) -> Kind {
@@ -142,7 +148,7 @@ final class SwitchStatusModel: ObservableObject {
     }
 
     private static func line(
-        _ d: BTDevice, _ s: DeviceStatus, selected: Bool, asleep: Bool, sent: Bool
+        _ d: BTDevice, _ s: DeviceStatus, selected: Bool, asleep: Bool, sent: Bool, switches: Bool
     ) -> SwitchStatusRow {
         let (text, tone): (String, SwitchStatusRow.Tone) =
             switch s {
@@ -154,8 +160,10 @@ final class SwitchStatusModel: ObservableObject {
                     ("Asleep: wake it to connect", .calm)
                 } else if selected {
                     // KVM here: a channel switcher that didn't come over (the engine's arrival wait
-                    // ended), or a device that was let go.
-                    d.managePairing ? ("Disconnected", .ok) : ("Didn't come over: press its channel key", .calm)
+                    // ended); anything else just isn't connected (a speaker has no channel key).
+                    d.managePairing
+                        ? ("Disconnected", .ok)
+                        : switches ? ("Didn't come over: press its channel key", .calm) : ("Not connected", .calm)
                 } else if d.managePairing {
                     ("Released", .ok)
                 } else {

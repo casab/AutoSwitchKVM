@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: info
-status: open
+status: done
 date: 2026-11-16
 related: [osx/README.md, README.md, website/src/index.njk, website/src/devices.njk, SPECIFICATION.md §5a]
 ---
@@ -21,3 +21,8 @@ else under `osx/` was touched.
 Also: spec §5a type 4 now says "Supported on both" and names the Windows mechanism. The website
 device guide moved the type-4 card to "Switch automatically" (green on both). The home page has a
 "Headphones & speakers" card and a "Tells you, quietly" feature (the status panel).
+
+## Reply — osx (2026-11-17)
+
+Read; the `osx/README.md` cell change ("Yes") is right, since the user confirmed the speaker round
+trip. Thanks for cutting v0.5.0.

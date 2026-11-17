@@ -21,11 +21,12 @@ final class SwitchStatusModelTests: XCTestCase {
 
     private func update(
         _ m: SwitchStatusModel, _ statuses: [UUID: DeviceStatus], selected: Bool, evaluated: Bool = true,
-        devices: [BTDevice]? = nil, asleep: Set<UUID> = [], sent: Set<UUID> = [], at seconds: Double = 0
+        devices: [BTDevice]? = nil, asleep: Set<UUID> = [], sent: Set<UUID> = [], switchers: Set<UUID> = [],
+        at seconds: Double = 0
     ) {
         m.update(
             devices: devices ?? all, statuses: statuses, selected: selected, evaluated: evaluated, asleep: asleep,
-            sentAway: sent, now: t0.addingTimeInterval(seconds))
+            sentAway: sent, channelSwitchers: switchers, now: t0.addingTimeInterval(seconds))
     }
 
     private func all(_ status: DeviceStatus) -> [UUID: DeviceStatus] {
@@ -97,16 +98,23 @@ final class SwitchStatusModelTests: XCTestCase {
         XCTAssertFalse(m.visible)
         XCTAssertTrue(m.rows.isEmpty)
 
-        update(m, [trackpad.id: .error("gave up"), k380.id: .disconnected, speaker.id: .disconnected], selected: true)
-        m.tick(now: t0.addingTimeInterval(7.9), hovering: false)
+        // A problem holds it 8 s (the next switch).
+        update(
+            m, [trackpad.id: .connecting, k380.id: .disconnected, speaker.id: .disconnected], selected: false, at: 10)
+        update(
+            m, [trackpad.id: .error("gave up"), k380.id: .disconnected, speaker.id: .disconnected], selected: false,
+            at: 10)
+        m.tick(now: t0.addingTimeInterval(17.9), hovering: false)
         XCTAssertTrue(m.visible)
         XCTAssertEqual(row(m, trackpad)?.tone, .problem)
-        m.tick(now: t0.addingTimeInterval(8.0), hovering: false)
+        m.tick(now: t0.addingTimeInterval(18.0), hovering: false)
         XCTAssertFalse(m.visible)
 
-        // (The trackpad is quiet now until it connects; another device keeps the panel up.)
-        update(m, [trackpad.id: .error("gave up"), k380.id: .connecting, speaker.id: .disconnected], selected: true)
-        m.tick(now: t0.addingTimeInterval(60), hovering: false)
+        // Never while something is connecting (the next switch; the trackpad is quiet until it connects).
+        update(
+            m, [trackpad.id: .error("gave up"), k380.id: .connecting, speaker.id: .disconnected], selected: true, at: 20
+        )
+        m.tick(now: t0.addingTimeInterval(80), hovering: false)
         XCTAssertTrue(m.visible, "never while something is connecting")
     }
 
@@ -197,7 +205,9 @@ final class SwitchStatusModelTests: XCTestCase {
         XCTAssertEqual(row(m, k380)?.text, "Disconnected", "not sent: the release fell back to a disconnect")
 
         update(m, all(.connecting), selected: true, at: 2)
-        update(m, [trackpad.id: .connected, k380.id: .disconnected, speaker.id: .connected], selected: true, at: 3)
+        update(
+            m, [trackpad.id: .connected, k380.id: .disconnected, speaker.id: .connected], selected: true,
+            switchers: [k380.id], at: 3)
         XCTAssertEqual(row(m, k380)?.text, "Didn't come over: press its channel key")
         XCTAssertEqual(row(m, k380)?.tone, .calm)
     }
@@ -242,6 +252,45 @@ final class SwitchStatusModelTests: XCTestCase {
         update(m, [speaker.id: .disconnected], selected: false, at: 1)
         update(m, [speaker.id: .connecting], selected: true, at: 10)
         XCTAssertEqual(row(m, speaker)?.text, "Connecting…")
+    }
+
+    // MARK: - Aligned with Windows (2026-11-17, Windows' reply on the switch-status note)
+
+    /// The panel hiding ends the switch: a wake's reconnects later (no KVM move) show nothing.
+    func testAWakeAfterASwitchShowsNothing() {
+        let m = model()
+        update(m, all(.disconnected), selected: false)
+        update(m, all(.connected), selected: true)
+        m.tick(now: t0.addingTimeInterval(4), hovering: false)
+        XCTAssertFalse(m.visible)
+        update(m, all(.connecting), selected: true, at: 100)  // wake: the engine reconnects
+        update(m, all(.connected), selected: true, at: 101)
+        XCTAssertFalse(m.visible)
+        XCTAssertTrue(m.rows.isEmpty)
+    }
+
+    /// A quiet device (it didn't connect) that connects later, e.g. woken up, shows even outside a
+    /// switch: "it's back".
+    func testAQuietDeviceThatConnectsLaterShows() {
+        let m = model()
+        update(m, all(.disconnected), selected: false)
+        update(m, [speaker.id: .connecting], selected: true)
+        update(m, [speaker.id: .disconnected], selected: true, at: 1)
+        m.tick(now: t0.addingTimeInterval(10), hovering: false)
+        XCTAssertFalse(m.visible)
+        update(m, [speaker.id: .connected], selected: true, at: 200)
+        XCTAssertTrue(m.visible)
+        XCTAssertEqual(row(m, speaker)?.text, "Connected")
+    }
+
+    /// "Didn't come over: press its channel key" only for a channel switcher; a speaker has no
+    /// channel key.
+    func testNotConnectedForADeviceWithoutChannels() {
+        let m = model()
+        update(m, all(.disconnected), selected: false)
+        update(m, [speaker.id: .connecting], selected: true)
+        update(m, [speaker.id: .disconnected], selected: true, at: 1)
+        XCTAssertEqual(row(m, speaker)?.text, "Not connected")
     }
 }
 
