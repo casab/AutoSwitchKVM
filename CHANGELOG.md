@@ -16,6 +16,15 @@ GitHub release (and from there into the in-app update notes).
 
 ## Unreleased
 
+## v0.5.1 (2026-11-18)
+
+### macOS
+
+- The switch status panel no longer pops up when you wake a device after a switch. It shows only
+  while the KVM is switching, plus once when a device that didn't connect comes back.
+- A device that can't switch channels and didn't connect now reads "Not connected" instead of
+  "Didn't come over: press its channel key".
+
 ### Windows
 
 - **The Magic Trackpad no longer gets stuck after you shut down the PC while it's using it.**

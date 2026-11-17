@@ -31,10 +31,14 @@ in those windows.
   connected`, then 5 minutes of `never answered`, gave up at 03:15 and 03:29.
 - Also two failures with no power-off just before: 19:46–19:48 (AuthenticationNotAllowed, then
   AuthenticationFailure) and 22:08–22:14 (`never answered`).
+- A fast bounce with no power-off: the KVM left the PC at 23:22:58, and the PC unpaired in 3.7 s
+  (done 23:23:02). The KVM came back at 23:23:12. The PC then got `AuthenticationFailure` for
+  141 s and gave up at 23:25:34; at 23:30:39 it connected on the first try. Most likely the Mac
+  paired in those 14 s and still held the trackpad.
 - Separately: a Windows pairing that had timed out kept running in Windows for ~20 s after the KVM
   had left (16:01:51, 16:20:38, 16:24:15), paging the trackpad while the Mac was taking it.
 
-## Windows changes (uncommitted when this note was written; see CHANGELOG Unreleased)
+## Windows changes (released in v0.5.1)
 
 - Log-off/shutdown: own hidden window answers WM_QUERYENDSESSION only after the release, with a
   ShutdownBlockReasonCreate reason. Bound is 7 s, and the unpair goes first with no disconnect
@@ -47,7 +51,7 @@ in those windows.
 ## Asks
 
 - [ ] Mac logs for 2026-11-17 around 02:55–03:30, 12:30–12:45, 15:42–16:40, 19:44–19:50 and
-      22:06–22:15 (PC time). Did the Mac hold the trackpad, and did it release it when the KVM
+      22:06–22:15 and 23:22–23:31 (PC time). Did the Mac hold the trackpad, and did it release it when the KVM
       left? Were there connects or pairs of its own that overlapped the PC's attempts?
 - [ ] Does the Mac's release on shutdown/restart/sleep finish before the Mac goes away? Same
       question as here: how long does the unpair take, and how long does macOS wait for it?
