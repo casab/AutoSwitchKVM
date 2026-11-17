@@ -324,9 +324,23 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
 - **No WMI on the UI thread:** `SeedAsync` snapshots via `Task.Run`; a failed snapshot keeps the
   previous presence and still evaluates. Settings uses `PnpUsbMonitor.LastSnapshot` (cached by the
   2 s reconcile) and `UsbSnapshotAsync()` for fresh reads.
-- **Going away:** suspend *and* log-off/shutdown (`SessionEnding`) halt the engine and release
-  (bounded 1.5 s). A release that never got to run before sleep is cancelled on resume, and the
-  re-seed decides instead.
+- **Going away:** suspend *and* log-off/shutdown halt the engine and release. Suspend comes from
+  `SystemEvents` (bounded 1.5 s). Log-off/shutdown come from `PowerMonitor`'s own hidden
+  top-level window on its own thread (bounded 7 s). It answers `WM_QUERYENDSESSION` only after
+  the release and holds a `ShutdownBlockReasonCreate` reason meanwhile. With
+  `SystemEvents.SessionEnding` and 1.5 s, all six Start-menu power-offs on 2026-11-17 ended the
+  app before the ~3.4 s unpair finished (three of them within 1.5 s). The trackpad stayed
+  bonded here, and after each boot it ignored the PC's pairing for minutes. A managed device's
+  release is the unpair alone, with no `DisconnectAsync` first. A release that never got to run
+  before sleep is cancelled on resume, and the re-seed decides instead.
+- **HID `DisconnectAsync` is a no-op without WinRT:** `PairedAudioFiltersAsync` looks for audio
+  filters first, which is local and has none for HID. Before, it started with
+  `FromBluetoothAddressAsync`, and that hung 30 s on the trackpad (2026-11-17).
+- **Orphan pairings vs. a release:** `UnpairAsync` cancels a still-running ceremony for the same
+  device. Windows honours that only at its own timeout, so the pairing handler also refuses a
+  request once the latest intent is "released", instead of bonding and unpairing again. This is
+  for pairing-handoff devices only: Easy-Switch and ZMK devices are already paired, so they never
+  start a ceremony, and their late release (`SendOnAsync`) is untouched.
 - **USB detection lag.** On 2026-11-12 Windows saw each KVM switch 3.1-3.8 s after the Mac.
   `PnpUsbMonitor` now reconciles on the first event of a burst (leading edge) as well as after
   it, and logs `via <trigger>, enumerate N ms, M ms after the burst started`. Use that to

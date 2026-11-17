@@ -174,16 +174,19 @@ public sealed class WinRtBluetooth : IBluetoothController
 
     /// The audio filters of a paired Classic audio device; null for anything else (HID devices,
     /// LE devices, devices Windows doesn't know or hasn't paired).
+    /// The local audio-filter lookup comes first: a HID device (the trackpad) has none, so it
+    /// returns without a WinRT call. On 2026-11-17 the WinRT lookup it used to start with hung
+    /// for 30 s on the trackpad, in releases and in the cleanup between retries.
     private async Task<List<string>?> PairedAudioFiltersAsync(string address, CancellationToken ct)
     {
         var digits = Digits(address);
+        var filters = await Task.Run(() => BluetoothAudio.FiltersFor(digits), ct);
+        if (filters.Count == 0) return null;
         using (var dev = await ResolveAsync(ParseAddress(address), digits, ct))
         {
             if (dev is null || dev.IsLe || !dev.DeviceInformation.Pairing.IsPaired) return null;
             if (dev.Classic!.ClassOfDevice.MajorClass != BluetoothMajorClass.AudioVideo) return null;
         }
-        var filters = await Task.Run(() => BluetoothAudio.FiltersFor(digits), ct);
-        if (filters.Count == 0) Log.Debug("bt", $"audio {address}: no Bluetooth audio filters found");
         return filters;
     }
 
@@ -385,8 +388,9 @@ public sealed class WinRtBluetooth : IBluetoothController
     /// Bluetooth audio device is disconnected and keeps its pairing (spec §5a type 4).
     public async Task DisconnectAsync(string address, CancellationToken ct = default)
     {
-        if (!await IsConnectedAsync(address, ct)) return;
+        // Audio check first: it returns at once for a HID device, so HID stays a true no-op.
         if (await PairedAudioFiltersAsync(address, ct) is not { Count: > 0 } filters) return;
+        if (!await IsConnectedAsync(address, ct)) return;
         var sw = Stopwatch.StartNew();
         try { await Task.Run(() => BluetoothAudio.Disconnect(filters), ct); }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -412,6 +416,7 @@ public sealed class WinRtBluetooth : IBluetoothController
     // Observed on hardware (2026-11-12): an orphan ends ~50-55 s after it started, as Canceled
     // (op.Cancel() only takes effect at Windows' own pairing timeout).
     private Task<DevicePairingResult>? _orphanPair;
+    private IAsyncOperation<DevicePairingResult>? _orphanOp;
     private string? _orphanAddress;
     private DateTime _orphanSince;
     private const int OrphanUndoGraceMs = 3000;
@@ -503,9 +508,18 @@ public sealed class WinRtBluetooth : IBluetoothController
             var requested = 0;   // did the device ever start the ceremony? (tells "no answer" apart)
 
             // Auto-accept the ceremony (a real .NET delegate; no PowerShell-style deadlock).
+            // Unless a release came after it: a ceremony still running in Windows once the KVM
+            // has left (an orphan) must not bond the device here while the other computer takes
+            // it. Not accepting refuses it; accepting would bond it and need a second unpair.
+            var digits = Digits(address);
             handler = (_, e) =>
             {
                 Interlocked.Exchange(ref requested, 1);
+                if (!WantsPaired(digits))
+                {
+                    Log.Info("bt", $"pair {address}: the device answered a pairing that is no longer wanted (released since); refused");
+                    return;
+                }
                 Log.Debug("bt", $"pair {address}: PairingRequested kind={e.PairingKind} after {sw.ElapsedMilliseconds} ms");
                 if (e.PairingKind == DevicePairingKinds.ProvidePin) e.Accept("0000");
                 else e.Accept();
@@ -527,7 +541,7 @@ public sealed class WinRtBluetooth : IBluetoothController
                     // Still running inside Windows. Hand it to a watcher (keep the handler: the
                     // device may still ask) and make the next pair wait for it.
                     handedOff = true;
-                    lock (_gate) { _orphanPair = task; _orphanAddress = address; _orphanSince = DateTime.UtcNow - sw.Elapsed; }
+                    lock (_gate) { _orphanPair = task; _orphanOp = op; _orphanAddress = address; _orphanSince = DateTime.UtcNow - sw.Elapsed; }
                     _ = WatchOrphanAsync(task, address, dev, custom, handler, sw);
                     var why = Volatile.Read(ref requested) == 1
                         ? "the device started pairing but did not finish"
@@ -575,6 +589,28 @@ public sealed class WinRtBluetooth : IBluetoothController
                 dev.Dispose();
             }
         }
+    }
+
+    /// A release while a timed-out pairing of the same device still runs in Windows: ask Windows
+    /// again to stop it. On hardware Cancel took effect only at Windows' own pairing timeout
+    /// (~50-55 s), so the ceremony may keep paging the device until then; if the device answers,
+    /// the handler refuses (WantsPaired is now false), so it can't bond here. Logged at Info to
+    /// measure how often a ceremony outlives the KVM switch (2026-11-17: 16:01, 16:20, 16:24).
+    private void StopOrphanFor(string address)
+    {
+        IAsyncOperation<DevicePairingResult>? op;
+        double age;
+        lock (_gate)
+        {
+            if (_orphanPair is not { IsCompleted: false } || _orphanAddress is null
+                || Digits(_orphanAddress) != Digits(address))
+                return;
+            op = _orphanOp;
+            age = (DateTime.UtcNow - _orphanSince).TotalSeconds;
+        }
+        Log.Info("bt", $"pair {address}: released while a pairing started {age:0} s ago is still running in Windows; " +
+            "cancelling it (Windows may keep trying until its own timeout; an answer is refused)");
+        try { op?.Cancel(); } catch { /* best-effort */ }
     }
 
     /// A pair that timed out but is still running inside Windows: log how it ends, and if it ends
@@ -633,7 +669,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             try { dev.Dispose(); } catch { /* ignore */ }
             lock (_gate)
             {
-                if (ReferenceEquals(_orphanPair, task)) { _orphanPair = null; _orphanAddress = null; }
+                if (ReferenceEquals(_orphanPair, task)) { _orphanPair = null; _orphanOp = null; _orphanAddress = null; }
             }
         }
     }
@@ -642,6 +678,7 @@ public sealed class WinRtBluetooth : IBluetoothController
     {
         ParseAddress(address);   // validate before touching state
         SetIntent(Digits(address), wantPaired: false);
+        StopOrphanFor(address);
 
         await _opLock.WaitAsync(ct);
         try

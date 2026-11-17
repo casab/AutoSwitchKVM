@@ -8,7 +8,25 @@ GitHub release (and from there into the in-app update notes).
 - When you commit a change a user would notice, add a line under **Unreleased**, in the right
   group: **Both**, **macOS** or **Windows**. Plain words, what the user sees, not how. Skip
   internal changes (refactors, tests, CI) unless they change what users get.
-- To release: rename `## Unreleased
+- To release: rename `## Unreleased` to `## vX.Y.Z (YYYY-MM-DD)`, check that both platforms'
+  changes since the last tag are in it (`git log vPREV..HEAD`), add a new empty `## Unreleased`
+  above it, commit, then tag. A stable tag without its section fails the release.
+- A pre-release tag (`vX.Y.Z-rc.1`) uses its own section if there is one, otherwise
+  `vX.Y.Z`, otherwise **Unreleased**.
+
+## Unreleased
+
+### Windows
+
+- **The Magic Trackpad no longer gets stuck after you shut down the PC while it's using it.**
+  AutoSwitch now asks Windows for the few seconds it needs to release the trackpad before the PC
+  turns off. Before, Windows closed it too soon, the PC stayed paired, and the trackpad wouldn't
+  connect again for minutes after the next start. If the release takes longer than about 5
+  seconds, the shutdown screen shows "Releasing Bluetooth devices for your other computer".
+- After the KVM leaves, a pairing attempt that Windows is still finishing can no longer pair the
+  trackpad to this PC while the Mac is taking it.
+- Trackpad retries no longer stall for 30 seconds on a speaker check that only applies to
+  speakers and headphones.
 
 ## v0.5.0 (2026-11-16)
 

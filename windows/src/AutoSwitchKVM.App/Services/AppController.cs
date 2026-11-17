@@ -150,10 +150,10 @@ public sealed class AppController
         // the engine so it can't re-pair (e.g. an auto-reconnect after the "drop" our own release
         // causes). The release talks to the Bluetooth controller directly (the engine is
         // UI-thread-only); resume re-enables and re-seeds the engine so statuses reconcile.
-        _power.OnSuspend = () => ReleaseBeforeGoingAway("suspend");
+        _power.OnSuspend = () => ReleaseBeforeGoingAway("suspend", SuspendReleaseBound);
         // Log-off/shutdown: same release, so the device isn't left bonded here while this PC is off
         // (the next launch also reconciles: spec §3 Evaluate step 5).
-        _power.OnSessionEnding = reason => ReleaseBeforeGoingAway(reason);
+        _power.OnSessionEnding = reason => ReleaseBeforeGoingAway(reason, SessionEndReleaseBound);
         _power.OnResume = () => _dispatcher.Enqueue("resume", () =>
         {
             Log.Info("power", "resume -> re-evaluate");
@@ -200,22 +200,28 @@ public sealed class AppController
 
     private CancellationTokenSource? _awayReleaseCts;
 
-    /// Runs on the SystemEvents thread for suspend / log-off / shutdown. Halts the engine first
-    /// (thread-safe) so nothing re-pairs, then releases, blocking at most 1.5 s. Windows' grace is
-    /// ~2 s; the release probe shows the link itself drops ~0.4–0.8 s into BluetoothRemoveDevice,
-    /// so the part that frees the device for the other host fits even though the full call takes
-    /// ~3.4 s.
-    private void ReleaseBeforeGoingAway(string reason)
+    /// Suspend: Windows' grace is ~2 s; the release probe shows the link itself drops ~0.4–0.8 s
+    /// into BluetoothRemoveDevice, so the part that frees the device for the other host fits even
+    /// though the full call takes ~3.4 s.
+    private static readonly TimeSpan SuspendReleaseBound = TimeSpan.FromMilliseconds(1500);
+    /// Log-off/shutdown: Windows waits for PowerMonitor's session window, so the unpair can finish
+    /// (~3.4 s, plus up to ~2 s for a pair in flight to let go of the radio). With 1.5 s the bond
+    /// survived the power-offs on 2026-11-17 and the trackpad came back stuck after each.
+    private static readonly TimeSpan SessionEndReleaseBound = TimeSpan.FromSeconds(7);
+
+    /// Runs on the power thread for suspend / log-off / shutdown. Halts the engine first
+    /// (thread-safe) so nothing re-pairs, then releases, blocking at most the bound.
+    private void ReleaseBeforeGoingAway(string reason, TimeSpan bound)
     {
         Engine.NotifySuspending();
         var cts = new CancellationTokenSource();
         Interlocked.Exchange(ref _awayReleaseCts, cts)?.Cancel();
-        Log.Info("power", $"{reason} -> releasing enabled devices (bounded to 1.5 s)");
+        Log.Info("power", $"{reason} -> releasing enabled devices (bounded to {bound.TotalSeconds:0.#} s)");
         try
         {
             // Task.Run keeps continuations off this thread's SynchronizationContext so the
             // bounded Wait cannot deadlock.
-            var released = Task.Run(() => ReleaseEnabledDevicesAsync(cts.Token)).Wait(TimeSpan.FromMilliseconds(1500));
+            var released = Task.Run(() => ReleaseEnabledDevicesAsync(cts.Token)).Wait(bound);
             Log.Info("power", released ? $"{reason} release complete" : $"{reason} release still running");
         }
         catch (Exception ex)
@@ -237,9 +243,12 @@ public sealed class AppController
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                await _bt.DisconnectAsync(device.Address, ct);
+                // A managed device's release is the unpair alone; nothing goes before it.
                 if (device.ManagePairing) await _bt.UnpairAsync(device.Address, ct);
-                Log.Debug("power", $"released {device.Name} ({sw.ElapsedMilliseconds} ms)");
+                else await _bt.DisconnectAsync(device.Address, ct);
+                // Info: whether the release finished before the PC went away is the first thing to
+                // check when a device comes back stuck after a shutdown.
+                Log.Info("power", $"released {device.Name} ({sw.ElapsedMilliseconds} ms)");
             }
             catch (OperationCanceledException)
             {
