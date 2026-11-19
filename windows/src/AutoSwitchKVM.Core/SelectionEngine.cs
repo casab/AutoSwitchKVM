@@ -527,12 +527,12 @@ public sealed class SelectionEngine
         if (device.ManagePairing)
         {
             // Spec §3: a pairing device that drops while the KVM is here keeps its bond and
-            // reconnects by itself. The Magic Trackpad drops its link when it goes to sleep
-            // and comes back when touched. The connect flow's retries re-paired it from scratch
-            // instead: they removed the bond of a sleeping trackpad, which then answered
-            // nobody (no bond here, none on the Mac) until it was switched off and on
-            // (2026-11-18 03:21 and 19:28, after 35-60 min idle).
-            Info($"{device.Name}: keeping its pairing; it reconnects by itself when it wakes up (touch or click it)");
+            // reconnects by itself. The Magic Trackpad drops Bluetooth when it's plugged in by
+            // USB (both drops on 2026-11-18, 03:21 and 19:28, were the cable, not sleep). The
+            // connect flow's retries re-paired it from scratch instead: with no answer over
+            // Bluetooth they removed its bond, and then it answered nobody (no bond here, none
+            // on the Mac) until it was switched off and on.
+            Info($"{device.Name}: keeping its pairing; it reconnects by itself (when it's unplugged, wakes up or comes back in range)");
             return;
         }
         var now = DateTime.UtcNow;

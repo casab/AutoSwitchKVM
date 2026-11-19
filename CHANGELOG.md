@@ -20,10 +20,11 @@ GitHub release (and from there into the in-app update notes).
 
 ### Both
 
-- **The Magic Trackpad no longer ends up paired to no computer after it goes to sleep.** When
-  it sleeps while a computer has it, AutoSwitch now keeps its pairing, and it reconnects as soon
-  as you touch it. Before, AutoSwitch tried to reconnect it and removed its pairing along the
-  way. After that, neither the PC nor the Mac could connect it until you switched it off and on.
+- **The Magic Trackpad no longer ends up paired to no computer after it loses its Bluetooth
+  connection** (for example, when you plug it in by cable). AutoSwitch now keeps its pairing,
+  and it reconnects by itself. Before, AutoSwitch tried to reconnect it and removed its pairing
+  along the way. After that, neither the PC nor the Mac could connect it until you switched it
+  off and on.
 
 ### macOS
 

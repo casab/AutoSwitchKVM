@@ -350,10 +350,11 @@ controller** (the operations in §5). It owns no platform APIs directly.
   normal connect flow under the current run token (a newer run supersedes it). Rate-limit to one
   auto-reconnect per device per ~30 s so a flapping device cannot cause a reconnect storm.
   **Not for a `managePairing` device**: it keeps its bond and reconnects by itself. The Magic
-  Trackpad drops its link when it sleeps (after ~35–60 min idle) and comes back when touched. A
-  sleeping trackpad doesn't answer, so the connect flow's stale-bond re-pair removed its bond, and
-  then it was paired to no host. It answered nobody until it was switched off and on (Windows,
-  2026-11-18). Log it, show it disconnected, and touch nothing.
+  Trackpad drops its Bluetooth link when it's plugged into a computer by USB. Both drops on
+  Windows on 2026-11-18 (03:21, 19:28) were the cable being plugged in, not sleep: no drop of an
+  idle trackpad has been seen. While it was on the cable it didn't answer over Bluetooth, so the
+  connect flow's stale-bond re-pair removed its bond, and then it was paired to no host. It answered
+  nobody until it was switched off and on. Log it, show it disconnected, and touch nothing.
   Trade-off: if the *other* host legitimately claimed the device this may briefly contend — the
   source-present guard makes that rare, and the option is user-disableable.
 

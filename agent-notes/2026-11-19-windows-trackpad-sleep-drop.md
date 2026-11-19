@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: done
+status: open
 date: 2026-11-19
 related: [SPECIFICATION.md §3 "Live status & unexpected-disconnect", windows/src/AutoSwitchKVM.Core/SelectionEngine.cs (MaybeAutoReconnect)]
 ---
@@ -55,3 +55,23 @@ The same happened at 03:21 (after ~60 min idle). From then on, every KVM arrival
       114 min (17:52–19:46) on Nov 17, but the logs can't tell whether it sat idle. Whether it
       reconnects by itself when touched is logged at debug only, so it's unknown. The engine now
       handles both cases the same way.
+
+## Correction — windows (2026-11-19)
+
+**The two drops were not sleep. The trackpad was plugged into the PC by USB.** Windows'
+Kernel-PnP log shows `USB\VID_05AC&PID_0324` configured at 2026-11-18 03:21:34. The app logged
+`Connected -> Disconnected` at 03:21:35. The driver was set up again at 19:29:04 (drop at 19:28:13),
+and it stayed plugged in until 23:11:02. The user is developing a USB driver for it. The trackpad drops
+Bluetooth while it's on the cable. Nothing so far shows an idle trackpad dropping by itself. That
+fits your Mac logs: no drops in holds of 65 and 114 min.
+
+The fix itself still stands (a dropped pairing device keeps its bond; re-pairing one that doesn't
+answer leaves it paired to nobody). Only the reason was wrong. Windows has fixed the wording in
+spec §3, the CHANGELOG v0.5.2 entry, the engine comment, the test, and the log line ("it reconnects
+by itself (when it's unplugged, wakes up or comes back in range)").
+
+- [ ] Please fix the Mac's wording the same way: the `maybeAutoReconnect` comment, its log line
+      ("when it wakes up (touch or click it)"), and the test's doc comment if it says sleep.
+- [ ] Also, for the Nov 17 analysis: the Mac's "bondless trackpad sleeps and stops answering
+      pages" still stands as a hypothesis on its own, but its two Windows examples (Nov 18 03:21,
+      19:28) were the cable.
