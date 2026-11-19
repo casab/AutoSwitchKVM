@@ -352,6 +352,15 @@ final class SelectionEngine: ObservableObject {
             return
         }
         guard !isBusy(device.id) else { return }
+        if device.managePairing {
+            // Spec §3: a pairing device that drops while the KVM is here keeps its bond and
+            // reconnects by itself. The Magic Trackpad drops its link when it sleeps and comes back
+            // when touched; the connect flow's stale-bond re-pair removed the bond of a sleeping
+            // trackpad, which then answered nobody until switched off and on (Windows, 2026-11-18).
+            Log.engine.log(
+                "\(device.name): keeping its pairing; it reconnects by itself when it wakes up (touch or click it)")
+            return
+        }
         let now = Date()
         if let last = lastAutoReconnect[device.id], now.timeIntervalSince(last) < autoReconnectMinInterval {
             let ago = Int(now.timeIntervalSince(last))
@@ -403,16 +412,17 @@ final class SelectionEngine: ObservableObject {
     /// automation release, so the stack's late "disconnected" events can't look like unexpected
     /// drops and trigger an auto-reconnect during sleep. `SleepWakeMonitor` holds the sleep
     /// transition (bounded) until this returns.
-    func prepareForSleep() async {
+    /// Also used before a power off, restart or log out (`reason`).
+    func prepareForSleep(reason: String = "system sleep") async {
         suspended = true
         debounceTimer?.invalidate()
         debounceTimer = nil
-        var run = newRun("system sleep")
+        var run = newRun(reason)
         run.sleepRelease = true
         let devices = store.config.devices.filter(\.enabled)
         let start = ContinuousClock.now
         Log.engine.log(
-            "run #\(run.token): system sleep → automation halted; releasing \(devices.count) enabled device(s)")
+            "run #\(run.token): \(reason) → automation halted; releasing \(devices.count) enabled device(s)")
         for device in devices {
             if let why = staleReason(run, respectSelection: false) {
                 Log.engine.debug("run #\(run.token): sleep release stopped: \(why)")
@@ -424,7 +434,7 @@ final class SelectionEngine: ObservableObject {
         }
         // Devices are released; on wake, seeding re-evaluates from scratch.
         automationActed = false
-        Log.engine.log("run #\(run.token): sleep release finished in \(Elapsed.since(start))")
+        Log.engine.log("run #\(run.token): release before \(reason) finished in \(Elapsed.since(start))")
     }
 
     /// The system woke: re-enable automation and re-seed presence from the current USB snapshot

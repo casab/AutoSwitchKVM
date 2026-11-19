@@ -326,6 +326,30 @@ final class SelectionEngineTests: XCTestCase {
         XCTAssertEqual(engine.statuses.values.first, .connected)
     }
 
+    /// Spec §3: a managePairing device keeps its bond after a drop and reconnects by itself. The
+    /// Magic Trackpad drops its link when it sleeps; the connect flow's stale-bond re-pair then
+    /// removed the bond of a sleeping trackpad, which answered nobody until switched off and on
+    /// (Windows, 2026-11-18).
+    func testManagePairingDeviceIsNotAutoReconnectedAfterADrop() async {
+        let (engine, bt, _) = makeEngine(managePairing: true)
+        engine.autoReconnectDelayMs = 0
+        engine.refreshMonitoring()
+        engine.handleUSB((vendorID: vendor, productID: product, added: true))
+        await engine.evaluateNow()
+        XCTAssertTrue(bt.connectedAddrs.contains(addr))
+        let before = bt.calls.count
+
+        bt.simulateConnectionDrop(addr)
+        for _ in 0..<20 {  // give a (wrong) reconnect a chance to run
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTAssertEqual(Array(bt.calls[before...]), [], "no pair, unpair or connect after the drop")
+        XCTAssertTrue(bt.pairedAddrs.contains(addr), "the bond is kept")
+        XCTAssertEqual(engine.statuses.values.first, .disconnected)
+    }
+
     /// One reconnect per drop, rate-limited — a flapping device must not cause a reconnect storm.
     func testAutoReconnectIsRateLimited() async {
         let (engine, bt, _) = makeEngine()

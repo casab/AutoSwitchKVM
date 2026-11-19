@@ -39,8 +39,6 @@ struct AutoSwitchKVMApp: App {
     }
 }
 
-/// Hides the Dock icon (menu-bar-only app) and starts the controller.
-@MainActor
 /// The menu bar icon. Always on screen, so it hands SwiftUI's `openWindow` to the controller
 /// (the switch status panel opens Settings on a click).
 private struct MenuBarLabel: View {
@@ -53,9 +51,15 @@ private struct MenuBarLabel: View {
     }
 }
 
+/// Hides the Dock icon (menu-bar-only app) and starts the controller.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// False when another copy already runs; this one then quits without touching anything.
     private var isPrimary = true
+    /// Set by `NSWorkspace.willPowerOffNotification` (shut down, restart, log out).
+    private var poweringOff = false
+    /// How long a power-off waits for the release (Windows holds its shutdown up to 7 s).
+    private static let powerOffReleaseLimitSeconds: UInt64 = 7
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard SingleInstance.claim() else {
@@ -74,6 +78,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSApp.setActivationPolicy(.accessory)
         AppController.shared.start()
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willPowerOffNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.poweringOff = true }
+        }
+    }
+
+    /// Shut down, restart or log out: release the devices first, as before sleep, so the other
+    /// computer can take them. A trackpad left bonded to a computer that went off answered
+    /// nobody for minutes (Windows, 2026-11-17). A plain Quit leaves the devices where they are.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard isPrimary, poweringOff else { return .terminateNow }
+        let limit = Self.powerOffReleaseLimitSeconds
+        Log.app.log("power off, restart or log out: releasing devices first (up to \(limit) s)")
+        var replied = false
+        func reply(_ why: String) {
+            guard !replied else { return }
+            replied = true
+            Log.app.log("quitting for the power off: \(why)")
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        let start = ContinuousClock.now
+        Task { @MainActor in
+            await AppController.shared.releaseForPowerOff()
+            reply("release finished in \(Elapsed.since(start))")
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: limit * 1_000_000_000)
+            reply("release still running after \(limit) s")
+        }
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {

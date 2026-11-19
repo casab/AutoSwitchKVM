@@ -147,12 +147,14 @@ Single executable target, organized by folder under `Sources/AutoSwitchKVM/`:
   classification per SPECIFICATION.md §3 (soft retries for busy/in-progress; stale-bond re-pair
   only after timeout/auth/unknown). Per-device manual entry points (`connectDeviceNow`,
   `disconnectDeviceNow`, `pairDeviceNow`, `unpairDeviceNow`) and sleep handling
-  (`prepareForSleep()` / `resumeAfterWake()`). Test seams: `sleepHook` (instant delays),
-  `softRetryIntervalMs`, `maxSoftRetries`, `releaseRetryDelayMs`, `postPairSettleMs`,
-  `postPairHidWaitMs`.
+  (`prepareForSleep()` / `resumeAfterWake()`). Shut down/restart/log out runs the same release:
+  `AppDelegate.applicationShouldTerminate` replies `.terminateLater` once
+  `NSWorkspace.willPowerOffNotification` was seen (bounded 7 s); a plain Quit releases nothing.
+  Test seams: `sleepHook` (instant delays), `softRetryIntervalMs`, `maxSoftRetries`,
+  `releaseRetryDelayMs`, `postPairSettleMs`, `postPairHidWaitMs`.
 - `System/` — `SingleInstance` (`flock` on `Application Support/AutoSwitchKVM/instance.lock`:
   two copies would fight over the same devices), `SleepWakeMonitor`, `LoginItem` (`SMAppService`),
-  `DockManager`, `Notifier`,
+  `DockManager`,
   `HotKeyManager` (Carbon `RegisterEventHotKey`; user-assignable combos via `KeyShortcut`, off by
   default; `apply(enabled:pause:connectAll:disconnectAll:)` is idempotent).
 - `Support/` — `Log` (`os.Logger` wrappers: subsystem `com.enginal.AutoSwitchKVM`, categories

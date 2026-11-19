@@ -325,6 +325,10 @@ controller** (the operations in §5). It owns no platform APIs directly.
   the release's own disconnect events look like unexpected drops, and auto-reconnect re-paired the
   device during sleep. On wake: re-enable automation and re-seed. (macOS: `prepareForSleep()` /
   `resumeAfterWake()`; Windows: `NotifySuspending()` / `NotifyResumed()`.)
+- **Shut down, restart, log out:** the same release, before the OS ends the app, held at most
+  ~7 s. A trackpad left bonded to a computer that powered off answered nobody for minutes
+  (Windows, 2026-11-17). A plain Quit releases nothing. (macOS: `applicationShouldTerminate`
+  replies later after `NSWorkspace.willPowerOffNotification`; Windows: `WM_QUERYENDSESSION`.)
 
 ### Pause
 - `paused` suspends automatic connect/disconnect (presence still tracked; manual actions still
@@ -345,12 +349,11 @@ controller** (the operations in §5). It owns no platform APIs directly.
   the dropped device: short delay (~2 s), re-check source-present/power/pause/busy, then run the
   normal connect flow under the current run token (a newer run supersedes it). Rate-limit to one
   auto-reconnect per device per ~30 s so a flapping device cannot cause a reconnect storm.
-  **Not for a `managePairing` device** (Windows implemented; macOS pending): it keeps its bond
-  and reconnects by itself. The Magic Trackpad drops its link when it sleeps (after ~35–60 min
-  idle) and comes back when touched. A sleeping trackpad doesn't answer, so the connect flow's
-  stale-bond re-pair removed its bond, and then it was paired to no host. It answered nobody until
-  it was switched off and on (Windows, 2026-11-18). Log it, show it disconnected, and touch
-  nothing.
+  **Not for a `managePairing` device**: it keeps its bond and reconnects by itself. The Magic
+  Trackpad drops its link when it sleeps (after ~35–60 min idle) and comes back when touched. A
+  sleeping trackpad doesn't answer, so the connect flow's stale-bond re-pair removed its bond, and
+  then it was paired to no host. It answered nobody until it was switched off and on (Windows,
+  2026-11-18). Log it, show it disconnected, and touch nothing.
   Trade-off: if the *other* host legitimately claimed the device this may briefly contend — the
   source-present guard makes that rare, and the option is user-disableable.
 

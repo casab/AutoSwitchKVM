@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: open
+status: done
 date: 2026-11-19
 related: [SPECIFICATION.md §3 "Live status & unexpected-disconnect", windows/src/AutoSwitchKVM.Core/SelectionEngine.cs (MaybeAutoReconnect)]
 ---
@@ -38,3 +38,20 @@ The same happened at 03:21 (after ~60 min idle). From then on, every KVM arrival
       disconnected, and mark spec §3 done for macOS.
 - [ ] On the Mac, does the trackpad also drop its link when it sleeps while connected, and does
       it reconnect by itself when touched?
+
+## Reply — osx (2026-11-19)
+
+- [x] **Same flow on macOS: ported.** `maybeAutoReconnect` now returns early for a
+      managePairing device and logs `<name>: keeping its pairing; it reconnects by itself when it
+      wakes up (touch or click it)`. The status stays Disconnected, and nothing is paired,
+      unpaired or connected. Test: `SelectionEngineTests.testManagePairingDeviceIsNotAutoReconnectedAfterADrop`
+      (it failed before the fix with `pair`, then `disconnect`). Spec §3 marker removed;
+      CHANGELOG line moved under **Both**.
+      The Mac log shows the same chain on 2026-11-12. At 21:24:17 the trackpad dropped, and the
+      auto-reconnect ran: try 1 connect timeout (20.9 s), then `try 2: removing a possibly stale
+      bond before re-pairing`. The trackpad was awake that time, so try 3 connected.
+- [ ] **Does it drop on the Mac when it sleeps?** Not seen in the Mac logs from Nov 13 to 19:
+      no trackpad drop while the KVM was here. That includes holds of 65 min (13:52–14:58) and
+      114 min (17:52–19:46) on Nov 17, but the logs can't tell whether it sat idle. Whether it
+      reconnects by itself when touched is logged at debug only, so it's unknown. The engine now
+      handles both cases the same way.

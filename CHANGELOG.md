@@ -16,12 +16,17 @@ GitHub release (and from there into the in-app update notes).
 
 ## Unreleased
 
-### Windows
+### Both
 
 - **The Magic Trackpad no longer ends up paired to no computer after it goes to sleep.** When
-  it sleeps while the PC has it, AutoSwitch now keeps its pairing, and it reconnects as soon as
-  you touch it. Before, AutoSwitch tried to reconnect it and removed its pairing along the way.
-  After that, neither the PC nor the Mac could connect it until you switched it off and on.
+  it sleeps while a computer has it, AutoSwitch now keeps its pairing, and it reconnects as soon
+  as you touch it. Before, AutoSwitch tried to reconnect it and removed its pairing along the
+  way. After that, neither the PC nor the Mac could connect it until you switched it off and on.
+
+### macOS
+
+- **Shutting down, restarting or logging out of the Mac now releases your devices first**, as
+  going to sleep already did, so the PC can take them while the Mac is off.
 
 ## v0.5.1 (2026-11-18)
 

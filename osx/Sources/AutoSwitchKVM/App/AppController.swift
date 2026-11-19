@@ -171,6 +171,13 @@ final class AppController: ObservableObject {
         append("Devices released; allowing sleep", level: .debug)
     }
 
+    /// Shut down, restart or log out (`AppDelegate.applicationShouldTerminate`): the same release
+    /// as before sleep, so the other computer can take the devices while this Mac is off.
+    func releaseForPowerOff() async {
+        append("Power off → releasing devices", level: .debug)
+        await engine.prepareForSleep(reason: "power off")
+    }
+
     private func handleDidWake() {
         append("Wake → re-seeding", level: .debug)
         usb.refreshAttached()
