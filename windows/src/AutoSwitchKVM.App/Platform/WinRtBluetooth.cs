@@ -608,7 +608,7 @@ public sealed class WinRtBluetooth : IBluetoothController
             op = _orphanOp;
             age = (DateTime.UtcNow - _orphanSince).TotalSeconds;
         }
-        Log.Info("bt", $"pair {address}: released while a pairing started {age:0} s ago is still running in Windows; " +
+        Log.Info("bt", $"pair {address}: unpair requested while a pairing started {age:0} s ago is still running in Windows; " +
             "cancelling it (Windows may keep trying until its own timeout; an answer is refused)");
         try { op?.Cancel(); } catch { /* best-effort */ }
     }

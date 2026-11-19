@@ -524,6 +524,17 @@ public sealed class SelectionEngine
     {
         if (!Config.AutoReconnectOnDrop || Config.Paused || _suspended) return;
         if (IsBusy(device.Id)) return;
+        if (device.ManagePairing)
+        {
+            // Spec §3: a pairing device that drops while the KVM is here keeps its bond and
+            // reconnects by itself. The Magic Trackpad drops its link when it goes to sleep
+            // and comes back when touched. The connect flow's retries re-paired it from scratch
+            // instead: they removed the bond of a sleeping trackpad, which then answered
+            // nobody (no bond here, none on the Mac) until it was switched off and on
+            // (2026-11-18 03:21 and 19:28, after 35-60 min idle).
+            Info($"{device.Name}: keeping its pairing; it reconnects by itself when it wakes up (touch or click it)");
+            return;
+        }
         var now = DateTime.UtcNow;
         if (_lastAutoReconnect.TryGetValue(device.Id, out var last) &&
             (now - last).TotalSeconds < AutoReconnectMinIntervalSecs)

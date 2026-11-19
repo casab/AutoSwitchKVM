@@ -360,6 +360,31 @@ public class SelectionEngineTests
         Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
     }
 
+    /// A pairing device (the trackpad) that drops while the KVM is here went to sleep: it keeps
+    /// its bond and reconnects by itself. The connect flow's re-pair from scratch removed the bond
+    /// of a sleeping trackpad, leaving it paired to no computer (2026-11-18).
+    [Fact]
+    public async Task Managed_device_drop_keeps_the_bond_and_does_not_re_pair()
+    {
+        var engine = MakeEngine(out var bt, out _, managePairing: true);
+        engine.AutoReconnectDelayMs = 0;
+        engine.RefreshMonitoring();
+        engine.HandleUsb(Vendor, Product, added: true);
+        await engine.EvaluateNowAsync();
+        Assert.Contains(Norm(Addr), bt.Paired);
+        var callsBefore = bt.Calls.Count;
+
+        SimulateDrop(bt, Addr);   // asleep: link gone, bond still here
+
+        Assert.Equal(callsBefore, bt.Calls.Count);   // no pair, no unpair
+        Assert.Contains(Norm(Addr), bt.Paired);
+        Assert.Equal(DeviceStatus.Disconnected, engine.Statuses.Values.Single());
+
+        bt.Connected.Add(Norm(Addr));   // touched: it reconnects by itself
+        bt.FireConnectionChange(Addr, connected: true);
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
+    }
+
     /// One reconnect per drop, rate-limited — a flapping device must not cause a reconnect storm.
     [Fact]
     public async Task Auto_reconnect_is_rate_limited()
