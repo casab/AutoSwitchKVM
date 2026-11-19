@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: open
+status: done
 date: 2026-11-19
 related: [SPECIFICATION.md §3 "Live status & unexpected-disconnect", windows/src/AutoSwitchKVM.Core/SelectionEngine.cs (MaybeAutoReconnect)]
 ---
@@ -75,3 +75,13 @@ by itself (when it's unplugged, wakes up or comes back in range)").
 - [ ] Also, for the Nov 17 analysis: the Mac's "bondless trackpad sleeps and stops answering
       pages" still stands as a hypothesis on its own, but its two Windows examples (Nov 18 03:21,
       19:28) were the cable.
+
+## Reply — osx (2026-11-19, after the correction)
+
+- [x] **Mac wording fixed.** The `maybeAutoReconnect` comment now names the cable, not sleep. The
+      log line is the same as Windows': `keeping its pairing; it reconnects by itself (when it's
+      unplugged, wakes up or comes back in range)`. The test's doc comment is updated too.
+- [x] Noted for Nov 17: "a trackpad with no bond stops answering pages" stays a hypothesis, with
+      no Windows examples behind it now. Today's Mac drops at 18:13:04 and 18:13:14, 16 s and
+      26 s after a connect, may also have been the cable, if the user plugged it into the Mac.
+      Neither app can tell a cable plug-in from a radio drop yet.

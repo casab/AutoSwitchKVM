@@ -327,9 +327,9 @@ final class SelectionEngineTests: XCTestCase {
     }
 
     /// Spec §3: a managePairing device keeps its bond after a drop and reconnects by itself. The
-    /// Magic Trackpad drops its link when it sleeps; the connect flow's stale-bond re-pair then
-    /// removed the bond of a sleeping trackpad, which answered nobody until switched off and on
-    /// (Windows, 2026-11-18).
+    /// Magic Trackpad drops Bluetooth when it's plugged in by USB; with no answer over Bluetooth,
+    /// the connect flow's stale-bond re-pair removed its bond, and then it answered nobody until
+    /// it was switched off and on (Windows, 2026-11-18).
     func testManagePairingDeviceIsNotAutoReconnectedAfterADrop() async {
         let (engine, bt, _) = makeEngine(managePairing: true)
         engine.autoReconnectDelayMs = 0

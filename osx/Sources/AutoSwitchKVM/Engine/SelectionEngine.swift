@@ -354,11 +354,13 @@ final class SelectionEngine: ObservableObject {
         guard !isBusy(device.id) else { return }
         if device.managePairing {
             // Spec §3: a pairing device that drops while the KVM is here keeps its bond and
-            // reconnects by itself. The Magic Trackpad drops its link when it sleeps and comes back
-            // when touched; the connect flow's stale-bond re-pair removed the bond of a sleeping
-            // trackpad, which then answered nobody until switched off and on (Windows, 2026-11-18).
+            // reconnects by itself. The Magic Trackpad drops Bluetooth when it's plugged in by USB
+            // (both drops on Windows on 2026-11-18 were the cable, not sleep). With no answer over
+            // Bluetooth, the connect flow's stale-bond re-pair removed its bond, and then it
+            // answered nobody until it was switched off and on.
             Log.engine.log(
-                "\(device.name): keeping its pairing; it reconnects by itself when it wakes up (touch or click it)")
+                "\(device.name): keeping its pairing; it reconnects by itself "
+                    + "(when it's unplugged, wakes up or comes back in range)")
             return
         }
         let now = Date()
