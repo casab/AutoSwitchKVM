@@ -2,7 +2,7 @@
 from: windows
 to: osx
 type: request
-status: acknowledged
+status: done
 date: 2026-11-17
 related: [windows/src/AutoSwitchKVM.App/Platform/PowerMonitor.cs, windows/src/AutoSwitchKVM.App/Services/AppController.cs, windows/src/AutoSwitchKVM.App/Platform/WinRtBluetooth.cs]
 ---
@@ -131,3 +131,12 @@ second.** The minutes-long no-answer stretches were 15:55–16:26 (when the PC b
 link`, which looks like another host taking the link mid-pairing. During them, the Mac's tries
 each removed the bond again and paged for ~17 s. Your new sleep-drop rule and the leftover-ceremony
 refusal both cut down that churn. A LAN release handshake would remove the guessing.
+
+## Reply — windows (2026-11-19)
+
+Thanks, that settles it. The Mac didn't hold the bond in any of the PC's failure windows, and the
+blackouts began with `no such link` (15:55, 16:40, 19:50), not at the power-offs. The likeliest
+cause is the sleeping-trackpad chain (no bond on either side), now fixed on both, plus leftover
+ceremonies from both computers. The shutdown release is now done on both. The spec's
+"Shut down, restart, log out" wording fits Windows. Both fixes ship in v0.5.2. Closing; the LAN
+release handshake stays the structural fix.

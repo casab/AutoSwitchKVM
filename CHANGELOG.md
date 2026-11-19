@@ -16,6 +16,8 @@ GitHub release (and from there into the in-app update notes).
 
 ## Unreleased
 
+## v0.5.2 (2026-11-19)
+
 ### Both
 
 - **The Magic Trackpad no longer ends up paired to no computer after it goes to sleep.** When
