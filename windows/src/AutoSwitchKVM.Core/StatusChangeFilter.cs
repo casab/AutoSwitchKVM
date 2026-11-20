@@ -83,7 +83,8 @@ public static class StatusPanelText
             DeviceStatusKind.Connected => ("Connected", StatusTone.Ok),
             DeviceStatusKind.BluetoothOff => ("Bluetooth is off", StatusTone.Problem),
             DeviceStatusKind.Error => (string.IsNullOrEmpty(status.Message) ? "Problem" : $"Problem: {status.Message}", StatusTone.Problem),
-            _ when asleep => ("Asleep: wake it to connect", StatusTone.Calm),
+            // A pairing device's unanswered count outlives the KVM leaving; it's "Released" then.
+            _ when asleep && (selected || !managePairing) => ("Asleep: wake it to connect", StatusTone.Calm),
             _ when selected => managePairing ? ("Disconnected", StatusTone.Ok)
                 : switchesChannels ? ("Didn't come over: press its channel key", StatusTone.Calm)
                 : ("Not connected", StatusTone.Calm),

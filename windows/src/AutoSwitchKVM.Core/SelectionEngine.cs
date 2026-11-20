@@ -132,14 +132,17 @@ public sealed class SelectionEngine
     internal int ArrivalWaitMs { get; set; } = 20_000;
     internal const int ArrivalPollMs = 500;
 
-    /// A device that doesn't answer (spec §3 Connect flow, managePairing off): unanswered tries in
-    /// a row this session (reset when it connects), the count from which it's tried slowly, and
-    /// how often then. Devices inside ConnectOneAsync, for "wait your turn".
+    /// A device that doesn't answer (spec §3 Connect flow): unanswered tries in a row this session
+    /// (reset when it connects; for a managePairing device also at the start of each connect),
+    /// the count from which it's tried slowly, and how often then. A pairing device is tried less
+    /// often: each pairing try holds Windows' pairing for up to ~55 s. Devices inside
+    /// ConnectOneAsync, for "wait your turn".
     private readonly ConcurrentDictionary<Guid, int> _unanswered = new();
     private readonly ConcurrentDictionary<Guid, byte> _inConnect = new();
     private readonly ConcurrentDictionary<Guid, byte> _slowWaiting = new();
     internal const int SlowModeAfter = 2;
     internal int SlowRetryMs { get; set; } = 30_000;
+    internal int SlowPairRetryMs { get; set; } = 60_000;
 
     /// Late release: the device's control channel can appear a moment after its connection (on
     /// macOS 7 ms was too early), so keep asking this long, this often (spec §3 Late release).
@@ -1068,6 +1071,9 @@ public sealed class SelectionEngine
     ///   - A managePairing-off device that doesn't answer (NoAnswer) goes behind the devices that
     ///     do, and from SlowModeAfter in a row is tried every SlowRetryMs without a retry budget
     ///     (automatic connects only), watched meanwhile in case it wakes up (spec §3).
+    ///   - A managePairing device whose pairing is never answered (NoAnswer: no pairing request)
+    ///     gets the same slow mode, every SlowPairRetryMs, but only while its tries go unanswered:
+    ///     any other failure (a refusal) goes back to the normal budget and can give up.
     private async Task ConnectOneAsync(BTDevice device, Run run, bool respectSelection)
     {
         _inConnect[device.Id] = 0;
@@ -1122,6 +1128,9 @@ public sealed class SelectionEngine
 
         Debug($"{name}: connect started (run #{run.Token}, {run.Trigger}; managePairing={device.ManagePairing})");
         NoteIntent(_connectRequestedToken, device.Id, run.Token);
+        // A pairing device may have been with the other computer since (awake and working there,
+        // which this PC can't see): its earlier unanswered tries say nothing about now.
+        if (device.ManagePairing) _unanswered.TryRemove(device.Id, out _);
         SetStatus(device.Id, DeviceStatus.Connecting);
 
         // Optional per-device stagger before connecting.
@@ -1295,14 +1304,20 @@ public sealed class SelectionEngine
             }
 
             last = failure;
-            var unanswered = !device.ManagePairing && failure.Kind == BluetoothFailureKind.NoAnswer;
+            var unanswered = failure.Kind == BluetoothFailureKind.NoAnswer;
             var count = unanswered ? _unanswered.AddOrUpdate(device.Id, 1, (_, n) => n + 1) : 0;
             // Never for a manual connect. Once in slow mode, any failure stays there, quietly: a
             // speaker switched off (2026-11-16) failed one slow try with a 30 s timeout instead of
             // NoAnswer, flipped to "Problem" and back, and each flip popped the status panel.
-            var slow = respectSelection && !device.ManagePairing && (slowLogged || (unanswered && count >= SlowModeAfter));
+            // A pairing device stays slow only while it doesn't answer at all: a refusal is a real
+            // problem (another host holds it, a bad key) and gets the normal budget and give-up.
+            // 2026-11-20: after a restart the trackpad, unpaired and asleep, never answered six
+            // tries; the engine gave up and a click later connected nothing.
+            var slow = respectSelection && (device.ManagePairing
+                ? unanswered && count >= SlowModeAfter
+                : slowLogged || (unanswered && count >= SlowModeAfter));
             var tryLine = $"{name}: try {tries}: {step} failed after {Ms(attempt)}: {failure.Summary}";
-            if (failure.Kind is BluetoothFailureKind.DeviceBusy or BluetoothFailureKind.OperationInProgress || slowLogged) Debug(tryLine);
+            if (failure.Kind is BluetoothFailureKind.DeviceBusy or BluetoothFailureKind.OperationInProgress || (slow && slowLogged)) Debug(tryLine);
             else Warn(tryLine);
             SetStatus(device.Id, slow ? DeviceStatus.Disconnected : DeviceStatus.Error(failure.Message));
 
@@ -1324,15 +1339,19 @@ public sealed class SelectionEngine
             // KVM leaves, watched in between (a keyboard that wakes up reconnects by itself).
             if (slow)
             {
+                var interval = device.ManagePairing ? SlowPairRetryMs : SlowRetryMs;
                 if (!slowLogged)
                 {
                     slowLogged = true;
-                    Info($"{name}: doesn't answer (asleep or switched off?). It connects as soon as it wakes up; " +
-                         $"meanwhile it's tried every {SlowRetryMs / 1000} s while no other device connects");
+                    Info(device.ManagePairing
+                        ? $"{name}: doesn't answer pairing (asleep or switched off?). Click or touch it to wake it; " +
+                          $"it's tried every {interval / 1000} s while the KVM is here"
+                        : $"{name}: doesn't answer (asleep or switched off?). It connects as soon as it wakes up; " +
+                          $"meanwhile it's tried every {interval / 1000} s while no other device connects");
                 }
                 _slowWaiting[device.Id] = 0;
                 (WatchResult, string?) slowWatch;
-                try { slowWatch = await WatchAsync(device, run, respectSelection, SlowRetryMs); }
+                try { slowWatch = await WatchAsync(device, run, respectSelection, interval); }
                 finally { _slowWaiting.TryRemove(device.Id, out _); }
                 var (slowResult, slowWhy) = slowWatch;
                 if (slowResult == WatchResult.Connected) return;

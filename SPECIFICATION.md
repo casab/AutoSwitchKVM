@@ -201,6 +201,18 @@ controller** (the operations in §5). It owns no platform APIs directly.
     and a speaker whose link arrives just after the try gave up would be dropped again; Windows
     saw that race). Slow mode only for automatic connects: a manual Connect isn't ended by the KVM
     leaving, so it still gives up after `connectRetryMax`.
+- **A pairing device that never answers is tried slowly too** (Windows 2026-11-20; macOS
+  pending). For `managePairing` devices, a pairing the device never takes up (no pairing request
+  within the call's timeout) is unanswered (`NoAnswer`), not a possible stale bond: the host
+  holds no bond then, so there's nothing to remove before the next try. From 2 in a row, a try
+  every ~60 s (one pairing try holds Windows' pairing for up to ~55 s) until it pairs or the KVM
+  leaves, with the link watched in between. Status "Disconnected", no "gave up". Unlike the
+  devices above, it stays slow only while its tries go unanswered: a refusal or any other
+  failure goes back to the normal budget and can give up. Its unanswered count restarts with
+  each connect (it may have been awake on the other host since). Logged once: "doesn't answer
+  pairing (asleep or switched off?) …". Seen on hardware: after a Windows restart released the
+  trackpad with the KVM staying on the PC, the unpaired trackpad never answered the PC's six
+  tries, and the engine gave up. Nothing would have connected it after a click.
 - Apply `connectDelayMs` first (stagger), re-checking cancellation after the wait.
 - **A known type 5 device is waited for, not connected** (§5a; macOS 2026-11-13). The other
   host's AutoSwitch sends it here, and it connects by itself. A host that calls it meanwhile gets
@@ -378,7 +390,9 @@ controller** (the operations in §5). It owns no platform APIs directly.
   ~20 s while the Mac releases it; exponential backoff overshoots that window.)
 - **Hard** failures consume an attempt and back off exponentially. The stale-bond re-pair applies
   only after a hard failure that may mean a stale bond (`authenticationFailed`, `timeout`,
-  `unknown`) — not after a refusal or a missing device.
+  `unknown`) — not after a refusal or a missing device. Windows (2026-11-20): a pairing the device
+  never took up is `noAnswer` (no bond exists to be stale; Connect flow, "A pairing device that
+  never answers").
 - `invalidAddress` gives up immediately; `adapterUnavailable` refreshes adapter power first.
 - **`hidNotReady`** (macOS: a registered `IOHIDDevice`; Windows: the `BTHENUM` HID-service node and
   at least one of its `HID\` collections started; both engines ask through the controller's

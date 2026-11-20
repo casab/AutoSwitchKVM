@@ -16,6 +16,13 @@ GitHub release (and from there into the in-app update notes).
 
 ## Unreleased
 
+### Windows
+
+- **AutoSwitch no longer gives up on a Magic Trackpad that doesn't answer**, for example after a
+  restart left it unpaired and asleep. While the KVM is on the PC, it tries the trackpad about
+  once a minute, and the trackpad connects shortly after you click it. The status panel shows
+  "Asleep: wake it to connect" in the meantime.
+
 ## v0.5.2 (2026-11-19)
 
 ### Both

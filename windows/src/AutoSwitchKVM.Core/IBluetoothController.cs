@@ -66,13 +66,15 @@ public enum BluetoothFailureKind
     /// OperationAlreadyInProgress). Wait for it; retrying immediately only collides again.
     OperationInProgress,
 
-    /// The device never answered in time (our per-call timeout, or Windows AuthenticationTimeout).
+    /// A call that got going didn't finish in time (our per-call timeout, Windows
+    /// AuthenticationTimeout, a pairing the device started but didn't complete).
     Timeout,
 
     /// The call went through but the device didn't come (asleep, switched off, out of range, or
     /// held by another computer): a paired keyboard that doesn't report connected, a speaker
-    /// whose reconnect brought no link. For devices without managePairing the engine counts these
-    /// and, from two in a row, tries the device slowly and behind the others (spec §3).
+    /// whose reconnect brought no link, a pairing the device never asked to go on with (no
+    /// pairing request). The engine counts these and, from two in a row, tries the device slowly
+    /// (devices without managePairing also behind the others; spec §3).
     NoAnswer,
 
     /// Key exchange failed — typically a stale/mismatched link key. Re-pair from scratch.

@@ -548,7 +548,12 @@ public sealed class WinRtBluetooth : IBluetoothController
                         : "the device never answered (no pairing request)";
                     Log.Warn("bt", $"pair {address}: stopped waiting after {sw.ElapsedMilliseconds} ms - {why}; " +
                         "Windows is still running the ceremony in the background");
-                    throw new BluetoothException(BluetoothFailureKind.Timeout,
+                    // Never asked = never answered (asleep, off, out of range): NoAnswer, so the
+                    // engine tries it slowly instead of giving up, and doesn't "remove a stale
+                    // bond" first (Windows holds none: an existing bond returns above). Asked but
+                    // unfinished stays Timeout.
+                    throw new BluetoothException(
+                        Volatile.Read(ref requested) == 1 ? BluetoothFailureKind.Timeout : BluetoothFailureKind.NoAnswer,
                         $"{why} within {sw.Elapsed.TotalSeconds:0} s", "PairAsync still pending");
                 }
             }

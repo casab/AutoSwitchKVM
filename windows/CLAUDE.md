@@ -380,7 +380,10 @@ Validated against the real Magic Trackpad (MAC `3C:50:02:BF:22:45`, Win 11, Powe
   hand) can't be switched by any host.
 - **Order of a run (spec §3).** Connect: pairing devices one at a time; everything else
   alongside; a device that didn't answer (`NoAnswer`) waits behind the ones that do, and from 2 in
-  a row is tried every 30 s without giving up (automatic runs only). Release: known channel
+  a row is tried every 30 s without giving up (automatic runs only). A pairing device whose
+  pairing nobody took up (`PairAsync` "never answered (no pairing request)", now `NoAnswer`, not
+  `Timeout`, so no stale-bond unpair) gets slow mode too, every 60 s (`SlowPairRetryMs`), but only
+  while unanswered: a refusal goes back to the budget (2026-11-20, restart-stranded trackpad). Release: known channel
   switchers first, then unpairs one at a time with every other device alongside (a speaker's
   disconnect ahead of the trackpad unpair made the Mac's trackpad 4–5 s slower). `Core/DeviceHandoff.cs`
   (`HandoffCatalog.Classify`, tested in `HandoffCatalogTests`) classifies from

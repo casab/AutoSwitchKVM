@@ -100,6 +100,8 @@ public class StatusChangeFilterTests
         Assert.Equal(("Sent to the other computer", StatusTone.Ok), Text(DeviceStatus.Disconnected, false, sent: true));
         Assert.Equal(("Disconnected", StatusTone.Ok), Text(DeviceStatus.Disconnected, false));              // a speaker let go
         Assert.Equal(("Asleep: wake it to connect", StatusTone.Calm), Text(DeviceStatus.Disconnected, true, asleep: true));
+        Assert.Equal(("Asleep: wake it to connect", StatusTone.Calm), Text(DeviceStatus.Disconnected, true, managePairing: true, asleep: true));
+        Assert.Equal(("Released", StatusTone.Ok), Text(DeviceStatus.Disconnected, false, managePairing: true, asleep: true));
         Assert.Equal(("Didn't come over: press its channel key", StatusTone.Calm),
             Text(DeviceStatus.Disconnected, true, switches: true));
         Assert.Equal(("Not connected", StatusTone.Calm), Text(DeviceStatus.Disconnected, true));

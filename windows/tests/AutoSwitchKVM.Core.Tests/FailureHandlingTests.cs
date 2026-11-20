@@ -534,6 +534,60 @@ public class FailureHandlingTests
     }
 
     [Fact]
+    public async Task A_pairing_device_that_never_answers_is_tried_slowly_and_pairs_when_it_answers()
+    {
+        // 2026-11-20: after a restart the trackpad (unpaired, asleep) never answered; the engine
+        // gave up after its budget and a click later connected nothing. Now it's tried slowly,
+        // without the stale-bond unpair (Windows holds no bond when nobody answered).
+        var engine = MakeEngine(out var bt, out var config, out var log);
+        config.ConnectRetryMax = 2;
+        for (var i = 0; i < 5; i++) bt.PairErrors.Enqueue(Fail(BluetoothFailureKind.NoAnswer, "the device never answered (no pairing request)"));
+        var kinds = new List<DeviceStatusKind>();
+        engine.Changed += () => { foreach (var s in engine.Statuses.Values) lock (kinds) kinds.Add(s.Kind); };
+
+        await Arrive(engine);
+
+        Assert.Equal(DeviceStatus.Connected, engine.Statuses.Values.Single());
+        Assert.Equal(6, Count(bt, "pair"));        // 5 unanswered + the one that worked, despite retryMax=2
+        Assert.Equal(0, Count(bt, "unpair"));
+        Assert.True(log.Has(LogLevel.Info, "doesn't answer pairing"), log.Dump());
+        Assert.False(log.Has(LogLevel.Error, "gave up"), log.Dump());
+        // Not a problem while it's asleep: once slow, it shows Disconnected, never an error.
+        var firstSlow = kinds.IndexOf(DeviceStatusKind.Disconnected);
+        Assert.True(firstSlow >= 0, string.Join(",", kinds));
+        Assert.DoesNotContain(DeviceStatusKind.Error, kinds.Skip(firstSlow));
+    }
+
+    [Fact]
+    public async Task A_pairing_device_in_slow_mode_that_refuses_gets_the_normal_budget()
+    {
+        // A refusal is a real problem (another host holds it, a bad key): not hidden by slow mode.
+        var engine = MakeEngine(out var bt, out var config, out var log);
+        config.ConnectRetryMax = 2;
+        for (var i = 0; i < 3; i++) bt.PairErrors.Enqueue(Fail(BluetoothFailureKind.NoAnswer, "never answered"));
+        for (var i = 0; i < 10; i++) bt.PairErrors.Enqueue(Fail(BluetoothFailureKind.AuthenticationFailed, "pairing refused: AuthenticationFailure"));
+
+        await Arrive(engine);
+
+        Assert.True(log.Has(LogLevel.Info, "doesn't answer pairing"), log.Dump());
+        Assert.True(log.Has(LogLevel.Warn, "AuthenticationFailure"), log.Dump());
+        Assert.True(log.Has(LogLevel.Error, "gave up"), log.Dump());
+        Assert.Equal(DeviceStatusKind.Error, engine.Statuses.Values.Single().Kind);
+    }
+
+    [Fact]
+    public async Task Manual_connect_of_a_pairing_device_that_never_answers_still_gives_up()
+    {
+        var engine = MakeEngine(out var bt, out var config, out _);
+        config.ConnectRetryMax = 2;
+        for (var i = 0; i < 10; i++) bt.PairErrors.Enqueue(Fail(BluetoothFailureKind.NoAnswer, "never answered"));
+
+        await engine.ConnectDeviceNowAsync(config.Devices[0]).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Contains("gave up", engine.Statuses.Values.Single().Label);
+    }
+
+    [Fact]
     public async Task A_device_that_didnt_answer_goes_last_next_time()
     {
         // The sleeping K380 (first in the list) waits until the speaker has connected.
