@@ -16,6 +16,8 @@ GitHub release (and from there into the in-app update notes).
 
 ## Unreleased
 
+## v0.5.3 (2026-11-20)
+
 ### Both
 
 - **AutoSwitch no longer gives up on a Magic Trackpad that doesn't answer**, for example after a
