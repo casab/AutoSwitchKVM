@@ -26,6 +26,9 @@ protocol BluetoothController: Sendable {
     func pagesToConnect(_ address: String) -> Bool
     func disconnect(_ address: String) async throws
     func pair(_ address: String) async throws
+    /// Whether this Mac holds a Classic bond with the device (cheap: no system_profiler). `pair`
+    /// runs no ceremony when it does.
+    func isPaired(_ address: String) async -> Bool
     func unpair(_ address: String) async throws
     func pairedDevices() async -> [PairedDeviceInfo]
 

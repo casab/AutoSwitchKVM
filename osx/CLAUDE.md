@@ -316,6 +316,16 @@ the new profile but does not force-disconnect the previous profile's devices.
   from `unansweredSlowAfter` (2) it's in slow mode: no retry budget, a try every
   `unansweredRetryMs` (30 s), status `.disconnected`, and `waitForTurn` polls the link so a
   device that wakes up counts at once.
+  **A managePairing device gets slow mode too** (2026-11-20, as Windows; spec §3 "A pairing
+  device that never answers"), counting only a `timeout` from the pair step when the Mac held no
+  bond as it started (`bt.isPaired` false: HCI 0x04 page timeout, or the 15 s call deadline).
+  `pair` runs no ceremony over a bond, so that can't be a stale bond (the stale-bond
+  `kIOReturnTimeout` comes from `openConnection`), and it gets no stale-bond unpair. Its count
+  restarts with each connect; slow tries go behind the other devices in the queue, keep the
+  default page timeout, and only last while they go unanswered (a refusal gets the normal budget
+  and can give up). `slowDevices` drops it when the connect loop ends, so it's "Released", not
+  asleep, after the KVM leaves. Hardware: an unpaired, asleep trackpad answered no page on
+  2026-11-19 (two "gave up after 6 tries" runs).
   **No Classic `openConnection` while another device pairs** (`IOBluetoothController.connect`
   throws soft `operationInProgress`): every connect request resets bluetoothd's per-app
   `didRequestPairing` flag, and the trackpad's pairing request then got the system's "Connection

@@ -88,6 +88,8 @@ final class SelectionEngine: ObservableObject {
     /// A device that didn't answer this many tries in a row (asleep or off) stops spending the
     /// retry budget: it's tried every `unansweredRetryMs`, only while no other device connects,
     /// until it answers or the KVM leaves. It connects at once if it wakes up meanwhile.
+    /// A pairing device counts only pairings it never took up (spec §3 "A pairing device that never
+    /// answers"); a Mac pairing try holds the radio ~17 s, so the same interval suits it.
     var unansweredSlowAfter = 2
     var unansweredRetryMs = 30_000
     var unansweredPollMs = 500
@@ -809,9 +811,15 @@ final class SelectionEngine: ObservableObject {
         let maxHard = max(1, cfg.connectRetryMax)
         let start = ContinuousClock.now
         releaseRequested.remove(device.id)
+        // A pairing device may have been awake and working on the other computer since, which
+        // this Mac can't see: its earlier unanswered pairings say nothing about now.
+        if device.managePairing { unansweredTries[device.id] = nil }
         defer {  // whatever way a try ends
             radio.release(device.id)
             radio.forget(device.id)
+            // Its slow mode lasts only while the KVM is here: once the loop ends it's released or
+            // connected, not asleep (the status panel would say so).
+            if device.managePairing { slowDevices.remove(device.id) }
         }
 
         Log.engine.debug(
@@ -851,7 +859,7 @@ final class SelectionEngine: ObservableObject {
         while true {
             // Spec §3 Connect flow "Order": a device that didn't answer lately goes after the ones
             // that did (the stack pages one device at a time; a sleeping K380 held a speaker up).
-            if !device.managePairing, (unansweredTries[device.id] ?? 0) > 0 {
+            if device.managePairing ? slowWait : (unansweredTries[device.id] ?? 0) > 0 {
                 switch await waitForTurn(device, run: run, respectSelection: respectSelection, slowWait: slowWait) {
                 case .go:
                     slowWait = false
@@ -871,7 +879,10 @@ final class SelectionEngine: ObservableObject {
             // time, so the app queues them itself: pairing devices first, then devices that
             // answered, then those that didn't. Held for the whole try (pair, connect, HID check).
             if bt.pagesToConnect(addr) {
-                let priority = device.managePairing ? 0 : 1 + (unansweredTries[device.id] ?? 0)
+                // A pairing device in slow mode goes behind the others too: its tries are guesses.
+                let priority =
+                    device.managePairing && !slowDevices.contains(device.id)
+                    ? 0 : 1 + (unansweredTries[device.id] ?? 0)
                 if !radio.isFree {
                     Log.engine.debug("\(name): waiting for the radio (priority \(priority))")
                 }
@@ -892,6 +903,7 @@ final class SelectionEngine: ObservableObject {
             var step = "status check"
             var failure: Failure?
             var hidOnPairingLink = false
+            var pairingWithoutBond = false  // a pair failure then can't be a stale bond here
 
             do {
                 if !device.managePairing, await bt.isConnected(addr), await bt.isHIDReady(addr) != false {
@@ -921,6 +933,7 @@ final class SelectionEngine: ObservableObject {
                         return
                     }
                     step = "pair"
+                    pairingWithoutBond = !(await bt.isPaired(addr))
                     try await self.step(name, tries, "pair") { try await self.bt.pair(addr) }
                     if let why = staleReason(run, respectSelection: respectSelection) {
                         Log.engine.debug("\(name): connect aborted after pairing: \(why)")
@@ -947,7 +960,8 @@ final class SelectionEngine: ObservableObject {
                 }
                 if !hidOnPairingLink {
                     step = "connect"
-                    let pageTimeout = (unansweredTries[device.id] ?? 0) > 0 ? unansweredPageTimeoutMs : nil
+                    let pageTimeout =
+                        !device.managePairing && (unansweredTries[device.id] ?? 0) > 0 ? unansweredPageTimeoutMs : nil
                     try await self.step(name, tries, "openConnection") {
                         try await self.bt.connect(addr, pageTimeoutMs: pageTimeout)
                     }
@@ -1002,17 +1016,28 @@ final class SelectionEngine: ObservableObject {
 
             last = f
             // Didn't answer (asleep or off). Two in a row: slow mode, see `unansweredSlowAfter`.
-            if !device.managePairing, f.kind == .timeout {
+            // A pairing device: only a pairing that timed out while this Mac held no bond (page
+            // timeout, or the call's deadline). `pair` runs no ceremony over a bond, so that can't
+            // be a stale bond; the stale-bond timeout comes from openConnection (spec §5).
+            let unanswered =
+                f.kind == .timeout && (!device.managePairing || (step == "pair" && pairingWithoutBond))
+            if unanswered {
                 unansweredTries[device.id, default: 0] += 1
             }
+            let unansweredInARow = (unansweredTries[device.id] ?? 0) >= max(1, unansweredSlowAfter)
             // Automatic connects only: a manual Connect isn't ended by the KVM leaving, so it would
             // keep trying until the next run; it gives up after `connectRetryMax` as before.
             // Once in slow mode, any failure stays there, quietly (a refusal flipping it to an
-            // error and back popped the status panel each time; Windows 2026-11-16).
+            // error and back popped the status panel each time; Windows 2026-11-16). Not for a
+            // pairing device: a refusal there is a real problem (another host holds it, a bad
+            // key), so it gets the normal budget and can give up. 2026-11-20 (Windows): after a
+            // restart the unpaired, asleep trackpad never answered six tries, the engine gave up,
+            // and a click later connected nothing. The Mac gave up the same way on 2026-11-19.
             let slow =
-                respectSelection && !device.managePairing
-                && (slowDevices.contains(device.id)
-                    || (!f.kind.isSoft && (unansweredTries[device.id] ?? 0) >= max(1, unansweredSlowAfter)))
+                respectSelection
+                && (device.managePairing
+                    ? unanswered && unansweredInARow
+                    : slowDevices.contains(device.id) || (!f.kind.isSoft && unansweredInARow))
             let wasSlow = slow && slowDevices.contains(device.id)
             // Expected refusals (the other host still holds it, an operation in flight) are routine
             // on every switch: debug, and so are the slow tries of a device that is asleep. Hard
@@ -1025,7 +1050,7 @@ final class SelectionEngine: ObservableObject {
             // Not after a try the device didn't answer: nothing came up, and a device whose link
             // arrives just after the try gave up would be dropped again (Windows saw that race with
             // a speaker; the next try's status check or the slow-mode watch picks it up).
-            if !device.managePairing, f.kind == .timeout {
+            if unanswered {
                 Log.engine.debug("\(name): no cleanup disconnect after a try it didn't answer")
             } else {
                 if await bt.isConnected(addr) {
@@ -1048,8 +1073,12 @@ final class SelectionEngine: ObservableObject {
             if slow {
                 if slowDevices.insert(device.id).inserted {
                     Log.engine.log(
-                        "\(name): doesn't answer (asleep or switched off?). It connects as soon as it wakes up; "
-                            + "meanwhile it's tried every \(unansweredRetryMs / 1000) s while no other device connects")
+                        device.managePairing
+                            ? "\(name): doesn't answer pairing (asleep or switched off?). Click or touch it to wake "
+                                + "it; it's tried every \(unansweredRetryMs / 1000) s while the KVM is here"
+                            : "\(name): doesn't answer (asleep or switched off?). It connects as soon as it wakes up; "
+                                + "meanwhile it's tried every \(unansweredRetryMs / 1000) s while no other device connects"
+                    )
                 }
                 slowWait = true
                 continue
@@ -1075,7 +1104,7 @@ final class SelectionEngine: ObservableObject {
 
             hardFailures += 1
             if hardFailures >= maxHard { break }
-            freshBond = device.managePairing && f.kind.mayBeStaleBond
+            freshBond = device.managePairing && f.kind.mayBeStaleBond && !unanswered
             let backoffMs = Int(Self.backoffNanos(base: cfg.connectRetrySecs, attempt: hardFailures) / 1_000_000)
             Log.engine.debug(
                 "\(name): attempt \(hardFailures)/\(maxHard) failed; retrying in \(backoffMs) ms"

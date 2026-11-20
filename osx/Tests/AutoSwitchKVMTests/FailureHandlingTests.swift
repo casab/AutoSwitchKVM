@@ -143,6 +143,98 @@ final class FailureHandlingTests: XCTestCase {
         XCTAssertEqual(f.status, .connected)
     }
 
+    // MARK: - A pairing device that never answers (spec §3; Windows 2026-11-20)
+
+    /// The pairing step's page timeout, as IOBluetoothDevicePair's completion reports it.
+    private let pairPageTimeout = BTError.pairFailed("completion", code: 0x04)
+
+    /// After a restart the unpaired, asleep trackpad never answered its pairings and the engine gave
+    /// up, so a click later connected nothing. From two unanswered in a row it's tried slowly with
+    /// no give-up, and pairs once it answers. No stale-bond unpair: this Mac held no bond.
+    func testAPairingDeviceThatNeverAnswersIsTriedSlowlyAndPairsWhenItAnswers() async {
+        let f = make(retries: 3)
+        f.bt.pairErrors =
+            Array(repeating: pairPageTimeout, count: 3) + [BTError.timeout(seconds: 15)]
+            + Array(repeating: pairPageTimeout, count: 3)
+        var asleep = false
+        f.engine.sleepHook = { [engine = f.engine, id = f.device.id] _ in
+            if engine.slowDevices.contains(id), engine.statuses[id] == .disconnected { asleep = true }
+            await Task.yield()
+        }
+
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+        await spinUntil({ f.status == .connected }, "never paired: \(f.bt.calls)")
+
+        XCTAssertEqual(count(f, "pair:"), 8, "7 unanswered, then it answered: \(f.bt.calls)")
+        XCTAssertEqual(count(f, "unpair:"), 0, "no bond to be stale: \(f.bt.calls)")
+        XCTAssertTrue(asleep, "shown asleep meanwhile")
+        XCTAssertTrue(f.engine.slowDevices.isEmpty)
+        XCTAssertFalse(notices.contains { $0.title == "Connection failed" }, "\(notices)")
+    }
+
+    /// Slow only while its pairings go unanswered: a refusal is a real problem (another host holds
+    /// it, a bad key), so it gets the normal budget and gives up.
+    func testAPairingDeviceInSlowModeThatRefusesGetsTheNormalBudget() async {
+        let f = make(retries: 3)
+        let refused = BTError.pairFailed("completion", code: 0x05)  // authentication failure
+        f.bt.pairErrors = Array(repeating: pairPageTimeout, count: 4) + Array(repeating: refused, count: 10)
+
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+        await spinUntil({ if case .error = f.status { true } else { false } }, "never gave up: \(f.bt.calls)")
+
+        guard case .error(let message) = f.status else { return }
+        XCTAssertTrue(message.hasPrefix("gave up"), message)
+        XCTAssertTrue(message.contains("authentication failure"), message)
+        XCTAssertEqual(count(f, "pair:"), 6, "1 hard + 3 slow unanswered, then 2 hard refusals: \(f.bt.calls)")
+    }
+
+    /// A manual Connect isn't ended by the KVM leaving, so it still gives up after the usual tries.
+    func testManualConnectOfAPairingDeviceThatNeverAnswersStillGivesUp() async {
+        let f = make(retries: 3)
+        f.bt.pairErrors = Array(repeating: pairPageTimeout, count: 10)
+
+        await f.engine.connectDeviceNow(f.device)
+
+        guard case .error(let message) = f.status else { return XCTFail("\(String(describing: f.status))") }
+        XCTAssertTrue(message.hasPrefix("gave up"), message)
+        XCTAssertEqual(count(f, "pair:"), 3)
+        XCTAssertEqual(count(f, "unpair:"), 0, "\(f.bt.calls)")
+    }
+
+    /// The unanswered count restarts with each connect: the trackpad may have been awake on the
+    /// other computer since. So a new arrival gets its normal first tries, not slow mode at once.
+    func testAPairingDevicesUnansweredCountRestartsWithEachConnect() async {
+        let f = make(retries: 3)
+        f.bt.pairErrors = Array(repeating: pairPageTimeout, count: 50)
+        var left = false
+        var secondRun = false
+        var slowInSecondRun = false
+        f.engine.sleepHook = { [engine = f.engine, id = f.device.id, vendor, product] _ in
+            if !left, engine.slowDevices.contains(id) {
+                left = true  // the KVM leaves while it's in slow mode
+                engine.handleUSB((vendorID: vendor, productID: product, added: false))
+            }
+            if secondRun, engine.slowDevices.contains(id) { slowInSecondRun = true }
+            await Task.yield()
+        }
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+        await settle()
+        XCTAssertTrue(left, "went slow: \(f.bt.calls)")
+        await f.engine.evaluateNow()
+        await settle()
+        XCTAssertFalse(f.engine.slowDevices.contains(f.device.id), "released, not asleep")
+
+        secondRun = true
+        f.bt.pairErrors = [pairPageTimeout]  // one miss, then it answers
+        sourceArrives(f)
+        await f.engine.evaluateNow()
+        await spinUntil({ f.status == .connected }, "never paired: \(f.bt.calls)")
+        XCTAssertFalse(slowInSecondRun, "a new connect starts with the normal tries")
+    }
+
     /// A refusal means the other host still holds the device; destroying our fresh bond in
     /// response only forces another full pairing ceremony.
     func testRefusalDoesNotDestroyTheBond() async {

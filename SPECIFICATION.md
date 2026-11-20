@@ -201,8 +201,8 @@ controller** (the operations in §5). It owns no platform APIs directly.
     and a speaker whose link arrives just after the try gave up would be dropped again; Windows
     saw that race). Slow mode only for automatic connects: a manual Connect isn't ended by the KVM
     leaving, so it still gives up after `connectRetryMax`.
-- **A pairing device that never answers is tried slowly too** (Windows 2026-11-20; macOS
-  pending). For `managePairing` devices, a pairing the device never takes up (no pairing request
+- **A pairing device that never answers is tried slowly too** (Windows and macOS 2026-11-20).
+  For `managePairing` devices, a pairing the device never takes up (no pairing request
   within the call's timeout) is unanswered (`NoAnswer`), not a possible stale bond: the host
   holds no bond then, so there's nothing to remove before the next try. From 2 in a row, a try
   every ~60 s (one pairing try holds Windows' pairing for up to ~55 s) until it pairs or the KVM
@@ -212,7 +212,13 @@ controller** (the operations in §5). It owns no platform APIs directly.
   each connect (it may have been awake on the other host since). Logged once: "doesn't answer
   pairing (asleep or switched off?) …". Seen on hardware: after a Windows restart released the
   trackpad with the KVM staying on the PC, the unpaired trackpad never answered the PC's six
-  tries, and the engine gave up. Nothing would have connected it after a click.
+  tries, and the engine gave up. Nothing would have connected it after a click. The Mac gave up
+  the same way on 2026-11-19 (pair page timeouts, HCI 0x04). **macOS:** unanswered is a pair-step
+  `timeout` (HCI 0x04 page timeout, or the 15 s call deadline) when the Mac held no bond as the
+  pairing started. `pair` runs no ceremony over a bond, so it can't be a stale bond; the stale-bond
+  `kIOReturnTimeout` comes from `openConnection` and stays re-pair-eligible. One Mac pairing try
+  holds the radio ~17 s, so the interval is the same ~30 s as other devices; slow tries go behind
+  the other devices in the radio queue.
 - Apply `connectDelayMs` first (stagger), re-checking cancellation after the wait.
 - **A known type 5 device is waited for, not connected** (§5a; macOS 2026-11-13). The other
   host's AutoSwitch sends it here, and it connects by itself. A host that calls it meanwhile gets
@@ -392,7 +398,8 @@ controller** (the operations in §5). It owns no platform APIs directly.
   only after a hard failure that may mean a stale bond (`authenticationFailed`, `timeout`,
   `unknown`) — not after a refusal or a missing device. Windows (2026-11-20): a pairing the device
   never took up is `noAnswer` (no bond exists to be stale; Connect flow, "A pairing device that
-  never answers").
+  never answers"). macOS (2026-11-20): a pair-step `timeout` with no bond on the Mac when the
+  pairing started counts the same way.
 - `invalidAddress` gives up immediately; `adapterUnavailable` refreshes adapter power first.
 - **`hidNotReady`** (macOS: a registered `IOHIDDevice`; Windows: the `BTHENUM` HID-service node and
   at least one of its `HID\` collections started; both engines ask through the controller's

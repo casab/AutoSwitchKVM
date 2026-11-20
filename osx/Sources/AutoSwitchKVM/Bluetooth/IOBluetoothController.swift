@@ -62,6 +62,11 @@ final class IOBluetoothController: NSObject, BluetoothController {
         return (result, took)
     }
 
+    func isPaired(_ address: String) async -> Bool {
+        guard let dev = try? device(address) else { return false }
+        return dev.isPaired()
+    }
+
     func isConnected(_ address: String) async -> Bool {
         guard let dev = try? device(address) else { return false }
         return dev.isConnected() || Self.lowEnergyHIDRegistered(address)
